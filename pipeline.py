@@ -1,9 +1,21 @@
 import numpy as np
 from scipy import integrate
-from utils import convolver, makeGaussian
-
 
 class Source:
+    '''
+    This class represents a source galaxy. It contains the following attributes:
+    x: x-coordinates of the source galaxy
+    y: y-coordinates of the source galaxy
+    gamma1: gamma1 component of the shear
+    gamma2: gamma2 component of the shear
+    f1: f1 component of the flexion
+    f2: f2 component of the flexion
+
+    The class also contains the following methods:
+    calc_shear: calculates the shear at the source galaxy due to the lenses
+    calc_flex: calculates the flexion at the source galaxy due to the lenses
+    weights: calculates the likelihood of each lensing configuration in a 3D parameter space
+    '''
     def __init__(self, x, y, gamma1, gamma2, f1, f2):
         self.x = x[:]
         self.y = y[:]
@@ -34,10 +46,14 @@ class Source:
 
 
     def weights(self, size, sigma_f = 10**-2, sigma_g = 10**-3, eRmin = 1, eRmax = 60):
-        res = size
+        # size: size of the grid in arcseconds
+        # sigma_f: standard deviation of the flexion
+        # sigma_g: standard deviation of the shear
+        # eRmin: minimum allowed value of eR
+        # eRmax: maximum allowed value of eR
+        res = size 
         line = np.linspace(-size,size,res)
         x,y = np.meshgrid(line,line)
-        Nsource = len(self.x)
         xs, ys, F1, F2, gamma1, gamma2 = self.x, self.y, self.f1, self.f2, self.gamma1, self.gamma2
         F = np.sqrt(F1**2 + F2**2)
         phiF = np.arctan2(F2,F1) + np.pi
@@ -47,9 +63,9 @@ class Source:
         weights2 = np.ones((res,res,res))
         eR_range = np.linspace(eRmin + 0.2, eRmax,res)
 
-        for n in range(Nsource):
+        for n in range(len(xs)):
             xn = x - xs[n]
-            yn = y + ys[n]
+            yn = y + ys[n] # The y-axis is flipped
             r = np.sqrt(xn**2 + yn**2)
             phi1 = np.arctan2(-yn,xn) - phi_gamma[n]
             phi2 = np.arctan2(-yn,xn) + phiF[n] + np.pi/2
@@ -58,20 +74,28 @@ class Source:
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
 
             if np.sum(shear_contribution) > 0:
+                #Multiply the weights by the contribution from the nth lens and normalize
                 weights1 *= shear_contribution
                 weights1 /= np.sum(weights1)
 
             if np.sum(flexion_contribution) > 0:
+                #Multiply the weights by the contribution from the nth lens and normalize
                 weights2 *= flexion_contribution
                 weights2 /= np.sum(weights2)
             
-        weights3 = weights1 * weights2
+        weights3 = weights1 * weights2 # Combine the weights from the shear and flexion
         weights3 /= np.sum(weights3)
 
         return weights1, weights2, weights3
 
 
 class Lens:
+    '''
+    This class represents a lens object. It contains the following attributes:
+    x: x-coordinates of the lens
+    y: y-coordinates of the lens
+    eR: einstein radius of the lens
+    '''
     def __init__(self, x, y, eR):
         self.x = x
         self.y = y
@@ -104,21 +128,10 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
         integrand = shear_integrand
         coefficient = 2 * r / np.abs(np.cos(2 * phi))
 
-    
     for i in range(res):
         for j in range(res):
             denominator[i, j] = integrate.quad(integrand, eRmin, eRmax, args=(signal, r[i, j], sigma, phi[i, j]))[0]
             denominator += 1e-10  # Prevent divide by zero errors
-    '''
-    for k in range(res):
-        numerator = integrand(eR[k], signal, r, sigma, phi)
-        unnormalized_weights = coefficient * numerator / denominator + 1e-10
-        if np.sum(unnormalized_weights) == 0:
-            weights = np.ones((res, res, res))
-            break
-        else:
-            weights[k] += unnormalized_weights / np.sum(unnormalized_weights)
-    '''
 
     numerator = integrand(eR[:, None, None], signal, r, sigma, phi)
     unnormalized_weights = coefficient * numerator / denominator + 10 ** -10  # Prevent divide by zero errors
@@ -129,6 +142,15 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
 
 
 def score_map(colormap, threshold=0.1):
+    '''
+    This function takes in a colormap and returns the locations of the peaks in the colormap
+    as well as the scores associated with each peak. It also takes in a threshold value, which
+    is used to determine the minimum score threshold. The minimum score threshold is defined as
+    the maximum score in the colormap multiplied by the threshold value. The function returns
+    the locations of the peaks and the scores associated with each peak that are above the minimum
+    score threshold.
+    '''
+
     # Step 1: Identify local maxima
     local_maxima = np.zeros_like(colormap, dtype=bool)
     local_maxima[(colormap >= np.roll(colormap, 1, axis=0)) &

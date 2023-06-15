@@ -30,6 +30,7 @@ def make_sources(Nsource, size = 100):
 def noise_variance():
     #Generates the likelihood maps for a single source with different
     #estimated noise levels
+    #THIS NEEDS TO BE REWRITTEN TO ACCOUNT FOR THE CHANGE TO SOURCE CLASS
     size = 50
     Nsource = 1
     line = np.linspace(-size,size,size)
@@ -185,7 +186,7 @@ def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1):
     plt.savefig('Images/test_map_{}_Nlens_{}.png'.format('Noiseless' if Noise == False else 'Noisy', Nlens))
 
 
-def random_realization(size = 100):
+def random_realization(size):
     #Create a random realization of a map
     #This is a function that can be run in parallel
     #It returns the coordinates of the maxima closest to the lens
@@ -214,7 +215,7 @@ def random_realization(size = 100):
     return x1, y1, x2, y2, x3, y3
 
 
-def run_random_realization(Ntrials, size = 50):
+def run_random_realization(Ntrials, size = 100):
     #Run the random realization function
     start = time.time()
 
@@ -307,11 +308,18 @@ def run_a2744():
 if __name__ == "__main__":
     #noise_variance()
     start = time.time()
-    plot_test_map(Noise = False, centered = True, size = 20, Nlens = 1)
+    run_random_realization(100, size = 100)
+    end = time.time()
+    print('Random Realization Time: {:.2f} s'.format(end-start))
+    start = time.time()
+    plot_test_map(Noise = False, centered = True, size = 100, Nlens = 1)
     end = time.time()
     print('Noiseless Lens Time: {:.2f} s'.format(end-start))
     start = time.time()
-    plot_test_map(Noise = True, centered = True, size = 20, Nlens = 1)
+    plot_test_map(Noise = True, centered = True, size = 100, Nlens = 1)
     end = time.time()
     print('Noisy Lens Time: {:.2f} s'.format(end-start))
-    #run_random_realization(100, size = 100)
+    start = time.time()
+    run_a2744()
+    end = time.time()
+    print('A2744 Time: {:.2f} s'.format(end-start))
