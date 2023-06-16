@@ -167,7 +167,6 @@ def plot_likelihood_map(axes,map,lenses,sources,xmax,ymax,zmax,eR,scale,title,le
     #corresponding x and y coordinates, and their strengths
     Nmaxima = len(xmax)
     col_labels = [r"$\theta_E$ ('')", "x('')", "y('')", "P"]
-    row_labels = [str(i) for i in range(1,Nmaxima+1)]
     table_vals = np.zeros((Nmaxima,4)) 
     table_vals[:,0] = eR
     table_vals[:,1] = xmax

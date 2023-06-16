@@ -25,8 +25,8 @@ def printProgressBar(iteration, total, prefix = '', suffix = '',
         print() 
 
 def convolver(img, kernel):
-    '''This function takes an image array and convolves it with some PSF kernel
-    in fourier space'''
+    '''This function takes an image array and 
+    convolves it with some PSF kernel in fourier space'''
     img_ft = np.fft.fftn(img, norm='ortho')
     kernel_ft = np.fft.fftn(kernel, norm='ortho')
     convolved_img_fourier = img_ft * kernel_ft

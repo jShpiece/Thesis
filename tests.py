@@ -13,8 +13,8 @@ from tqdm import tqdm
 from multiprocessing import Pool
 
 #Global variables
-sigma_f = 10**-2
-sigma_g = 10**-3
+sigma_f = 10**-2 #Noise level for flexion
+sigma_g = 5*10**-3 #Noise level for shear
 
 
 def make_sources(Nsource, size = 100):
@@ -197,20 +197,20 @@ def random_realization(size):
     #This is so we can plot the results later
 
     
-    *_, xmax1, xmax2, xmax3, ymax1, ymax2, ymax3, z1, z2, z3 = create_test_set(1, Noise = True, centered = True, size = size, res = size)
+    *_, maxima, strengths, _ = create_test_set(1, Noise = True, centered = True, size = size)
 
     #Return the maxima with the highest score
-    max1 = np.argmax(z1)
-    max2 = np.argmax(z2)
-    max3 = np.argmax(z3)
+    max1 = np.argmax(strengths[0])
+    max2 = np.argmax(strengths[1])
+    max3 = np.argmax(strengths[2])
 
     #Return the coordinates of the maxima
-    x1 = xmax1[max1]
-    y1 = ymax1[max1]
-    x2 = xmax2[max2]
-    y2 = ymax2[max2]
-    x3 = xmax3[max3]
-    y3 = ymax3[max3]   
+    x1 = maxima[0][0][max1]
+    y1 = maxima[0][1][max1]
+    x2 = maxima[1][0][max2]
+    y2 = maxima[1][1][max2]
+    x3 = maxima[2][0][max3]
+    y3 = maxima[2][1][max3] 
 
     return x1, y1, x2, y2, x3, y3
 
@@ -308,9 +308,10 @@ def run_a2744():
 if __name__ == "__main__":
     #noise_variance()
     start = time.time()
-    run_random_realization(100, size = 100)
+    run_random_realization(10, size = 100)
     end = time.time()
     print('Random Realization Time: {:.2f} s'.format(end-start))
+    '''
     start = time.time()
     plot_test_map(Noise = False, centered = True, size = 100, Nlens = 1)
     end = time.time()
@@ -323,3 +324,4 @@ if __name__ == "__main__":
     run_a2744()
     end = time.time()
     print('A2744 Time: {:.2f} s'.format(end-start))
+    '''
