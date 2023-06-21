@@ -17,7 +17,7 @@ sigma_f = 10**-2 #Noise level for flexion
 sigma_g = 5*10**-3 #Noise level for shear
 
 
-def make_sources(Nsource, size = 100):
+def make_sources(Nsource, size = 50):
     #Create a set of sources
     #Uniformly distributed in a circle of radius size/2 - size gives the length of the side of the square
     rs = np.sqrt(np.random.random(Nsource)) * (size / 2)
@@ -94,18 +94,21 @@ def noise_variance():
     plt.savefig('Images/noise_variance.png')
 
 
-def make_lensing_field(Nlens, size = 50, Noise = True, centered = False):
-    Nsource = int(10**-2 * size**2)
+def make_lensing_field(Nlens, Nsource = 0, size = 50, Noise = True, centered = False):
+    if Nsource == 0:
+        Nsource = int(10**-2 * size**2)
+    
     xs, ys = make_sources(Nsource, size = size)
 
+    xl = np.random.uniform(-size,size,Nlens)
+    yl = np.random.uniform(-size,size,Nlens)
+    eR = np.random.uniform(0,10,Nlens)
+
     if centered:
-        xl = [0]
-        yl = [0]
-        eR = [5]
-    else:
-        xl = np.random.uniform(-size,size,Nlens)
-        yl = np.random.uniform(-size,size,Nlens)
-        eR = np.random.uniform(0,10,Nlens)
+        xl[0] = 0
+        yl[0] = 0
+        eR[0] = 5
+
 
     if Noise:
         f1 = np.random.normal(0,sigma_f,Nsource)
@@ -127,17 +130,17 @@ def make_lensing_field(Nlens, size = 50, Noise = True, centered = False):
     return lenses, sources
 
 
-def create_test_set(Nlens, Noise = True, centered = True, size = 50):
+def create_test_set(Nlens, Nsource, Noise = True, centered = True, size = 50):
     #Generate a test set of lenses and sources
     #Return the weights for each weighting scheme and the coordinates of the maxima
 
     #Note: here 1,2,3 correspond to shear, flexion, and shear + flexion respectively
-    lenses,sources = make_lensing_field(Nlens, size = size, Noise = Noise, centered = centered)
+    lenses,sources = make_lensing_field(Nlens, Nsource, size = size, Noise = Noise, centered = centered)
 
     weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
     weights = [weights1, weights2, weights3]
 
-    np.save('Data/test_weights_Nlens_{}.npy'.format(Nlens), weights)
+    #np.save('Data/test_weights_Nlens_{}.npy'.format(Nlens), weights)
 
     map1 = process_weights(weights1, np.linspace(1,60,size), size)
     map2 = process_weights(weights2, np.linspace(1,60,size), size)
@@ -171,11 +174,11 @@ def create_test_set(Nlens, Noise = True, centered = True, size = 50):
     return maps, lenses, sources, maxima, strengths, eR
 
 
-def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1):
-    maps, lenses, sources, maxima, strengths, eR = create_test_set(Nlens, Noise = Noise, centered = centered, size = size)
+def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1, Nsource = 100):
+    maps, lenses, sources, maxima, strengths, eR = create_test_set(Nlens, Nsource, Noise = Noise, centered = centered, size = size)
     #Plot the results
-    fig, ax = plt.subplots(1,3, figsize=(10,7), sharex=True, sharey=True)
-    fig.suptitle('{} Map'.format('Noiseless' if Noise == False else 'Noisy'), y = 0.9, fontsize=16)
+    fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
+    fig.suptitle('{} Map - {} Sources'.format('Noiseless' if Noise == False else 'Noisy',len(sources.x)), y = 0.9, fontsize=16)
     
     plots.plot_likelihood_map(ax[0],np.log10(maps[0]+10**-20),lenses,None,maxima[0][0],maxima[0][1],100*strengths[0],eR[0],size,'Shear')
     plots.plot_likelihood_map(ax[1],np.log10(maps[1]+10**-20),lenses,None,maxima[1][0],maxima[1][1],100*strengths[1],eR[1],size,'Flexion')
@@ -183,7 +186,7 @@ def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1):
 
     #Shift the axes up a bit to remove whitespace
     plt.subplots_adjust(top=1)
-    plt.savefig('Images/test_map_{}_Nlens_{}.png'.format('Noiseless' if Noise == False else 'Noisy', Nlens))
+    plt.savefig('Images/{}_map_lens_{}_source_{}.png'.format('noiseless' if Noise == False else 'noisy', Nlens, Nsource))
 
 
 def random_realization(size):
@@ -197,7 +200,7 @@ def random_realization(size):
     #This is so we can plot the results later
 
     
-    *_, maxima, strengths, _ = create_test_set(1, Noise = True, centered = True, size = size)
+    *_, maxima, strengths, _ = create_test_set(1, 0, Noise = True, centered = True, size = size)
 
     #Return the maxima with the highest score
     max1 = np.argmax(strengths[0])
@@ -221,7 +224,7 @@ def run_random_realization(Ntrials, size = 100):
 
     pbar = tqdm(total=Ntrials)
 
-    pool = Pool()
+    pool = Pool(processes=20)
     results = []
     for result in pool.imap_unordered(random_realization, [size for i in range(Ntrials)]):
         results.append(result)
@@ -241,7 +244,7 @@ def run_random_realization(Ntrials, size = 100):
 
     #Plot the results
     fig, ax = plt.subplots(1,3, figsize=(10,5))
-    fig.suptitle('Noiseless Random Realization: Nsource = {}'.format(len(x1)), fontsize=16)
+    fig.suptitle('Noisy Random Realization: Nsource = {}'.format(len(x1)), fontsize=16)
 
     plots.plot_param_conf(x1,y1,ax[0],['Data: x = {:.2f} $\pm$ {:.2f}, y = {:.2f} $\pm$ {:.2f}'.format(
                         np.mean(x1),np.std(x1)/np.sqrt(len(x1)),np.mean(y1),np.std(y1)/np.sqrt(len(x1))), 'x', 'y'],'Shear')
@@ -277,7 +280,7 @@ def run_a2744():
     sources = Source(x, y, g1, g2, f1, f2)
 
     #Compute the weights
-    weights1, weights2, weights3 = sources.weights(size,100,sigma_f=10**-2,sigma_g=10**-3)
+    weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
     
     np.save('Data/a2744_weights.npy', [weights1, weights2, weights3])
     #weights1, weights2, weights3 = np.load('a2744_weights.npy', allow_pickle=True)
@@ -307,21 +310,21 @@ def run_a2744():
 
 if __name__ == "__main__":
     #noise_variance()
-    start = time.time()
-    run_random_realization(10, size = 100)
-    end = time.time()
-    print('Random Realization Time: {:.2f} s'.format(end-start))
-    '''
-    start = time.time()
-    plot_test_map(Noise = False, centered = True, size = 100, Nlens = 1)
-    end = time.time()
-    print('Noiseless Lens Time: {:.2f} s'.format(end-start))
-    start = time.time()
-    plot_test_map(Noise = True, centered = True, size = 100, Nlens = 1)
-    end = time.time()
-    print('Noisy Lens Time: {:.2f} s'.format(end-start))
-    start = time.time()
-    run_a2744()
-    end = time.time()
-    print('A2744 Time: {:.2f} s'.format(end-start))
-    '''
+    #start = time.time()
+    #run_random_realization(50, size = 100)
+    #end = time.time()
+    #print('Random Realization Time: {:.2f} s'.format(end-start))
+    sources = [1,3,5,10,20,50,100,200,500,1000]
+    for N in sources:
+        start = time.time()
+        plot_test_map(Noise = False, centered = False, size = 50, Nlens = 2, Nsource = N)
+        end = time.time()
+        print('Noiseless Lens Time: {:.2f} s for {} sources'.format(end-start, N))
+        start = time.time()
+        plot_test_map(Noise = True, centered = False, size = 50, Nlens = 2, Nsource = N)
+        end = time.time()
+        print('Noisy Lens Time: {:.2f} s for {} sources'.format(end-start, N))
+    #start = time.time()
+    #run_a2744()
+    #end = time.time()
+    #print('A2744 Time: {:.2f} s'.format(end-start))

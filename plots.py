@@ -176,6 +176,8 @@ def plot_likelihood_map(axes,map,lenses,sources,xmax,ymax,zmax,eR,scale,title,le
 
     #Sort the table by the z values
     table_vals = table_vals[table_vals[:,3].argsort()[::-1]]
+    #Only keep the top 10 maxima
+    table_vals = table_vals[:10]
 
     data_table = axes.table(cellText=table_vals, 
                colLabels=col_labels, 

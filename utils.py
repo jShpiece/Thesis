@@ -1,5 +1,4 @@
 #This script holds useful utility functions for my research
-
 import numpy as np
 
 def printProgressBar(iteration, total, prefix = '', suffix = '', 
@@ -24,6 +23,7 @@ def printProgressBar(iteration, total, prefix = '', suffix = '',
     if iteration == total: 
         print() 
 
+
 def convolver(img, kernel):
     '''This function takes an image array and 
     convolves it with some PSF kernel in fourier space'''
@@ -42,6 +42,7 @@ def makeGaussian(stamp, sigma):
     f_g = np.exp(-((xp / sigma) ** 2 + (yp / sigma) ** 2) / 2)
     f_g /= np.sum(f_g)
     return f_g
+
 
 def process_weights(map, eR_range, size):
     '''

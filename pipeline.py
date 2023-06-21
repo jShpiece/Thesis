@@ -175,10 +175,10 @@ def score_map(colormap, threshold=0.1):
     relevant_locations = np.transpose(np.where(scores >= score_threshold))
 
     #Unpack the relevant locations
-    xloc = relevant_locations[:,0]
-    yloc = relevant_locations[:,1]
+    yloc = relevant_locations[:,0]
+    xloc = relevant_locations[:,1]
 
     #Get the scores associated with each location
-    scores = scores[xloc,yloc]
+    scores = scores[yloc,xloc]
 
     return xloc, yloc, scores
