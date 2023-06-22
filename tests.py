@@ -140,11 +140,11 @@ def create_test_set(Nlens, Nsource, Noise = True, centered = True, size = 50):
     weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
     weights = [weights1, weights2, weights3]
 
-    #np.save('Data/test_weights_Nlens_{}.npy'.format(Nlens), weights)
+    eR_range = np.linspace(1.02,60,size)
 
-    map1 = process_weights(weights1, np.linspace(1,60,size), size)
-    map2 = process_weights(weights2, np.linspace(1,60,size), size)
-    map3 = process_weights(weights3, np.linspace(1,60,size), size)
+    map1 = process_weights(weights1, eR_range, size)
+    map2 = process_weights(weights2, eR_range, size)
+    map3 = process_weights(weights3, eR_range, size)
 
     maps = [map1, map2, map3]
 
@@ -165,9 +165,9 @@ def create_test_set(Nlens, Nsource, Noise = True, centered = True, size = 50):
 
     #Next, find the einstein radius associated with each maxima
 
-    eR1 = find_eR(weights[0], x1, y1, eR_range = np.linspace(1,60,size))
-    eR2 = find_eR(weights[1], x2, y2, eR_range = np.linspace(1,60,size))
-    eR3 = find_eR(weights[2], x3, y3, eR_range = np.linspace(1,60,size))
+    eR1 = find_eR(weights[0], x1, y1, eR_range)
+    eR2 = find_eR(weights[1], x2, y2, eR_range)
+    eR3 = find_eR(weights[2], x3, y3, eR_range)
 
     eR = [eR1, eR2, eR3]
 
@@ -178,7 +178,7 @@ def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1, Nsource = 
     maps, lenses, sources, maxima, strengths, eR = create_test_set(Nlens, Nsource, Noise = Noise, centered = centered, size = size)
     #Plot the results
     fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
-    fig.suptitle('{} Map - {} Sources'.format('Noiseless' if Noise == False else 'Noisy',len(sources.x)), y = 0.9, fontsize=16)
+    fig.suptitle('Likelihood Maps \n Nlens = {}, Nsource = {} \n Noise = {}'.format(Nlens, Nsource, Noise), fontsize=16)
     
     plots.plot_likelihood_map(ax[0],np.log10(maps[0]+10**-20),lenses,None,maxima[0][0],maxima[0][1],100*strengths[0],eR[0],size,'Shear')
     plots.plot_likelihood_map(ax[1],np.log10(maps[1]+10**-20),lenses,None,maxima[1][0],maxima[1][1],100*strengths[1],eR[1],size,'Flexion')
@@ -186,7 +186,7 @@ def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1, Nsource = 
 
     #Shift the axes up a bit to remove whitespace
     plt.subplots_adjust(top=1)
-    plt.savefig('Images/{}_map_lens_{}_source_{}.png'.format('noiseless' if Noise == False else 'noisy', Nlens, Nsource))
+    plt.savefig('Images/tests/{}_map_lens_{}_source_{}.png'.format('noiseless' if Noise == False else 'noisy', Nlens, Nsource))
 
 
 def random_realization(size):
@@ -200,7 +200,8 @@ def random_realization(size):
     #This is so we can plot the results later
 
     
-    *_, maxima, strengths, _ = create_test_set(1, 0, Noise = True, centered = True, size = size)
+    _, lenses, *_, maxima, strengths, eR = create_test_set(1, 0, Noise = True, centered = True, size = size)
+    true_eR = lenses.eR[0]
 
     #Return the maxima with the highest score
     max1 = np.argmax(strengths[0])
@@ -214,14 +215,15 @@ def random_realization(size):
     y2 = maxima[1][1][max2]
     x3 = maxima[2][0][max3]
     y3 = maxima[2][1][max3] 
+    eR1 = eR[0][max1] - true_eR
+    eR2 = eR[1][max2] - true_eR
+    eR3 = eR[2][max3] - true_eR
 
-    return x1, y1, x2, y2, x3, y3
+    return x1, y1, eR1, x2, y2, eR2, x3, y3, eR3
 
 
 def run_random_realization(Ntrials, size = 100):
     #Run the random realization function
-    start = time.time()
-
     pbar = tqdm(total=Ntrials)
 
     pool = Pool(processes=20)
@@ -237,27 +239,42 @@ def run_random_realization(Ntrials, size = 100):
     #Unpack the results
     x1 = np.array([result[0] for result in results])
     y1 = np.array([result[1] for result in results])
-    x2 = np.array([result[2] for result in results])
-    y2 = np.array([result[3] for result in results])
-    x3 = np.array([result[4] for result in results])
-    y3 = np.array([result[5] for result in results])
+    eR1 = np.array([result[2] for result in results])
+    x2 = np.array([result[3] for result in results])
+    y2 = np.array([result[4] for result in results])
+    eR2 = np.array([result[5] for result in results]) 
+    x3 = np.array([result[6] for result in results])
+    y3 = np.array([result[7] for result in results])
+    eR3 = np.array([result[8] for result in results]) 
 
-    #Plot the results
-    fig, ax = plt.subplots(1,3, figsize=(10,5))
-    fig.suptitle('Noisy Random Realization: Nsource = {}'.format(len(x1)), fontsize=16)
+    data = [x1, y1, eR1, x2, y2, eR2, x3, y3, eR3]
+    labels = ['dx (s)', 'dy (s)', r'd$\theta_E$ (s)', 'dx (f)', 'dy (f)', r'd$\theta_E$ (f)', 'dx (s + f)', 'dy (s + f)', r'd$\theta_E$ (s + f)']
 
-    plots.plot_param_conf(x1,y1,ax[0],['Data: x = {:.2f} $\pm$ {:.2f}, y = {:.2f} $\pm$ {:.2f}'.format(
-                        np.mean(x1),np.std(x1)/np.sqrt(len(x1)),np.mean(y1),np.std(y1)/np.sqrt(len(x1))), 'x', 'y'],'Shear')
+    #Plot the results - we want confidence ellipses that relate (x,y), (x,eR) and (y,eR). This should be repeated for each weighting scheme
+    fig, ax = plt.subplots(3,3, figsize=(15,15), sharex=True, sharey=True)
+    fig.suptitle('Random Realization: {} Trials - Shear'.format(Ntrials), fontsize=16)
+    fig.subplots_adjust(wspace=0, hspace=0)
+    plots.correlation_plot([x1,y1,eR1], [r'$\theta_E','y','x'], ax)
+    plt.savefig('Images/rr/shear_N_{}.png'.format(Ntrials))
 
-    plots.plot_param_conf(x2,y2,ax[1],['Data: x = {:.2f} $\pm$ {:.2f}, y = {:.2f} $\pm$ {:.2f}'.format(
-                        np.mean(x2),np.std(x2)/np.sqrt(len(x2)),np.mean(y2),np.std(y2)/np.sqrt(len(x2))), 'x', 'y'],'Flexion')
-    
-    plots.plot_param_conf(x3,y3,ax[2],['Data: x = {:.2f} $\pm$ {:.2f}, y = {:.2f} $\pm$ {:.2f}'.format(
-                        np.mean(x3),np.std(x3)/np.sqrt(len(x3)),np.mean(y3),np.std(y3)/np.sqrt(len(x3))), 'x', 'y'],'Flexion + Shear')
+    fig, ax = plt.subplots(3,3, figsize=(15,15), sharex=True, sharey=True)
+    fig.suptitle('Random Realization: {} Trials - Flexion'.format(Ntrials), fontsize=16)
+    fig.subplots_adjust(wspace=0, hspace=0)
+    plots.correlation_plot([x2,y2,eR2], [r'$\theta_E','y','x'], ax)
+    plt.savefig('Images/rr/flexion_N_{}.png'.format(Ntrials))    
 
-    end = time.time()
-    print('Time: {:.2f} s'.format(end-start))
-    plt.savefig('Images/random_realization_N_{}.png'.format(Ntrials))
+    fig, ax = plt.subplots(3,3, figsize=(15,15), sharex=True, sharey=True)
+    fig.suptitle('Random Realization: {} Trials - Flexion + Shear'.format(Ntrials), fontsize=16)
+    fig.subplots_adjust(wspace=0, hspace=0)
+    plots.correlation_plot([x3,y3,eR3], [r'$\theta_E','y','x'], ax)
+    plt.savefig('Images/rr/flexion_shear_N_{}.png'.format(Ntrials))
+
+    #Plot correlation of all parameters
+    fig, ax = plt.subplots(9,9, figsize=(15,10), sharex=True, sharey=True)
+    fig.suptitle('Random Realization: {} Trials'.format(Ntrials), fontsize=16)
+    fig.subplots_adjust(wspace=0, hspace=0)
+    plots.correlation_plot(data, labels, ax)
+    plt.savefig('Images/rr/N_{}.png'.format(Ntrials))
 
 
 def run_a2744():
@@ -310,21 +327,14 @@ def run_a2744():
 
 if __name__ == "__main__":
     #noise_variance()
-    #start = time.time()
-    #run_random_realization(50, size = 100)
-    #end = time.time()
-    #print('Random Realization Time: {:.2f} s'.format(end-start))
-    sources = [1,3,5,10,20,50,100,200,500,1000]
-    for N in sources:
-        start = time.time()
-        plot_test_map(Noise = False, centered = False, size = 50, Nlens = 2, Nsource = N)
-        end = time.time()
-        print('Noiseless Lens Time: {:.2f} s for {} sources'.format(end-start, N))
-        start = time.time()
-        plot_test_map(Noise = True, centered = False, size = 50, Nlens = 2, Nsource = N)
-        end = time.time()
-        print('Noisy Lens Time: {:.2f} s for {} sources'.format(end-start, N))
+    
+    start = time.time()
+    run_random_realization(10, size = 100)
+    end = time.time()
+    print('Random Realization Time: {:.2f} s'.format(end-start))
+
     #start = time.time()
     #run_a2744()
     #end = time.time()
     #print('A2744 Time: {:.2f} s'.format(end-start))
+

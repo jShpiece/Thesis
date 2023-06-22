@@ -1,5 +1,6 @@
 #This script holds useful utility functions for my research
 import numpy as np
+import matplotlib.pyplot as plt
 
 def printProgressBar(iteration, total, prefix = '', suffix = '', 
                      decimals = 1, length = 100, fill = '█', printEnd = "\r"):
@@ -66,7 +67,7 @@ def find_eR(map, x, y, eR_range):
     '''
     eR = []
     for i in range(len(x)):
-        possible_eR = map[x[i],y[i],:]
+        possible_eR = map[:,y[i],x[i]]
         eR.append(eR_range[np.argmax(possible_eR)])
 
     return eR

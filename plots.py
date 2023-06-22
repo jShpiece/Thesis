@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 import matplotlib.transforms as transforms
+from astropy.visualization import hist as fancyhist
 
 
 def confidence_ellipse(x, y, ax, n_std=3.0, facecolor='none', **kwargs):
@@ -97,6 +98,27 @@ def plot_param_conf(x,y,axes,labels,title,legend_loc='best'):
     axes.set_ylabel(labels[2])
     axes.set_title(title)
     axes.legend(loc=legend_loc)
+    return axes
+
+
+def correlation_plot(data,labels,axes):
+    N = len(data)
+    for i in range(N):
+        for j in range(N):
+            if i == j:               
+                fancyhist(data[i], ax=axes[i,j], bins='freedman', histtype='step', density=True, color='k')
+            elif i > j:
+                confidence_ellipse(data[i],data[j],axes[i,j],n_std=1,edgecolor='r',label='1$\sigma$')
+                confidence_ellipse(data[i],data[j],axes[i,j],n_std=2,edgecolor='b',label='2$\sigma$',linestyle='--')
+                confidence_ellipse(data[i],data[j],axes[i,j],n_std=3,edgecolor='g',label='3$\sigma$',linestyle=':')
+                axes[i,j].axvline(0, color = 'black', alpha = 0.5)
+                axes[i,j].axhline(0, color = 'black', alpha = 0.5)
+            else:
+                axes[i,j].axis('off')
+    
+    for i in range(N):
+        axes[i,0].set_ylabel(labels[i])
+        axes[N-1,i].set_xlabel(labels[i])
     return axes
 
 
