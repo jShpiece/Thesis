@@ -51,7 +51,7 @@ def process_weights(map, eR_range, size):
     and convolve with a gaussian kernel to smooth out the map. Then normalize
     the map and return it.
     '''
-    map = np.trapz(map, eR_range, axis=0)
+    map = np.trapz(map, eR_range[::-1], axis=0)
     kernel = makeGaussian(size,1)
     map = convolver(map,kernel)
     map = np.abs(map)

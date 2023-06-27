@@ -106,7 +106,7 @@ def correlation_plot(data,labels,axes):
     for i in range(N):
         for j in range(N):
             if i == j:               
-                fancyhist(data[i], ax=axes[i,j], bins='freedman', histtype='step', density=True, color='k')
+                fancyhist(data[i], ax=axes[i,j], bins='scott', histtype='step', density=True, color='k')
             elif i > j:
                 confidence_ellipse(data[i],data[j],axes[i,j],n_std=1,edgecolor='r',label='1$\sigma$')
                 confidence_ellipse(data[i],data[j],axes[i,j],n_std=2,edgecolor='b',label='2$\sigma$',linestyle='--')
@@ -188,6 +188,10 @@ def plot_likelihood_map(axes,map,lenses,sources,xmax,ymax,zmax,eR,scale,title,le
     #Beneath each plot, print a table with the maxima's eR values, their 
     #corresponding x and y coordinates, and their strengths
     Nmaxima = len(xmax)
+    if Nmaxima == 0:
+        #If there are no maxima, return the axes without a table
+        return axes
+
     col_labels = [r"$\theta_E$ ('')", "x('')", "y('')", "P"]
     table_vals = np.zeros((Nmaxima,4)) 
     table_vals[:,0] = eR

@@ -16,6 +16,7 @@ class Source:
     calc_flex: calculates the flexion at the source galaxy due to the lenses
     weights: calculates the likelihood of each lensing configuration in a 3D parameter space
     '''
+
     def __init__(self, x, y, gamma1, gamma2, f1, f2):
         self.x = x[:]
         self.y = y[:]
@@ -24,25 +25,27 @@ class Source:
         self.f1 = f1[:]
         self.f2 = f2[:]
     
-
+    
     def calc_shear(self, lenses):
-        dx = self.x[:, np.newaxis] - lenses.x
-        dy = self.y[:, np.newaxis] - lenses.y
-        r = np.sqrt(dx ** 2 + dy ** 2 + 0.5 ** 2)
-        phi = np.arctan2(dy, dx)
-        tangential_shear = lenses.eR / (2 * r)
-        self.gamma1 -= np.sum(tangential_shear * np.cos(2 * phi), axis=1)
-        self.gamma2 -= np.sum(tangential_shear * np.sin(2 * phi), axis=1)
+        Nl = len(lenses.x)
+        for n in range(Nl):
+            dx = self.x - lenses.x[n]
+            dy = self.y - lenses.y[n]
+            r = np.sqrt(dx ** 2 + dy ** 2 + 0.5 ** 2)
+            phi = np.arctan2(dy, dx)
+            self.gamma1 -= lenses.eR[n] * np.cos(2 * phi) / (2 * r)
+            self.gamma2 -= lenses.eR[n] * np.sin(2 * phi) / (2 * r)
 
 
     def calc_flex(self, lenses):
-        dx = self.x[:, np.newaxis] - lenses.x
-        dy = self.y[:, np.newaxis] - lenses.y
-        r2 = dx ** 2 + dy ** 2 + 0.5 ** 2
-        phi = np.arctan2(-dy, dx)
-        radial_flexion = lenses.eR / (2 * r2)
-        self.f1 -= np.sum(radial_flexion * np.cos(phi), axis=1)
-        self.f2 -= np.sum(radial_flexion * np.sin(phi), axis=1)
+        Nl = len(lenses.x)
+        for n in range(Nl):
+            dx = self.x - lenses.x[n]
+            dy = self.y - lenses.y[n]
+            r2 = dx ** 2 + dy ** 2 + 0.5 ** 2
+            phi = np.arctan2(-dy, dx)
+            self.f1 -= lenses.eR[n] * np.cos(phi) / (2 * r2)
+            self.f2 -= lenses.eR[n] * np.sin(phi) / (2 * r2)
 
 
     def weights(self, size, sigma_f = 10**-2, sigma_g = 10**-3, eRmin = 1, eRmax = 60):
@@ -122,7 +125,7 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
 
     if signal_type == 'flexion':
         integrand = flexion_integrand
-        filter = np.exp(-r / 10)
+        filter = np.exp(-r / 30) 
         coefficient = 2 * filter * r**2 / np.abs(np.cos(phi)) 
     elif signal_type == 'shear':
         integrand = shear_integrand

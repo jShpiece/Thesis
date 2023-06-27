@@ -20,7 +20,7 @@ sigma_g = 5*10**-3 #Noise level for shear
 def make_sources(Nsource, size = 50):
     #Create a set of sources
     #Uniformly distributed in a circle of radius size/2 - size gives the length of the side of the square
-    rs = np.sqrt(np.random.random(Nsource)) * (size / 2)
+    rs = np.sqrt(np.random.random(Nsource)) * (size)
     thetas = np.random.random(Nsource) * 2*np.pi
     xs = rs * np.cos(thetas)
     ys = rs * np.sin(thetas)
@@ -291,13 +291,17 @@ def run_a2744():
 
     #To compute the size, lets take the largest separation between two sources
     #And add 10% to it
-    size = 1.1 * np.max(np.sqrt((x[:,np.newaxis] - x)**2 + (y[:,np.newaxis] - y)**2))
+    size = int(1.1 * np.max(np.sqrt((x[:,np.newaxis] - x)**2 + (y[:,np.newaxis] - y)**2)))
 
     #Create the sources
     sources = Source(x, y, g1, g2, f1, f2)
 
     #Compute the weights
     weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
+    #Process weights
+    map1 = process_weights(weights1, np.linspace(1,60,size), size)
+    map2 = process_weights(weights2, np.linspace(1,60,size), size)
+    map3 = process_weights(weights3, np.linspace(1,60,size), size)
     
     np.save('Data/a2744_weights.npy', [weights1, weights2, weights3])
     #weights1, weights2, weights3 = np.load('a2744_weights.npy', allow_pickle=True)
@@ -305,36 +309,111 @@ def run_a2744():
     #Find maxima within the weightmaps, output their coordinates and scores
     line = np.linspace(0,size,100)
 
-    x1,y1,z1 = score_map(weights1, threshold=0.5, N = 3)
+    x1,y1,z1 = score_map(map1, threshold=0.5, N = 3)
     xmax1, ymax1 = line[x1], -line[y1]
 
-    x2,y2,z2 = score_map(weights2, threshold=0.5, N = 3)
+    x2,y2,z2 = score_map(map2, threshold=0.5, N = 3)
     xmax2, ymax2 = line[x2], -line[y2]
 
-    x3,y3,z3 = score_map(weights3, threshold=0.5, N = 3)
+    x3,y3,z3 = score_map(map3, threshold=0.5, N = 3)
     xmax3, ymax3 = line[x3], -line[y3]
+
+    #Get the einstein radius
+    eR1 = find_eR(weights1, x1, y1, np.linspace(1,60,size))
+    eR2 = find_eR(weights2, x2, y2, np.linspace(1,60,size))
+    eR3 = find_eR(weights3, x3, y3, np.linspace(1,60,size))
 
     #Plot the results
     fig, ax = plt.subplots(1,3, figsize=(10,5), sharex=True, sharey=True)
     fig.suptitle('A2744', fontsize=16)
 
-    plots.plot_likelihood_map(ax[0],np.log10(weights1+10**-10),None,None,xmax1,ymax1,100*z1,size,'Shear')
-    plots.plot_likelihood_map(ax[1],np.log10(weights2+10**-10),None,None,xmax2,ymax2,100*z2,size,'Flexion')
-    plots.plot_likelihood_map(ax[2],np.log10(weights3+10**-10),None,None,xmax3,ymax3,100*z3,size,'Flexion + Shear')
+    plots.plot_likelihood_map(ax[0],np.log10(map1+10**-10),None,None,xmax1,ymax1,100*z1,eR1,size,'Shear')
+    plots.plot_likelihood_map(ax[1],np.log10(map2+10**-10),None,None,xmax2,ymax2,100*z2,eR2,size,'Flexion')
+    plots.plot_likelihood_map(ax[2],np.log10(map3+10**-10),None,None,xmax3,ymax3,100*z3,eR3,size,'Flexion + Shear')
 
     plt.savefig('Images/a2744.png')
 
 
+def generate_test_set():
+    size = 50
+    Nlens = [1,2]
+    #Create lens
+    xl = [20,-20]
+    yl = [0,0]
+    eR = [5,5]
+
+    #Vary this by number of sources
+    Nsources = [1,2,5,20]
+    xs, ys = make_sources(Nsources[-1], size = size)
+
+    noise = [True, False]
+
+    for Nsource in Nsources:
+        source_x = xs[:Nsource]
+        source_y = ys[:Nsource]
+        for Nlen in Nlens:
+            lenses = Lens(xl[:Nlen], yl[:Nlen], eR[:Nlen])
+            for n in noise:
+                if n:
+                    sources = Source(source_x, source_y, np.random.normal(0,sigma_g,Nsource), np.random.normal(0,sigma_g,Nsource), np.random.normal(0,sigma_f,Nsource), np.random.normal(0,sigma_f,Nsource))
+                else:
+                    sources = Source(source_x, source_y, np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
+
+                sources.calc_shear(lenses)
+                sources.calc_flex(lenses)
+
+                weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
+
+                map1 = process_weights(weights1, np.linspace(1,60,size), size)
+                map2 = process_weights(weights2, np.linspace(1,60,size), size)
+                map3 = process_weights(weights3, np.linspace(1,60,size), size)
+
+                #Find maxima within the weightmaps, output their coordinates and scores
+                line = np.linspace(-size,size,size)
+
+                x1,y1,z1 = score_map(map1, threshold=0.5)
+                xmax1, ymax1 = line[x1], -line[y1]
+
+                x2,y2,z2 = score_map(map2, threshold=0.5)
+                xmax2, ymax2 = line[x2], -line[y2]
+
+                x3,y3,z3 = score_map(map3, threshold=0.5)
+                xmax3, ymax3 = line[x3], -line[y3]
+
+                #Get the einstein radius
+                eR1 = find_eR(weights1, x1, y1, np.linspace(1,60,size))
+                eR2 = find_eR(weights2, x2, y2, np.linspace(1,60,size))
+                eR3 = find_eR(weights3, x3, y3, np.linspace(1,60,size))
+
+                #Plot the results
+                fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
+                fig.suptitle('Likelihood Maps \n Nlens = {}, Nsource = {} \n Noise = {}'.format(Nlen, Nsource, n), fontsize=16)
+
+                plots.plot_likelihood_map(ax[0],np.log10(map1+10**-20),lenses,sources,xmax1,ymax1,100*z1,eR1, size,'Shear')
+                plots.plot_likelihood_map(ax[1],np.log10(map2+10**-20),lenses,sources,xmax2,ymax2,100*z2,eR2, size,'Flexion')
+                plots.plot_likelihood_map(ax[2],np.log10(map3+10**-20),lenses,sources,xmax3,ymax3,100*z3,eR3, size,'Flexion + Shear')
+
+                #Shift the axes up a bit to remove whitespace
+                plt.subplots_adjust(top=1)
+
+                #plt.savefig('Images/tests/{}_map_lens_{}_source_{}.png'.format('noiseless' if n == False else 'noisy', Nlen, Nsource))
+                plt.show()
+                plt.close()
+
+        print('Done with {} sources'.format(Nsource))
+
+
 if __name__ == "__main__":
     #noise_variance()
-    
+    '''
     start = time.time()
-    run_random_realization(10, size = 100)
+    run_a2744()
+    end = time.time()
+    print('A2744 Time: {:.2f} s'.format(end-start))
+
+    start = time.time()
+    run_random_realization(100, size = 50)
     end = time.time()
     print('Random Realization Time: {:.2f} s'.format(end-start))
-
-    #start = time.time()
-    #run_a2744()
-    #end = time.time()
-    #print('A2744 Time: {:.2f} s'.format(end-start))
-
+    '''
+    generate_test_set()
