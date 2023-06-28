@@ -334,7 +334,7 @@ def run_a2744():
     plt.savefig('Images/a2744.png')
 
 
-def generate_test_set():
+def create_varied_tests():
     size = 50
     Nlens = [1,2]
     #Create lens
@@ -343,7 +343,7 @@ def generate_test_set():
     eR = [5,5]
 
     #Vary this by number of sources
-    Nsources = [1,2,5,20]
+    Nsources = [1,2,3,4,5,6,7,8,9,10,20,30,40,50,100,200]
     xs, ys = make_sources(Nsources[-1], size = size)
 
     noise = [True, False]
@@ -396,8 +396,7 @@ def generate_test_set():
                 #Shift the axes up a bit to remove whitespace
                 plt.subplots_adjust(top=1)
 
-                #plt.savefig('Images/tests/{}_map_lens_{}_source_{}.png'.format('noiseless' if n == False else 'noisy', Nlen, Nsource))
-                plt.show()
+                plt.savefig('Images/tests/{}_map_lens_{}_source_{}.png'.format('noiseless' if n == False else 'noisy', Nlen, Nsource))
                 plt.close()
 
         print('Done with {} sources'.format(Nsource))
@@ -416,4 +415,5 @@ if __name__ == "__main__":
     end = time.time()
     print('Random Realization Time: {:.2f} s'.format(end-start))
     '''
-    generate_test_set()
+
+    
