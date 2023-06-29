@@ -125,7 +125,9 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
 
     if signal_type == 'flexion':
         integrand = flexion_integrand
-        filter = np.exp(-r / 30) 
+        #filter = np.exp(-r / 30) 
+        #Set weights to zero outside of the filter
+        filter = np.where(r < 10, 1, 0)
         coefficient = 2 * filter * r**2 / np.abs(np.cos(phi)) 
     elif signal_type == 'shear':
         integrand = shear_integrand
@@ -137,9 +139,11 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
             denominator += 1e-10  # Prevent divide by zero errors
 
     numerator = integrand(eR[:, None, None], signal, r, sigma, phi)
-    unnormalized_weights = coefficient * numerator / denominator + 10 ** -10  # Prevent divide by zero errors
+    unnormalized_weights = coefficient * numerator / denominator + 10 ** -20  # Prevent divide by zero errors
 
     weights = np.where(np.sum(unnormalized_weights) == 0, np.ones((res,res,res)), unnormalized_weights / np.sum(unnormalized_weights))
+    #anywhere weights are zero, set them to 1
+    weights = np.where(weights == 0, 1, weights)
 
     return weights
 

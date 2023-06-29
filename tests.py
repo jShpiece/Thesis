@@ -186,7 +186,8 @@ def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1, Nsource = 
 
     #Shift the axes up a bit to remove whitespace
     plt.subplots_adjust(top=1)
-    plt.savefig('Images/tests/{}_map_lens_{}_source_{}.png'.format('noiseless' if Noise == False else 'noisy', Nlens, Nsource))
+    #plt.savefig('Images/tests/{}_map_lens_{}_source_{}.png'.format('noiseless' if Noise == False else 'noisy', Nlens, Nsource))
+    plt.show()
 
 
 def random_realization(size):
@@ -403,7 +404,6 @@ def create_varied_tests():
 
 
 if __name__ == "__main__":
-    #noise_variance()
     '''
     start = time.time()
     run_a2744()
@@ -416,4 +416,100 @@ if __name__ == "__main__":
     print('Random Realization Time: {:.2f} s'.format(end-start))
     '''
 
+
+    #Okay, we're going to try checking pairs of sources
+    #Start with a single lens
+
+    Nsource = 100
+    size = 50
+    Nlens = 1
+
+    #Create lens
+    xl = [0]
+    yl = [0]
+    eR = [5]
+
+    #Create sources
+    xs, ys = make_sources(Nsource, size = size)
+
+    #Create the sources
+    sources = Source(xs, ys, np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
+    lenses = Lens(xl, yl, eR)
+
+    sources.calc_shear(lenses)
+    sources.calc_flex(lenses)
+
+    #Consider each pair of sources within a certain radius
+    #And compute the weights for each pair
+
+    r = 20
+    pairs = []
+    for i in range(Nsource):
+        for j in range(i+1,Nsource):
+            if np.sqrt((xs[i] - xs[j])**2 + (ys[i] - ys[j])**2) < r:
+                pairs.append([i,j])
     
+    #Now, compute the weights for each pair
+    weights1 = np.ones((size,size,size))
+    weights2 = np.ones((size,size,size))
+    weights3 = np.ones((size,size,size))
+
+    maxima1 = []
+    maxima2 = []
+    maxima3 = []
+    
+    line = np.linspace(-size,size,size*2)
+
+    for pair in pairs:
+        #Compute the weights for each pair
+        source_pair = Source([xs[pair[0]], xs[pair[1]]], [ys[pair[0]], ys[pair[1]]], sources.gamma1[pair], sources.gamma2[pair], sources.f1[pair], sources.f2[pair])
+        w1, w2, w3 = source_pair.weights(size,sigma_f=10**-2,sigma_g=10**-3)
+
+        #Process each set of weights
+        map1 = process_weights(w1, np.linspace(1,60,size), size)
+        map2 = process_weights(w2, np.linspace(1,60,size), size)
+        map3 = process_weights(w3, np.linspace(1,60,size), size)
+
+        #Find maxima within the weightmaps, output their coordinates and scores
+        
+        x1,y1,z1 = score_map(map1, threshold=0.1)
+        xmax1, ymax1 = line[x1], -line[y1]
+
+        x2,y2,z2 = score_map(map2, threshold=0.1)
+        xmax2, ymax2 = line[x2], -line[y2]
+
+        x3,y3,z3 = score_map(map3, threshold=0.1)
+        xmax3, ymax3 = line[x3], -line[y3]
+
+        maxima1.append([xmax1, ymax1])
+        maxima2.append([xmax2, ymax2])
+        maxima3.append([xmax3, ymax3])
+
+    #Unpack our lists
+    x1 = np.array([maxima1[i][0] for i in range(len(maxima1))])
+    y1 = np.array([maxima1[i][1] for i in range(len(maxima1))])
+
+    x2 = np.array([maxima2[i][0] for i in range(len(maxima2))])
+    y2 = np.array([maxima2[i][1] for i in range(len(maxima2))])
+
+    x3 = np.array([maxima3[i][0] for i in range(len(maxima3))])
+    y3 = np.array([maxima3[i][1] for i in range(len(maxima3))])
+
+    #Now plot all the maxima against the lens position
+
+    fig, ax = plt.subplots(1,3, figsize=(15,5), sharex=True, sharey=True)
+    fig.suptitle('Maxima for Pairs of Sources', fontsize=16)
+
+    ax[0].scatter(maxima1[:,0], maxima1[:,1], s=1)
+    ax[0].scatter(0,0, s=100, marker='x')
+    ax[0].set_title('Shear')
+
+    ax[1].scatter(maxima2[:,0], maxima2[:,1], s=1)
+    ax[1].scatter(0,0, s=100, marker='x')
+    ax[1].set_title('Flexion')
+
+    ax[2].scatter(maxima3[:,0], maxima3[:,1], s=1)
+    ax[2].scatter(0,0, s=100, marker='x')
+    ax[2].set_title('Shear + Flexion')
+
+    plt.show()
