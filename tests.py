@@ -403,37 +403,23 @@ def create_varied_tests():
         print('Done with {} sources'.format(Nsource))
 
 
-if __name__ == "__main__":
-    '''
-    start = time.time()
-    run_a2744()
-    end = time.time()
-    print('A2744 Time: {:.2f} s'.format(end-start))
-
-    start = time.time()
-    run_random_realization(100, size = 50)
-    end = time.time()
-    print('Random Realization Time: {:.2f} s'.format(end-start))
-    '''
-
-
+def pair_test():
     #Okay, we're going to try checking pairs of sources
     #Start with a single lens
 
     Nsource = 100
     size = 50
-    Nlens = 1
 
     #Create lens
-    xl = [0]
-    yl = [0]
-    eR = [5]
+    xl = [20,-20]
+    yl = [0,0]
+    eR = [5,5]
 
     #Create sources
     xs, ys = make_sources(Nsource, size = size)
 
     #Create the sources
-    sources = Source(xs, ys, np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
+    sources = Source(xs, ys, np.random.normal(0,sigma_g,Nsource), np.random.normal(0,sigma_g,Nsource), np.random.normal(0,sigma_f,Nsource), np.random.normal(0,sigma_f,Nsource))
     lenses = Lens(xl, yl, eR)
 
     sources.calc_shear(lenses)
@@ -448,68 +434,78 @@ if __name__ == "__main__":
         for j in range(i+1,Nsource):
             if np.sqrt((xs[i] - xs[j])**2 + (ys[i] - ys[j])**2) < r:
                 pairs.append([i,j])
+        
+    #Now, compute the weights for each source - doing this for each pair is inefficient
+    #So we'll just do it for each source
+    weights = []    
+    for i in range(Nsource):
+        x = np.array([xs[i]])
+        y = np.array([ys[i]])
+        g1 = np.array([sources.gamma1[i]])
+        g2 = np.array([sources.gamma2[i]])
+        f1 = np.array([sources.f1[i]])
+        f2 = np.array([sources.f2[i]])
+        single_source = Source(x, y, g1, g2, f1, f2)
+        _,w2,_ = single_source.weights(size,sigma_f=10**-2,sigma_g=10**-3)
+        weights.append(w2)
     
-    #Now, compute the weights for each pair
-    weights1 = np.ones((size,size,size))
-    weights2 = np.ones((size,size,size))
-    weights3 = np.ones((size,size,size))
+    print('Done computing weights')
 
-    maxima1 = []
-    maxima2 = []
-    maxima3 = []
+    maxima = []
     
-    line = np.linspace(-size,size,size*2)
+    line = np.linspace(-size,size,size)
 
+    #Initialize progress bar 
+    pbar = tqdm(total=len(pairs))
+        
     for pair in pairs:
         #Compute the weights for each pair
-        source_pair = Source([xs[pair[0]], xs[pair[1]]], [ys[pair[0]], ys[pair[1]]], sources.gamma1[pair], sources.gamma2[pair], sources.f1[pair], sources.f2[pair])
-        w1, w2, w3 = source_pair.weights(size,sigma_f=10**-2,sigma_g=10**-3)
+        wf = weights[pair[0]] * weights[pair[1]]
 
-        #Process each set of weights
-        map1 = process_weights(w1, np.linspace(1,60,size), size)
-        map2 = process_weights(w2, np.linspace(1,60,size), size)
-        map3 = process_weights(w3, np.linspace(1,60,size), size)
+        #Process the flexion weights
+        map = process_weights(wf, np.linspace(1,60,size), size)
 
         #Find maxima within the weightmaps, output their coordinates and scores
+        x,y,z = score_map(map, threshold=0.1)
+        xmax, ymax = line[x], -line[y]
+
+        for i in range(len(x)):
+            maxima.append([xmax[i], ymax[i], z[i]])
+
+        #Update progress bar
+        pbar.update()
         
-        x1,y1,z1 = score_map(map1, threshold=0.1)
-        xmax1, ymax1 = line[x1], -line[y1]
-
-        x2,y2,z2 = score_map(map2, threshold=0.1)
-        xmax2, ymax2 = line[x2], -line[y2]
-
-        x3,y3,z3 = score_map(map3, threshold=0.1)
-        xmax3, ymax3 = line[x3], -line[y3]
-
-        maxima1.append([xmax1, ymax1])
-        maxima2.append([xmax2, ymax2])
-        maxima3.append([xmax3, ymax3])
 
     #Unpack our lists
-    x1 = np.array([maxima1[i][0] for i in range(len(maxima1))])
-    y1 = np.array([maxima1[i][1] for i in range(len(maxima1))])
-
-    x2 = np.array([maxima2[i][0] for i in range(len(maxima2))])
-    y2 = np.array([maxima2[i][1] for i in range(len(maxima2))])
-
-    x3 = np.array([maxima3[i][0] for i in range(len(maxima3))])
-    y3 = np.array([maxima3[i][1] for i in range(len(maxima3))])
+    xm = np.array([maxima[i][0] for i in range(len(maxima))])
+    ym = np.array([maxima[i][1] for i in range(len(maxima))])
+    zm = np.array([maxima[i][2] for i in range(len(maxima))])
 
     #Now plot all the maxima against the lens position
 
-    fig, ax = plt.subplots(1,3, figsize=(15,5), sharex=True, sharey=True)
-    fig.suptitle('Maxima for Pairs of Sources', fontsize=16)
-
-    ax[0].scatter(maxima1[:,0], maxima1[:,1], s=1)
-    ax[0].scatter(0,0, s=100, marker='x')
-    ax[0].set_title('Shear')
-
-    ax[1].scatter(maxima2[:,0], maxima2[:,1], s=1)
-    ax[1].scatter(0,0, s=100, marker='x')
-    ax[1].set_title('Flexion')
-
-    ax[2].scatter(maxima3[:,0], maxima3[:,1], s=1)
-    ax[2].scatter(0,0, s=100, marker='x')
-    ax[2].set_title('Shear + Flexion')
-
+    plt.figure()
+    plt.scatter(xm, ym, c='r', s=100*zm, label='Maxima')
+    plt.scatter(xl, yl, c='b', label='Lenses')
+    plt.xlim(-size,size)
+    plt.ylim(-size,size)
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title('Intersecting Pairs')
+    plt.legend()
     plt.show()
+    
+    
+if __name__ == "__main__":
+    '''
+    start = time.time()
+    run_a2744()
+    end = time.time()
+    print('A2744 Time: {:.2f} s'.format(end-start))
+
+    start = time.time()
+    run_random_realization(100, size = 50)
+    end = time.time()
+    print('Random Realization Time: {:.2f} s'.format(end-start))
+    '''
+
+    plot_test_map(Noise=True, centered = True, size = 50, Nlens = 2, Nsource = 100)
