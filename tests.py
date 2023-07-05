@@ -11,10 +11,12 @@ import matplotlib.pyplot as plt
 import time
 from tqdm import tqdm
 from multiprocessing import Pool
+from sklearn import cluster
+from kneed import KneeLocator
 
 #Global variables
-sigma_f = 10**-2 #Noise level for flexion
-sigma_g = 5*10**-3 #Noise level for shear
+sigma_f = 10**-3 #Noise level for flexion
+sigma_g = 10**-3 #Noise level for shear
 
 
 def make_sources(Nsource, size = 50):
@@ -140,7 +142,7 @@ def create_test_set(Nlens, Nsource, Noise = True, centered = True, size = 50):
     weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
     weights = [weights1, weights2, weights3]
 
-    eR_range = np.linspace(1.02,60,size)
+    eR_range = np.linspace(1,60,size)
 
     map1 = process_weights(weights1, eR_range, size)
     map2 = process_weights(weights2, eR_range, size)
@@ -411,9 +413,9 @@ def pair_test():
     size = 50
 
     #Create lens
-    xl = [20,-20]
-    yl = [0,0]
-    eR = [5,5]
+    xl = [20,-20, 0]
+    yl = [0,0, 20]
+    eR = [5,5,5]
 
     #Create sources
     xs, ys = make_sources(Nsource, size = size)
@@ -481,31 +483,140 @@ def pair_test():
     ym = np.array([maxima[i][1] for i in range(len(maxima))])
     zm = np.array([maxima[i][2] for i in range(len(maxima))])
 
-    #Now plot all the maxima against the lens position
+    #Locate clusters in the maxima using k-means clustering
+    #Use elbow method to determine number of clusters
+    data = np.array([xm,ym]).T
+    elbow = []
+    for i in range(1,10):
+        kmeans = cluster.KMeans(n_clusters=i).fit(data)
+        elbow.append(kmeans.inertia_)
+    #Locate the elbow
+
+    kl = KneeLocator(range(1,10), elbow, curve='convex', direction='decreasing')    
+
+    kmeans = cluster.KMeans(n_clusters=kl.elbow).fit(data)
+
+    #Plot the results
 
     plt.figure()
-    plt.scatter(xm, ym, c='r', s=100*zm, label='Maxima')
-    plt.scatter(xl, yl, c='b', label='Lenses')
-    plt.xlim(-size,size)
-    plt.ylim(-size,size)
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.title('Intersecting Pairs')
+    plt.scatter(xl, yl, marker='*', s=200, c='g', label='Lens')
+    plt.scatter(xm, ym, marker='o', s=zm*100, c='k', alpha = 0.5, label='Maxima')
+    plt.scatter(kmeans.cluster_centers_[:,1], kmeans.cluster_centers_[:,0], marker='x', s=100, c='r', label='Cluster Centers')
     plt.legend()
+    plt.title('Pair Test: {} Lenses Detected'.format(kl.elbow))
+    plt.xlim([-size,size])
+    plt.ylim([-size,size])
+    plt.gca().set_aspect('equal')
+    plt.show()
+
+
+def kmeans_accuracy_test(size):
+    #Create a lensing field with a random number of lenses
+    Nlens = np.random.randint(1,10)
+    Nsource = 100
+
+    #Create lens 
+    xl = np.random.uniform(-size,size,Nlens)
+    yl = np.random.uniform(-size,size,Nlens)
+    eR = np.random.uniform(1,10,Nlens)
+
+    #Create sources
+    xs, ys = make_sources(Nsource, size)
+    sources = Source(xs,ys,np.random.normal(0,sigma_g,Nsource),np.random.normal(0,sigma_g,Nsource),np.random.normal(0,sigma_f,Nsource),np.random.normal(0,sigma_f,Nsource))
+    lenses = Lens(xl, yl, eR)
+
+    sources.calc_shear(lenses)
+    sources.calc_flex(lenses)
+    
+    #Perform pairwise test
+    r = 20
+    pairs = []
+    for i in range(Nsource):
+        for j in range(i+1,Nsource):
+            if np.sqrt((xs[i] - xs[j])**2 + (ys[i] - ys[j])**2) < r:
+                pairs.append([i,j])
+        
+    #Now, compute the weights for each source - doing this for each pair is inefficient
+    #So we'll just do it for each source
+    weights = []    
+    for i in range(Nsource):
+        x = np.array([xs[i]])
+        y = np.array([ys[i]])
+        g1 = np.array([sources.gamma1[i]])
+        g2 = np.array([sources.gamma2[i]])
+        f1 = np.array([sources.f1[i]])
+        f2 = np.array([sources.f2[i]])
+        single_source = Source(x, y, g1, g2, f1, f2)
+        _,w2,_ = single_source.weights(size,sigma_f=10**-2,sigma_g=10**-3)
+        weights.append(w2)
+
+    line = np.linspace(-size,size,size)
+    maxima = []
+
+    for pair in pairs:
+        #Compute the weights for each pair
+        wf = weights[pair[0]] * weights[pair[1]]
+
+        #Process the flexion weights
+        map = process_weights(wf, np.linspace(1,60,size), size)
+
+        #Find maxima within the weightmaps, output their coordinates and scores
+        x,y,z = score_map(map, threshold=0.1)
+        xmax, ymax = line[x], -line[y]
+
+        for i in range(len(x)):
+            maxima.append([xmax[i], ymax[i], z[i]])
+
+    #Unpack our lists
+    xm = np.array([maxima[i][0] for i in range(len(maxima))])
+    ym = np.array([maxima[i][1] for i in range(len(maxima))])
+    zm = np.array([maxima[i][2] for i in range(len(maxima))])
+
+    #Locate clusters in the maxima using k-means clustering
+    #Use elbow method to determine number of clusters
+    data = np.array([xm,ym]).T
+    elbow = []
+    for i in range(1,10):
+        kmeans = cluster.KMeans(n_clusters=i).fit(data)
+        elbow.append(kmeans.inertia_)
+
+    #Locate the elbow
+    kl = KneeLocator(range(1,10), elbow, curve='convex', direction='decreasing')    
+    
+    return kl.elbow - Nlens
+    
+
+if __name__ == "__main__":
+    Ntrials = 100
+
+    pbar = tqdm(total=Ntrials)
+    pool = Pool(processes=20)
+
+    results = []
+    for result in pool.imap_unordered(kmeans_accuracy_test, [50 for i in range(Ntrials)]):
+        results.append(result)
+        pbar.update()
+    
+    pool.close()
+
+    dlN = np.array(results)
+    dlN_old = np.load('Data/dlN.npy')
+    dlN = np.concatenate((dlN_old, dlN))
+    np.save('Data/dlN.npy', dlN)
+    
+    Ntrials = len(dlN)
+
+    #Plot the results
+
+    bins = np.linspace(-10,10,21)
+    plt.figure()
+    plt.hist(dlN, bins, density = False, histtype = 'step', label = 'Pairwise Test')
+    plt.axvline(np.mean(dlN), c='k', label = 'Mean')
+    plt.axvline(np.median(dlN), c='r', label = 'Median')
+    plt.legend()
+    plt.xlabel('Located Lenses - True Lens')
+    plt.ylabel('Counts')
+    plt.title('Pairwise Test: {} Trials'.format(Ntrials))
+    plt.savefig('Images/pairwise_test.png')
     plt.show()
     
-    
-if __name__ == "__main__":
-    '''
-    start = time.time()
-    run_a2744()
-    end = time.time()
-    print('A2744 Time: {:.2f} s'.format(end-start))
-
-    start = time.time()
-    run_random_realization(100, size = 50)
-    end = time.time()
-    print('Random Realization Time: {:.2f} s'.format(end-start))
-    '''
-
-    plot_test_map(Noise=True, centered = True, size = 50, Nlens = 2, Nsource = 100)
