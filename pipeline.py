@@ -79,15 +79,16 @@ class Source:
             if np.sum(shear_contribution) > 0:
                 #Multiply the weights by the contribution from the nth lens and normalize
                 weights1 *= shear_contribution
-                weights1 /= np.sum(weights1)
 
             if np.sum(flexion_contribution) > 0:
                 #Multiply the weights by the contribution from the nth lens and normalize
                 weights2 *= flexion_contribution
-                weights2 /= np.sum(weights2)
-            
+        
+
+        #weights1 /= np.sum(weights1)
+        #weights2 /= np.sum(weights2)
         weights3 = weights1 * weights2 # Combine the weights from the shear and flexion
-        weights3 /= np.sum(weights3)
+        #weights3 /= np.sum(weights3)
 
         return weights1, weights2, weights3
 
@@ -137,10 +138,10 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
     for i in range(res):
         for j in range(res):
             denominator[i, j] = integrate.quad(integrand, eRmin, eRmax, args=(signal, r[i, j], sigma, phi[i, j]))[0]
-            denominator += 1e-20  # Prevent divide by zero errors
+            denominator += 1e-10  # Prevent divide by zero errors
 
     numerator = integrand(eR[:, None, None], signal, r, sigma, phi)
-    unnormalized_weights = coefficient * numerator / denominator + 10 ** -20  # Prevent divide by zero errors
+    unnormalized_weights = coefficient * numerator / denominator + 10 ** -10  # Prevent divide by zero errors
 
     weights = np.where(np.sum(unnormalized_weights) == 0, np.ones((res,res,res)), unnormalized_weights / np.sum(unnormalized_weights))
     #anywhere weights are zero, set them to 1

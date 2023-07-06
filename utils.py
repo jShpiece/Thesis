@@ -54,8 +54,8 @@ def process_weights(weights, eR_range, size):
     map = np.trapz(weights, eR_range[::-1], axis=0)
     kernel = makeGaussian(size,1)
     map = convolver(map,kernel)
-    map = np.abs(map)
-    map /= np.sum(map)
+    #map = np.abs(map)
+    #map /= np.sum(map)
 
     return map
 
