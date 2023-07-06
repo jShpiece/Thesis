@@ -49,7 +49,7 @@ class Source:
 
 
     def weights(self, size, sigma_f = 10**-2, sigma_g = 10**-3, eRmin = 1, eRmax = 60):
-        # size: size of the grid in arcseconds
+        # size: 1/2 size of the grid in arcseconds
         # sigma_f: standard deviation of the flexion
         # sigma_g: standard deviation of the shear
         # eRmin: minimum allowed value of eR
@@ -125,10 +125,10 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
 
     if signal_type == 'flexion':
         integrand = flexion_integrand
-        #filter = np.exp(-r / 30) 
+        filter = np.exp(-r / 30) 
         #filter = 1
         #Set weights to zero outside of the filter
-        filter = np.where(r < 20, 1, 0)
+        #filter = np.where(r < 20, 1, 0)
         coefficient = 2 * filter * r**2 / np.abs(np.cos(phi)) 
     elif signal_type == 'shear':
         integrand = shear_integrand

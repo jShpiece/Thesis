@@ -88,7 +88,7 @@ def plot_param_conf(x,y,axes,labels,title,legend_loc='best'):
     -------
     matplotlib.axes.Axes
     '''
-    axes.scatter(x,y,marker='.',color='k',label=labels[0])
+    axes.scatter(x,y,marker='.',color='k',alpha=0,label=labels[0])
     confidence_ellipse(x,y,axes,n_std=1,edgecolor='r',label='1$\sigma$')
     confidence_ellipse(x,y,axes,n_std=2,edgecolor='b',label='2$\sigma$',linestyle='--')
     confidence_ellipse(x,y,axes,n_std=3,edgecolor='g',label='3$\sigma$',linestyle=':')

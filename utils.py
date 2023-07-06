@@ -45,13 +45,13 @@ def makeGaussian(stamp, sigma):
     return f_g
 
 
-def process_weights(map, eR_range, size):
+def process_weights(weights, eR_range, size):
     '''
     Take a likelihood map in 3D parameter space, integrate over the eR axis,
     and convolve with a gaussian kernel to smooth out the map. Then normalize
     the map and return it.
     '''
-    map = np.trapz(map, eR_range[::-1], axis=0)
+    map = np.trapz(weights, eR_range[::-1], axis=0)
     kernel = makeGaussian(size,1)
     map = convolver(map,kernel)
     map = np.abs(map)
