@@ -51,13 +51,13 @@ def process_weights(weights, eR_range, size):
     and convolve with a gaussian kernel to smooth out the map. Then normalize
     the map and return it.
     '''
-    map = np.trapz(weights, eR_range[::-1], axis=0)
+    llmap = np.trapz(weights, eR_range[::-1], axis=0)
     kernel = makeGaussian(size,1)
-    map = convolver(map,kernel)
-    #map = np.abs(map)
+    llmap = convolver(llmap,kernel)
+    llmap = np.abs(llmap)
     #map /= np.sum(map)
 
-    return map
+    return llmap
 
 
 def find_eR(map, x, y, eR_range):

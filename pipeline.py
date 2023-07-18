@@ -18,12 +18,12 @@ class Source:
     '''
 
     def __init__(self, x, y, gamma1, gamma2, f1, f2):
-        self.x = x[:]
-        self.y = y[:]
-        self.gamma1 = gamma1[:]
-        self.gamma2 = gamma2[:]
-        self.f1 = f1[:]
-        self.f2 = f2[:]
+        self.x = x
+        self.y = y
+        self.gamma1 = gamma1
+        self.gamma2 = gamma2
+        self.f1 = f1
+        self.f2 = f2
     
     
     def calc_shear(self, lenses):
@@ -54,10 +54,10 @@ class Source:
         # sigma_g: standard deviation of the shear
         # eRmin: minimum allowed value of eR
         # eRmax: maximum allowed value of eR
+        xs, ys, F1, F2, gamma1, gamma2 = self.x, self.y, self.f1, self.f2, self.gamma1, self.gamma2
         res = size 
         line = np.linspace(-size,size,res)
         x,y = np.meshgrid(line,line)
-        xs, ys, F1, F2, gamma1, gamma2 = self.x, self.y, self.f1, self.f2, self.gamma1, self.gamma2
         F = np.sqrt(F1**2 + F2**2)
         phiF = np.arctan2(F2,F1) + np.pi
         gamma = np.sqrt(gamma1**2 + gamma2**2)
@@ -85,10 +85,10 @@ class Source:
                 weights2 *= flexion_contribution
         
 
-        #weights1 /= np.sum(weights1)
-        #weights2 /= np.sum(weights2)
         weights3 = weights1 * weights2 # Combine the weights from the shear and flexion
-        #weights3 /= np.sum(weights3)
+        weights1 /= np.sum(weights1)
+        weights2 /= np.sum(weights2)
+        weights3 /= np.sum(weights3)
 
         return weights1, weights2, weights3
 

@@ -137,7 +137,7 @@ def create_test_set(Nlens, Nsource, Noise = True, centered = True, size = 50):
     #Note: here 1,2,3 correspond to shear, flexion, and shear + flexion respectively
     lenses,sources = make_lensing_field(Nlens, Nsource, size = size, Noise = Noise, centered = centered)
 
-    weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
+    weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-2)
     weights = [weights1, weights2, weights3]
 
     eR_range = np.linspace(1,60,size)
@@ -404,40 +404,59 @@ def create_varied_tests():
 
 
 if __name__ == "__main__":
-    plot_test_map(Noise=False,centered=True,size=20,Nlens=1,Nsource=20)
+    #Create a very simple lensing field
 
-    '''
-    Ntrials = 100
+    size = 50
+    Nlens = 1
+    Nsource = 4
 
-    pbar = tqdm(total=Ntrials)
-    pool = Pool(processes=20)
+    #Create lens
+    xl = [0]
+    yl = [0]
+    eR = [5]
 
-    results = []
-    for result in pool.imap_unordered(kmeans_accuracy_test, [50 for i in range(Ntrials)]):
-        results.append(result)
-        pbar.update()
-    
-    pool.close()
+    #Create sources
+    xs = np.array([20, 20, -20, -20])
+    ys = np.array([20, -20, 20, -20])
 
-    dlN = np.array(results)
-    dlN_old = np.load('Data/dlN.npy')
-    dlN = np.concatenate((dlN_old, dlN))
-    np.save('Data/dlN.npy', dlN)
-    
-    Ntrials = len(dlN)
+    sources = Source(xs, ys, np.random.normal(0,sigma_g,Nsource), np.random.normal(0,sigma_g,Nsource), np.random.normal(0,sigma_f,Nsource), np.random.normal(0,sigma_f,Nsource))
+    lenses = Lens(xl, yl, eR)
+
+    sources.calc_shear(lenses)
+    sources.calc_flex(lenses)
+
+    weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
+
+    map1 = process_weights(weights1, np.linspace(1,60,size), size)
+    map2 = process_weights(weights2, np.linspace(1,60,size), size)
+    map3 = process_weights(weights3, np.linspace(1,60,size), size)
+
+    #Find maxima within the weightmaps, output their coordinates and scores
+    line = np.linspace(-size,size,size)
+
+    x1,y1,z1 = score_map(map1, threshold=0.5)
+    xmax1, ymax1 = line[x1], -line[y1]
+
+    x2,y2,z2 = score_map(map2, threshold=0.5)
+    xmax2, ymax2 = line[x2], -line[y2]
+
+    x3,y3,z3 = score_map(map3, threshold=0.5)
+    xmax3, ymax3 = line[x3], -line[y3]
+
+    #Get the einstein radius
+    eR1 = find_eR(weights1, x1, y1, np.linspace(1,60,size))
+    eR2 = find_eR(weights2, x2, y2, np.linspace(1,60,size))
+    eR3 = find_eR(weights3, x3, y3, np.linspace(1,60,size))
 
     #Plot the results
+    fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
+    fig.suptitle('Likelihood Maps \n Nlens = {}, Nsource = {} \n Noise = {}'.format(Nlens, Nsource, True), fontsize=16)
 
-    bins = np.linspace(-10,10,21)
-    plt.figure()
-    plt.hist(dlN, bins, density = False, histtype = 'step', label = 'Pairwise Test')
-    plt.axvline(np.mean(dlN), c='k', label = 'Mean')
-    plt.axvline(np.median(dlN), c='r', label = 'Median')
-    plt.legend()
-    plt.xlabel('Located Lenses - True Lens')
-    plt.ylabel('Counts')
-    plt.title('Pairwise Test: {} Trials'.format(Ntrials))
-    plt.savefig('Images/pairwise_test.png')
+    plots.plot_likelihood_map(ax[0],np.log10(map1+10**-20),lenses,sources,xmax1,ymax1,100*z1,eR1, size,'Shear')
+    plots.plot_likelihood_map(ax[1],np.log10(map2+10**-20),lenses,sources,xmax2,ymax2,100*z2,eR2, size,'Flexion')
+    plots.plot_likelihood_map(ax[2],np.log10(map3+10**-20),lenses,sources,xmax3,ymax3,100*z3,eR3, size,'Flexion + Shear')
+
+    #Shift the axes up a bit to remove whitespace
+    plt.subplots_adjust(top=1)
+
     plt.show()
-    '''
-
