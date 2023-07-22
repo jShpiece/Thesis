@@ -31,25 +31,19 @@ M_largest = 1.6e14
 #The mass of the smallest subhalo
 M_smallest = 1e9
 
-#The number of subhalos per mass bin
-N_subhalos = cumulative_mass_function(M_smallest/M_host) - cumulative_mass_function(M_largest/M_host)
-print('Number of expected subhalos over 10^9 Msun: ', int(N_subhalos))
-
-mass_bins = np.logspace(7, 14, 8)
-N_subhalos = np.zeros(len(mass_bins)-1)
-for i in range(len(mass_bins)-1):
-    N_subhalos[i] = cumulative_mass_function(mass_bins[i]/M_host) - cumulative_mass_function(mass_bins[i+1]/M_host)
 
 #Create this plot as a histogram
-plt.hist(mass_bins[:-1], bins = mass_bins, weights = N_subhalos)
+plt.plot(mu * M_host, cumulative_mass_function(mu))
 #Label each bin with the number of subhalos in that bin
+'''
 for i in range(len(mass_bins)-1):
-    plt.text(mass_bins[i], N_subhalos[i], str(int(N_subhalos[i])))
+    plt.text(mass_bins[i], cumulative_mass_function[i], str(int(N_subhalos[i])))
+'''
 plt.xscale('log')
 plt.yscale('log')
 plt.xlabel(r'$M_{sub}$')
-plt.ylabel(r'$N(M_{sub})$')
-plt.title('Subhalo Mass Function for Abell-Like Cluster')
+plt.ylabel(r'$N(>M_{sub})$')
+plt.title('Cumulative subhalo mass function for Abell 2744 - like cluster')
 plt.show()
 
 #Okay, so this gives us several hundred subhalos at the low mass end
@@ -60,8 +54,9 @@ plt.show()
 #Let us assume that the subhalos are distributed uniformly in the cluster
 #Let the number of subhalos be 500
 
-n_small = 8950
+n_small = 900
 d = 350 #arcsec
 n_dist = n_small / (d**2)
+print(n_dist)
 avg_sep = np.sqrt(1/n_dist)
 print(avg_sep)

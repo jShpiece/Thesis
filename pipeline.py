@@ -55,7 +55,7 @@ class Source:
         # eRmin: minimum allowed value of eR
         # eRmax: maximum allowed value of eR
         xs, ys, F1, F2, gamma1, gamma2 = self.x, self.y, self.f1, self.f2, self.gamma1, self.gamma2
-        res = size 
+        res = size * 2
         line = np.linspace(-size,size,res)
         x,y = np.meshgrid(line,line)
         F = np.sqrt(F1**2 + F2**2)
@@ -86,9 +86,6 @@ class Source:
         
 
         weights3 = weights1 * weights2 # Combine the weights from the shear and flexion
-        weights1 /= np.sum(weights1)
-        weights2 /= np.sum(weights2)
-        weights3 /= np.sum(weights3)
 
         return weights1, weights2, weights3
 
@@ -107,7 +104,7 @@ class Lens:
 
 
 def flexion_integrand(eR, F, r, sigma, phi):
-    lens_F = -(eR * np.abs(np.cos(phi))) / (2 * r**2)
+    lens_F = -(eR * np.cos(phi)) / (2 * r**2)
     gaussian_term = np.exp((-(F - lens_F)**2) / (2 * sigma**2))
     power_term = np.abs(eR)**-0.95
     return gaussian_term * power_term
@@ -126,7 +123,7 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
 
     if signal_type == 'flexion':
         integrand = flexion_integrand
-        filter = np.exp(-r / 30) 
+        filter = np.exp(-r / 20) 
         #filter = 1
         #Set weights to zero outside of the filter
         #filter = np.where(r < 20, 1, 0)

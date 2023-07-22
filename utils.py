@@ -52,10 +52,10 @@ def process_weights(weights, eR_range, size):
     the map and return it.
     '''
     llmap = np.trapz(weights, eR_range[::-1], axis=0)
-    kernel = makeGaussian(size,1)
+    kernel = makeGaussian(size,2)
     llmap = convolver(llmap,kernel)
     llmap = np.abs(llmap)
-    #map /= np.sum(map)
+    llmap /= np.sum(llmap)
 
     return llmap
 
@@ -66,8 +66,16 @@ def find_eR(map, x, y, eR_range):
     at each maxima.
     '''
     eR = []
+    #plt.figure()
+
     for i in range(len(x)):
         possible_eR = map[:,y[i],x[i]]
         eR.append(eR_range[np.argmax(possible_eR)])
+
+        #plt.plot(eR_range,possible_eR)
+    #plt.yscale('log')
+    #plt.xlabel('eR')
+    #plt.ylabel('Likelihood')
+    #plt.show()
 
     return eR
