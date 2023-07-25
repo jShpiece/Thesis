@@ -49,6 +49,7 @@ class Source:
 
 
     def weights(self, size, sigma_f = 10**-2, sigma_g = 10**-3, eRmin = 1, eRmax = 60):
+        # This function calculates the likelihood of each lensing configuration in a 3D parameter space
         # size: 1/2 size of the grid in arcseconds
         # sigma_f: standard deviation of the flexion
         # sigma_g: standard deviation of the shear
@@ -138,7 +139,7 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
             denominator += 1e-10  # Prevent divide by zero errors
 
     numerator = integrand(eR[:, None, None], signal, r, sigma, phi)
-    unnormalized_weights = coefficient * numerator / denominator + 10 ** -10  # Prevent divide by zero errors
+    unnormalized_weights = coefficient * numerator / denominator + 10 ** -5  # Prevent divide by zero errors
 
     weights = np.where(np.sum(unnormalized_weights) == 0, np.ones((res,res,res)), unnormalized_weights / np.sum(unnormalized_weights))
     #anywhere weights are zero, set them to 1

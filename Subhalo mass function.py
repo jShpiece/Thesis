@@ -6,6 +6,16 @@ def cumulative_mass_function(mu, mu1 = 0.01, mu_cut = 0.1):
     #mu is the mass of the subhalo divided by the mass of the host halo
     return (mu/mu1)**(-0.94) * np.exp(-(mu/mu_cut)**1.2)
 
+def stn_flexion(eR, n, sigma, rmin, rmax):
+    term1 = eR * np.sqrt(np.pi * n) / (sigma * rmin)
+    term2 = np.log(rmax / rmin) / np.sqrt(rmax**2 / rmin**2 - 1)
+    return term1 * term2
+
+def stn_shear(eR, n, sigma, rmin, rmax):
+    term1 = eR * np.sqrt(np.pi * n) / (sigma)
+    term2 = (1 - rmin/rmax) / np.sqrt(1 - (rmin/rmax)**2)
+    return term1 * term2
+ 
 #Plotting
 mu = np.logspace(-5, -2, 1000)
 
@@ -19,10 +29,6 @@ plt.ylabel(r'$N(>\mu)$')
 
 #Let us now calculate the number of subhalos per mass bin
 #Take Abell 2744 as an example
-#The mass of the host halo is 1.6e15 Msun
-#The mass of the largest subhalo is 1.6e14 Msun
-#Let us assume that the mass of the smallest subhalo is 1e9 Msun
-#The number of subhalos per mass bin is then
 
 #The mass of the host halo
 M_host = 1.6e15
@@ -46,17 +52,41 @@ plt.ylabel(r'$N(>M_{sub})$')
 plt.title('Cumulative subhalo mass function for Abell 2744 - like cluster')
 plt.show()
 
-#Okay, so this gives us several hundred subhalos at the low mass end
-#What is the angular separation between these subhalos?
-#Abell 2744 is at a redshift of 0.308
-#The angular diameter distance to Abell 2744 is 1.2 Gpc
-#Let Abell 2744 span 350 x 350 arcsec
-#Let us assume that the subhalos are distributed uniformly in the cluster
-#Let the number of subhalos be 500
+#Now load the flexion data for Abell 2744
+file = 'a2744_updated_simplified.csv'
 
-n_small = 900
-d = 350 #arcsec
-n_dist = n_small / (d**2)
-print(n_dist)
-avg_sep = np.sqrt(1/n_dist)
-print(avg_sep)
+#Read in the data
+data = np.loadtxt(file, delimiter=',', skiprows=1)
+
+#Order: ID, x, y, f1, f2
+#Read in all the data
+IDs = data[:,0]
+xs = data[:,1]
+ys = data[:,2]
+f1s = data[:,3]
+f2s = data[:,4]
+
+#Compute the angular size of the cluster
+size = np.max(np.sqrt(xs**2 + ys**2))
+N = len(IDs)
+#The number density n of subhalos is given by n = N / (size**2)
+n = N / (size**2)
+
+sigma = 10**-2
+rmin = 1
+rmax = 20
+
+#Calculate the signal to noise ratio as a function of eR
+eR = np.linspace(10e-3, 1, 1000)
+stnf = stn_flexion(eR, n, sigma, rmin, rmax)
+stns = stn_shear(eR, n, sigma, rmin, rmax)
+
+plt.plot(eR, stnf, label='Flexion')
+plt.plot(eR, stns, label='Shear')
+plt.xlabel('eR')
+plt.ylabel('Signal to noise ratio')
+plt.hlines(1, 0, 1, colors='r', linestyles='dashed')
+plt.title('Signal to noise ratio as a function of Einstein radius')
+plt.xscale('log')
+plt.legend()
+plt.show()
