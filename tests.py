@@ -4,7 +4,7 @@
 #Or run any tests I want to run
 
 from pipeline import Source, Lens, score_map
-from utils import process_weights, find_eR
+import utils
 import plots
 import numpy as np
 import matplotlib.pyplot as plt
@@ -403,7 +403,7 @@ def create_varied_tests():
         print('Done with {} sources'.format(Nsource))
 
 
-if __name__ == "__main__":
+def fewsourcetest():
     #Create a very simple lensing field
 
     size = 50
@@ -425,82 +425,140 @@ if __name__ == "__main__":
 
     Ntrial = 20
 
-    for n in range(Ntrial):
-        start = time.time()
-        sources = Source(xs, ys, np.random.normal(0,noise1,Nsource), np.random.normal(0,noise1,Nsource), np.random.normal(0,noise2,Nsource), np.random.normal(0,noise2,Nsource))
 
-        sources.calc_shear(lenses)
-        sources.calc_flex(lenses)
+    sources = Source(xs, ys, np.random.normal(0,noise1,Nsource), np.random.normal(0,noise1,Nsource), np.random.normal(0,noise2,Nsource), np.random.normal(0,noise2,Nsource))
 
-        weights1, weights2, weights3 = sources.weights(size)
+    sources.calc_shear(lenses)
+    sources.calc_flex(lenses)
 
-        map1 = process_weights(weights1, np.linspace(1,60,res), res)
-        map2 = process_weights(weights2, np.linspace(1,60,res), res)
-        map3 = process_weights(weights3, np.linspace(1,60,res), res)
+    weights1, weights2, weights3 = sources.weights(size)
 
-        #Find maxima within the weightmaps, output their coordinates and scores
-        line = np.linspace(-size,size,res)
+    map1 = utils.process_weights(weights1, np.linspace(1,60,res), res)
+    map2 = utils.process_weights(weights2, np.linspace(1,60,res), res)
+    map3 = utils.process_weights(weights3, np.linspace(1,60,res), res)
 
-        x1,y1,z1 = score_map(map1, threshold=0.1)
-        xmax1, ymax1 = line[x1], -line[y1]
+    #Find maxima within the weightmaps, output their coordinates and scores
+    line = np.linspace(-size,size,res)
 
-        x2,y2,z2 = score_map(map2, threshold=0.1)
-        xmax2, ymax2 = line[x2], -line[y2]
+    x1,y1,z1 = score_map(map1, threshold=0.1)
+    xmax1, ymax1 = line[x1], -line[y1]
 
-        x3,y3,z3 = score_map(map3, threshold=0.1)
-        xmax3, ymax3 = line[x3], -line[y3]
+    x2,y2,z2 = score_map(map2, threshold=0.1)
+    xmax2, ymax2 = line[x2], -line[y2]
 
-        #Get the einstein radius
-        eR1 = find_eR(weights1, x1, y1, np.linspace(1,60,res))
-        eR2 = find_eR(weights2, x2, y2, np.linspace(1,60,res))
-        eR3 = find_eR(weights3, x3, y3, np.linspace(1,60,res))
+    x3,y3,z3 = score_map(map3, threshold=0.1)
+    xmax3, ymax3 = line[x3], -line[y3]
 
-        #We can ask the question, given the flexion of each source, what einstein radius would that source
-        #predict at the maximum?
-        #We can then plot this as a function of the einstein radius
-        '''
-        fig, ax = plt.subplots(1,3, figsize=(10,5), sharex=True, sharey=True)
-        
-        for i in range(Nsource):
-            F = np.sqrt(sources.f1[i]**2 + sources.f2[i]**2)
-            dist1 = np.sqrt((xs[i] - xmax1)**2 + (ys[i] - ymax1)**2)
-            dist2 = np.sqrt((xs[i] - xmax2)**2 + (ys[i] - ymax2)**2)
-            dist3 = np.sqrt((xs[i] - xmax3)**2 + (ys[i] - ymax3)**2)
+    #Get the einstein radius
+    eR1 = utils.find_eR(weights1, x1, y1, np.linspace(1,60,res))
+    eR2 = utils.find_eR(weights2, x2, y2, np.linspace(1,60,res))
+    eR3 = utils.find_eR(weights3, x3, y3, np.linspace(1,60,res))
 
-            predict1 = 2*dist1*np.abs(dist1) * F
-            predict2 = 2*dist2*np.abs(dist2) * F       
-            predict3 = 2*dist3*np.abs(dist3) * F
+    #We can ask the question, given the flexion of each source, what einstein radius would that source
+    #predict at the maximum?
+    #We can then plot this as a function of the einstein radius
+    '''
+    fig, ax = plt.subplots(1,3, figsize=(10,5), sharex=True, sharey=True)
+    
+    for i in range(Nsource):
+        F = np.sqrt(sources.f1[i]**2 + sources.f2[i]**2)
+        dist1 = np.sqrt((xs[i] - xmax1)**2 + (ys[i] - ymax1)**2)
+        dist2 = np.sqrt((xs[i] - xmax2)**2 + (ys[i] - ymax2)**2)
+        dist3 = np.sqrt((xs[i] - xmax3)**2 + (ys[i] - ymax3)**2)
 
-            ax[0].scatter(eR1, predict1, label='Source {}'.format(i))
-            ax[1].scatter(eR2, predict2, label='Source {}'.format(i))
-            ax[2].scatter(eR3, predict3, label='Source {}'.format(i))
+        predict1 = 2*dist1*np.abs(dist1) * F
+        predict2 = 2*dist2*np.abs(dist2) * F       
+        predict3 = 2*dist3*np.abs(dist3) * F
 
-        name = ['Shear', 'Flexion', 'Flexion + Shear']
-        for i in range(3):
-            ax[i].plot(np.linspace(0,20,100), np.linspace(0,20,100), label='1:1')
-            ax[i].set_xlabel(r'Located $\theta_E$')
-            ax[i].set_ylabel(r'Predicted $\theta_E$')
-            ax[i].legend()
-            ax[i].set_title(name[i])
-            ax[i].set_xlim([0,20])
-            ax[i].set_ylim([0,20])
-            ax[i].set_aspect('equal', adjustable='box')
+        ax[0].scatter(eR1, predict1, label='Source {}'.format(i))
+        ax[1].scatter(eR2, predict2, label='Source {}'.format(i))
+        ax[2].scatter(eR3, predict3, label='Source {}'.format(i))
 
-        '''
+    name = ['Shear', 'Flexion', 'Flexion + Shear']
+    for i in range(3):
+        ax[i].plot(np.linspace(0,20,100), np.linspace(0,20,100), label='1:1')
+        ax[i].set_xlabel(r'Located $\theta_E$')
+        ax[i].set_ylabel(r'Predicted $\theta_E$')
+        ax[i].legend()
+        ax[i].set_title(name[i])
+        ax[i].set_xlim([0,20])
+        ax[i].set_ylim([0,20])
+        ax[i].set_aspect('equal', adjustable='box')
 
-        #Plot the results
-        fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
-        fig.suptitle('Likelihood Maps \n 4 Sources \n Iteration {}'.format(n), fontsize=16)
+    '''
 
-        plots.plot_likelihood_map(ax[0],np.log10(map1+10**-10),lenses,sources,xmax1,ymax1,100*z1,eR1, size,'Shear')
-        plots.plot_likelihood_map(ax[1],np.log10(map2+10**-10),lenses,sources,xmax2,ymax2,100*z2,eR2, size,'Flexion')
-        plots.plot_likelihood_map(ax[2],np.log10(map3+10**-10),lenses,sources,xmax3,ymax3,100*z3,eR3, size,'Flexion + Shear')
+    #Plot the results
+    fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
+    fig.suptitle('Likelihood Maps \n 4 Sources \n Iteration {}'.format(n), fontsize=16)
 
-        #Shift the axes up a bit to remove whitespace
-        plt.subplots_adjust(top=1)
+    plots.plot_likelihood_map(ax[0],np.log10(map1+10**-10),lenses,sources,xmax1,ymax1,100*z1,eR1, size,'Shear')
+    plots.plot_likelihood_map(ax[1],np.log10(map2+10**-10),lenses,sources,xmax2,ymax2,100*z2,eR2, size,'Flexion')
+    plots.plot_likelihood_map(ax[2],np.log10(map3+10**-10),lenses,sources,xmax3,ymax3,100*z3,eR3, size,'Flexion + Shear')
 
-        plt.savefig('Images/tests/4_source_tests_{}.png'.format(n))
-        plt.close()
+    #Shift the axes up a bit to remove whitespace
+    plt.subplots_adjust(top=1)
 
-        end = time.time()
-        print('Iteration {} took {} seconds'.format(n, end-start))
+    plt.show()
+
+if __name__ == '__main__':
+    #Okay, so we're going to create a lensing field and track how the likelihood distribution 
+    #Changes with the addition of each source
+    #Lets start with a single lens and just four sources
+
+    size = 50
+    res = 100
+    Nlens = 1
+    Nsource = 100
+
+    #Create sources
+    xs, ys = make_sources(Nsource, size = size)
+    
+    #Create lens
+    xl = [0]
+    yl = [0]
+    eR = [5]
+    lenses = Lens(xl, yl, eR)
+
+    #Create sources
+    noise1 = 5*10**-4
+    noise2 = 5*10**-4
+
+    sources = Source(xs, ys, np.random.normal(0,noise1,Nsource), np.random.normal(0,noise1,Nsource), np.random.normal(0,noise2,Nsource), np.random.normal(0,noise2,Nsource))
+
+    sources.calc_shear(lenses)
+    sources.calc_flex(lenses)
+
+    weights1, weights2, weights3 = sources.weights(size)
+
+    map1 = utils.process_weights(weights1, np.linspace(1,60,res))
+    map2 = utils.process_weights(weights2, np.linspace(1,60,res))
+    map3 = utils.process_weights(weights3, np.linspace(1,60,res))
+
+    #Find maxima within the weightmaps, output their coordinates and scores
+    line = np.linspace(-size,size,res)
+
+    x1,y1,z1 = score_map(map1, threshold=0.1)
+    xmax1, ymax1 = line[x1], -line[y1]
+
+    x2,y2,z2 = score_map(map2, threshold=0.1)
+    xmax2, ymax2 = line[x2], -line[y2]
+
+    x3,y3,z3 = score_map(map3, threshold=0.1)
+    xmax3, ymax3 = line[x3], -line[y3]
+
+    #Get the einstein radius
+    eR1 = utils.find_eR(weights1, x1, y1, np.linspace(1,60,res))
+    eR2 = utils.find_eR(weights2, x2, y2, np.linspace(1,60,res))
+    eR3 = utils.find_eR(weights3, x3, y3, np.linspace(1,60,res))
+
+    #Plot the results
+    fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
+
+    plots.plot_likelihood_map(ax[0],np.log10(map1+10**-20),lenses,sources,xmax1,ymax1,10e4*z1,eR1, size,'Shear')
+    plots.plot_likelihood_map(ax[1],np.log10(map2+10**-20),lenses,sources,xmax2,ymax2,10e4*z2,eR2, size,'Flexion')
+    plots.plot_likelihood_map(ax[2],np.log10(map3+10**-20),lenses,sources,xmax3,ymax3,10e4*z3,eR3, size,'Flexion + Shear')
+
+    #Shift the axes up a bit to remove whitespace
+    plt.subplots_adjust(top=1)
+
+    plt.show()

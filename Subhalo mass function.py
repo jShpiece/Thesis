@@ -19,14 +19,6 @@ def stn_shear(eR, n, sigma, rmin, rmax):
 #Plotting
 mu = np.logspace(-5, -2, 1000)
 
-'''
-plt.plot(mu, cumulative_mass_function(mu))
-plt.xscale('log')
-plt.yscale('log')
-plt.xlabel(r'$\mu = M_{sub}/M_{host}$')
-plt.ylabel(r'$N(>\mu)$')
-'''
-
 #Let us now calculate the number of subhalos per mass bin
 #Take Abell 2744 as an example
 
@@ -83,6 +75,12 @@ stns = stn_shear(eR, n, sigma, rmin, rmax)
 
 plt.plot(eR, stnf, label='Flexion')
 plt.plot(eR, stns, label='Shear')
+#For each, read off the value of eR for which the signal to noise ratio is 1
+#This is the minimum value of eR for which we can detect a subhalo
+fmin = eR[np.argmin(np.abs(stnf - 1))]
+smin = eR[np.argmin(np.abs(stns - 1))]
+plt.text(fmin, 1.1, str(round(fmin, 3)))
+plt.text(smin, 1.1, str(round(smin, 3)))
 plt.xlabel('eR')
 plt.ylabel('Signal to noise ratio')
 plt.hlines(1, 0, 1, colors='r', linestyles='dashed')

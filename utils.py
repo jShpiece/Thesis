@@ -45,20 +45,19 @@ def makeGaussian(stamp, sigma):
     return f_g
 
 
-def process_weights(weights, eR_range, size):
+def process_weights(weights, eR_range):
     '''
     Take a likelihood map in 3D parameter space, integrate over the eR axis,
     and convolve with a gaussian kernel to smooth out the map. Then normalize
     the map and return it.
     '''
-    llmap = np.trapz(weights, eR_range[::-1], axis=0)
-    kernel = makeGaussian(size,2)
+    res = len(eR_range)
+    llmap = np.trapz(weights, eR_range, axis=0)
+    kernel = makeGaussian(res,2)
     llmap = convolver(llmap,kernel)
-    llmap = np.abs(llmap)
-    llmap /= np.sum(llmap)
+    #llmap /= np.sum(llmap)
 
     return llmap
-
 
 def find_eR(map, x, y, eR_range):
     '''
@@ -66,16 +65,19 @@ def find_eR(map, x, y, eR_range):
     at each maxima.
     '''
     eR = []
-    #plt.figure()
-
     for i in range(len(x)):
         possible_eR = map[:,y[i],x[i]]
         eR.append(eR_range[np.argmax(possible_eR)])
-
-        #plt.plot(eR_range,possible_eR)
-    #plt.yscale('log')
-    #plt.xlabel('eR')
-    #plt.ylabel('Likelihood')
-    #plt.show()
-
     return eR
+
+def stn_flexion(eR, n, sigma, rmin, rmax):
+    #This function calculates the signal to noise ratio of the flexion signal
+    term1 = eR * np.sqrt(np.pi * n) / (sigma * rmin)
+    term2 = np.log(rmax / rmin) / np.sqrt(rmax**2 / rmin**2 - 1)
+    return term1 * term2
+
+def stn_shear(eR, n, sigma, rmin, rmax):
+    #This function calculates the signal to noise ratio of the shear signal
+    term1 = eR * np.sqrt(np.pi * n) / (sigma)
+    term2 = (1 - rmin/rmax) / np.sqrt(1 - (rmin/rmax)**2)
+    return term1 * term2

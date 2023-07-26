@@ -63,8 +63,8 @@ class Source:
         phiF = np.arctan2(F2,F1) + np.pi
         gamma = np.sqrt(gamma1**2 + gamma2**2)
         phi_gamma = np.arctan2(gamma2,gamma1) / 2 + np.pi
-        weights1 = np.ones((res,res,res))
-        weights2 = np.ones((res,res,res))
+        weights1 = np.zeros((res,res,res))
+        weights2 = np.zeros((res,res,res))
         eR_range = np.linspace(eRmin + 0.2, eRmax,res)
 
         for n in range(len(xs)):
@@ -78,15 +78,24 @@ class Source:
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
 
             if np.sum(shear_contribution) > 0:
-                #Multiply the weights by the contribution from the nth lens and normalize
-                weights1 *= shear_contribution
+                #Multiply the weights by the contribution from the nth lens 
+                #Do this in log space to avoid numerical errors
+                weights1 += np.log(shear_contribution)
 
             if np.sum(flexion_contribution) > 0:
-                #Multiply the weights by the contribution from the nth lens and normalize
-                weights2 *= flexion_contribution
+                #Multiply the weights by the contribution from the nth lens 
+                #Do this in log space to avoid numerical errors
+                weights2 += np.log(flexion_contribution)
         
+        #Shift back to linear space
+        weights1 = np.exp(weights1)
+        weights2 = np.exp(weights2)
 
+        #By construction, weights1 and weights2 are normalized
+        weights1 /= np.sum(weights1)
+        weights2 /= np.sum(weights2)
         weights3 = weights1 * weights2 # Combine the weights from the shear and flexion
+        weights3 /= np.sum(weights3) # Normalize the weights )
 
         return weights1, weights2, weights3
 
