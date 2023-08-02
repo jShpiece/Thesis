@@ -63,8 +63,8 @@ class Source:
         phiF = np.arctan2(F2,F1) + np.pi
         gamma = np.sqrt(gamma1**2 + gamma2**2)
         phi_gamma = np.arctan2(gamma2,gamma1) / 2 + np.pi
-        weights1 = np.zeros((res,res,res))
-        weights2 = np.zeros((res,res,res))
+        weights1 = np.ones((res,res,res))
+        weights2 = np.ones((res,res,res))
         eR_range = np.linspace(eRmin + 0.2, eRmax,res)
 
         for n in range(len(xs)):
@@ -78,25 +78,18 @@ class Source:
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
 
             if np.sum(shear_contribution) > 0:
-                #Multiply the weights by the contribution from the nth lens 
-                #Do this in log space to avoid numerical errors
-                weights1 += np.log(shear_contribution)
+                weights1 = update_bayesian_posterior(weights1, shear_contribution, weights1)
 
             if np.sum(flexion_contribution) > 0:
-                #Multiply the weights by the contribution from the nth lens 
-                #Do this in log space to avoid numerical errors
-                weights2 += np.log(flexion_contribution)
+                weights2 = update_bayesian_posterior(weights2, flexion_contribution, weights2)
         
-        #Shift back to linear space
-        weights1 = np.exp(weights1)
-        weights2 = np.exp(weights2)
-
-        #By construction, weights1 and weights2 are normalized
+        #Normalize the weights
         weights1 /= np.sum(weights1)
         weights2 /= np.sum(weights2)
-        weights3 = weights1 * weights2 # Combine the weights from the shear and flexion
-        weights3 /= np.sum(weights3) # Normalize the weights )
 
+        weights3 = weights1 * weights2
+        weights3 /= np.sum(weights3)
+        
         return weights1, weights2, weights3
 
 
@@ -134,9 +127,6 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
     if signal_type == 'flexion':
         integrand = flexion_integrand
         filter = np.exp(-r / 20) 
-        #filter = 1
-        #Set weights to zero outside of the filter
-        #filter = np.where(r < 20, 1, 0)
         coefficient = 2 * filter * r**2 / np.abs(np.cos(phi)) 
     elif signal_type == 'shear':
         integrand = shear_integrand
@@ -148,13 +138,38 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
             denominator += 1e-10  # Prevent divide by zero errors
 
     numerator = integrand(eR[:, None, None], signal, r, sigma, phi)
-    unnormalized_weights = coefficient * numerator / denominator + 10 ** -5  # Prevent divide by zero errors
-
-    weights = np.where(np.sum(unnormalized_weights) == 0, np.ones((res,res,res)), unnormalized_weights / np.sum(unnormalized_weights))
-    #anywhere weights are zero, set them to 1
-    #weights = np.where(weights == 0, 1, weights)
+    weights = coefficient * numerator / denominator + 10 ** -5  # Prevent divide by zero errors
 
     return weights
+
+
+def update_bayesian_posterior(posterior, likelihood, prior):
+    """
+    Updates the posterior distribution using Bayes' theorem.
+
+    Parameters:
+        posterior (numpy array): The current posterior distribution.
+        likelihood (numpy array): The likelihood distribution for the current iteration.
+        prior (numpy array): The prior distribution for the current iteration.
+
+    Returns:
+        updated_posterior (numpy array): The updated posterior distribution.
+    """
+    # Ensure the likelihood and prior are normalized
+    normalized_likelihood = likelihood / np.sum(likelihood)
+    normalized_prior = prior / np.sum(prior)
+
+    # Compute the numerator of Bayes' theorem: likelihood * prior
+    numerator = normalized_likelihood * normalized_prior
+
+    # Compute the denominator (evidence) by summing over the numerator
+    evidence = np.sum(numerator)
+
+    # Compute the updated posterior by dividing the numerator by the evidence
+    updated_posterior = numerator / evidence
+
+    return updated_posterior
+
 
 
 def score_map(colormap, threshold=0.1):

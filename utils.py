@@ -53,11 +53,11 @@ def process_weights(weights, eR_range):
     '''
     res = len(eR_range)
     llmap = np.trapz(weights, eR_range, axis=0)
-    kernel = makeGaussian(res,2)
-    llmap = convolver(llmap,kernel)
+    llmap = convolver(llmap, makeGaussian(res, 2))
     #llmap /= np.sum(llmap)
 
     return llmap
+
 
 def find_eR(map, x, y, eR_range):
     '''
@@ -70,11 +70,13 @@ def find_eR(map, x, y, eR_range):
         eR.append(eR_range[np.argmax(possible_eR)])
     return eR
 
+
 def stn_flexion(eR, n, sigma, rmin, rmax):
     #This function calculates the signal to noise ratio of the flexion signal
     term1 = eR * np.sqrt(np.pi * n) / (sigma * rmin)
     term2 = np.log(rmax / rmin) / np.sqrt(rmax**2 / rmin**2 - 1)
     return term1 * term2
+
 
 def stn_shear(eR, n, sigma, rmin, rmax):
     #This function calculates the signal to noise ratio of the shear signal

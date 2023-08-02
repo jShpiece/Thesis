@@ -172,7 +172,7 @@ def plot_likelihood_map(axes,map,lenses,sources,xmax,ymax,zmax,eR,scale,title,le
     if sources == None:
         pass
     else:
-        axes.scatter(sources.x,sources.y,marker='x',color='k', alpha=0.5, linewidth=2, label='Sources')
+        axes.scatter(sources.x,sources.y,marker='x',color='k', alpha=0.25, linewidth=2, label='Sources')
 
     if lenses == None:
         pass
