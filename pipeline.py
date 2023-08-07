@@ -63,8 +63,8 @@ class Source:
         phiF = np.arctan2(F2,F1) + np.pi
         gamma = np.sqrt(gamma1**2 + gamma2**2)
         phi_gamma = np.arctan2(gamma2,gamma1) / 2 + np.pi
-        weights1 = np.ones((res,res,res))
-        weights2 = np.ones((res,res,res))
+        weights1 = np.zeros((res,res,res))
+        weights2 = np.zeros((res,res,res))
         eR_range = np.linspace(eRmin + 0.2, eRmax,res)
 
         for n in range(len(xs)):
@@ -78,11 +78,15 @@ class Source:
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
 
             if np.sum(shear_contribution) > 0:
-                weights1 = update_bayesian_posterior(weights1, shear_contribution, weights1)
+                #weights1 = update_bayesian_posterior(weights1, shear_contribution, weights1)
+                weights1 += np.log(shear_contribution)
 
             if np.sum(flexion_contribution) > 0:
-                weights2 = update_bayesian_posterior(weights2, flexion_contribution, weights2)
-        
+                #weights2 = update_bayesian_posterior(weights2, flexion_contribution, weights2)
+                weights2 += np.log(flexion_contribution)
+        #Return to linear space
+        weights1 = np.exp(weights1)
+        weights2 = np.exp(weights2)
         #Normalize the weights
         weights1 /= np.sum(weights1)
         weights2 /= np.sum(weights2)
@@ -90,7 +94,7 @@ class Source:
         weights3 = weights1 * weights2
         weights3 /= np.sum(weights3)
         
-        return weights1, weights2, weights3
+        return [weights1, weights2, weights3]
 
 
 class Lens:
@@ -143,36 +147,7 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
     return weights
 
 
-def update_bayesian_posterior(posterior, likelihood, prior):
-    """
-    Updates the posterior distribution using Bayes' theorem.
-
-    Parameters:
-        posterior (numpy array): The current posterior distribution.
-        likelihood (numpy array): The likelihood distribution for the current iteration.
-        prior (numpy array): The prior distribution for the current iteration.
-
-    Returns:
-        updated_posterior (numpy array): The updated posterior distribution.
-    """
-    # Ensure the likelihood and prior are normalized
-    normalized_likelihood = likelihood / np.sum(likelihood)
-    normalized_prior = prior / np.sum(prior)
-
-    # Compute the numerator of Bayes' theorem: likelihood * prior
-    numerator = normalized_likelihood * normalized_prior
-
-    # Compute the denominator (evidence) by summing over the numerator
-    evidence = np.sum(numerator)
-
-    # Compute the updated posterior by dividing the numerator by the evidence
-    updated_posterior = numerator / evidence
-
-    return updated_posterior
-
-
-
-def score_map(colormap, threshold=0.1):
+def score_map(maps, threshold=0.1):
     '''
     This function takes in a colormap and returns the locations of the peaks in the colormap
     as well as the scores associated with each peak. It also takes in a threshold value, which
@@ -181,35 +156,39 @@ def score_map(colormap, threshold=0.1):
     the locations of the peaks and the scores associated with each peak that are above the minimum
     score threshold.
     '''
+    coords = []
+    for i in range(len(maps)):
+        colormap = maps[i]
+        # Step 1: Identify local maxima
+        local_maxima = np.zeros_like(colormap, dtype=bool)
+        local_maxima[(colormap >= np.roll(colormap, 1, axis=0)) &
+                    (colormap >= np.roll(colormap, -1, axis=0)) &
+                    (colormap >= np.roll(colormap, 1, axis=1)) &
+                    (colormap >= np.roll(colormap, -1, axis=1))] = True
 
-    # Step 1: Identify local maxima
-    local_maxima = np.zeros_like(colormap, dtype=bool)
-    local_maxima[(colormap >= np.roll(colormap, 1, axis=0)) &
-                (colormap >= np.roll(colormap, -1, axis=0)) &
-                (colormap >= np.roll(colormap, 1, axis=1)) &
-                (colormap >= np.roll(colormap, -1, axis=1))] = True
+        # Step 2: Determine the width of regions
+        widths = np.zeros_like(colormap)
+        for i, j in np.transpose(np.where(local_maxima)):
+            peak_value = colormap[i, j]
+            contour = np.where(colormap >= threshold * peak_value)
+            distances = np.sqrt((contour[0] - i)**2 + (contour[1] - j)**2)
+            widths[i, j] = np.max(distances)
 
-    # Step 2: Determine the width of regions
-    widths = np.zeros_like(colormap)
-    for i, j in np.transpose(np.where(local_maxima)):
-        peak_value = colormap[i, j]
-        contour = np.where(colormap >= threshold * peak_value)
-        distances = np.sqrt((contour[0] - i)**2 + (contour[1] - j)**2)
-        widths[i, j] = np.max(distances)
+        # Step 3: Rank the locations
+        scores = colormap * widths
 
-    # Step 3: Rank the locations
-    scores = colormap * widths
+        # Set the minimum score threshold
+        score_threshold = np.max(scores) * 0.5
 
-    # Set the minimum score threshold
-    score_threshold = np.max(scores) * 0.5
+        relevant_locations = np.transpose(np.where(scores >= score_threshold))
 
-    relevant_locations = np.transpose(np.where(scores >= score_threshold))
+        #Unpack the relevant locations
+        yloc = relevant_locations[:,0]
+        xloc = relevant_locations[:,1]
 
-    #Unpack the relevant locations
-    yloc = relevant_locations[:,0]
-    xloc = relevant_locations[:,1]
+        #Get the scores associated with each location
+        scores = scores[yloc,xloc]
+    
+        coords.append([xloc, yloc, scores])
 
-    #Get the scores associated with each location
-    scores = scores[yloc,xloc]
-
-    return xloc, yloc, scores
+    return coords

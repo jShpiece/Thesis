@@ -52,23 +52,29 @@ def process_weights(weights, eR_range):
     the map and return it.
     '''
     res = len(eR_range)
-    llmap = np.trapz(weights, eR_range, axis=0)
-    llmap = convolver(llmap, makeGaussian(res, 2))
-    #llmap /= np.sum(llmap)
+    maps = []
+    for i in range(len(weights)):
+        llmap = np.trapz(weights[i], eR_range, axis=0)
+        llmap = convolver(llmap, makeGaussian(res, 2))
+        maps.append(llmap)
+    return maps
 
-    return llmap
 
-
-def find_eR(map, x, y, eR_range):
+def find_eR(maps, coords):
     '''
     Take a likelihood map in 3D parameter space and return the eR value
     at each maxima.
     '''
-    eR = []
-    for i in range(len(x)):
-        possible_eR = map[:,y[i],x[i]]
-        eR.append(eR_range[np.argmax(possible_eR)])
-    return eR
+    output = []
+    for i in range(len(maps)):
+        eR = []
+        x = coords[i][0]
+        y = coords[i][1]
+        for j in range(len(x)):
+            possible_eR = maps[i][:,y[j],x[j]]
+            eR.append(np.argmax(possible_eR, axis=0))
+        output.append(eR)
+    return output
 
 
 def stn_flexion(eR, n, sigma, rmin, rmax):
@@ -83,3 +89,20 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     term1 = eR * np.sqrt(np.pi * n) / (sigma)
     term2 = (1 - rmin/rmax) / np.sqrt(1 - (rmin/rmax)**2)
     return term1 * term2
+
+def gradient_respecting_bounds(bounds, fun, eps=1e-8):
+    '''This function takes in a function and returns the gradient of that function
+    It is used to correct the bounds being used in SCIPY minimization functions, 
+    because otherwise the minimization function will sometimes try to evaluate the
+    function outside of the bounds, which causes an error.'''
+    
+    """bounds: list of tuples (lower, upper)"""
+    def gradient(x):
+        fx = fun(x)
+        grad = np.zeros(len(x))
+        for k in range(len(x)):
+            d = np.zeros(len(x))
+            d[k] = eps if x[k] + eps <= bounds[k][1] else -eps
+            grad[k] = (fun(x + d) - fx) / d[k]
+        return grad
+    return gradient
