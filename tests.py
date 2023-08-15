@@ -131,48 +131,6 @@ def make_lensing_field(Nlens, Nsource = 0, size = 50, Noise = True, centered = F
     return lenses, sources
 
 
-def create_test_set(Nlens, Nsource, Noise = True, centered = True, size = 50):
-    #Generate a test set of lenses and sources
-    #Return the weights for each weighting scheme and the coordinates of the maxima
-
-    #Note: here 1,2,3 correspond to shear, flexion, and shear + flexion respectively
-    lenses,sources = make_lensing_field(Nlens, Nsource, size = size, Noise = Noise, centered = centered)
-
-    weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-2)
-    weights = [weights1, weights2, weights3]
-
-    eR_range = np.linspace(1,60,size)
-
-    map1 = process_weights(weights1, eR_range, size)
-    map2 = process_weights(weights2, eR_range, size)
-    map3 = process_weights(weights3, eR_range, size)
-
-    maps = [map1, map2, map3]
-
-    #Find maxima within the weightmaps, output their coordinates and scores
-    line = np.linspace(-size,size,size)
-
-    x1,y1,z1 = score_map(maps[0], threshold=0.5)
-    xmax1, ymax1 = line[x1], -line[y1]
-
-    x2,y2,z2 = score_map(maps[1], threshold=0.5)
-    xmax2, ymax2 = line[x2], -line[y2]
-
-    x3,y3,z3 = score_map(maps[2], threshold=0.5)
-    xmax3, ymax3 = line[x3], -line[y3]
-
-    maxima = [[xmax1, ymax1], [xmax2, ymax2], [xmax3, ymax3]]
-    strengths = [z1, z2, z3]
-
-    #Next, find the einstein radius associated with each maxima
-
-    eR1 = find_eR(weights[0], x1, y1, eR_range)
-    eR2 = find_eR(weights[1], x2, y2, eR_range)
-    eR3 = find_eR(weights[2], x3, y3, eR_range)
-
-    eR = [eR1, eR2, eR3]
-
-    return maps, lenses, sources, maxima, strengths, eR
 
 
 def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1, Nsource = 100):
@@ -279,329 +237,16 @@ def run_random_realization(Ntrials, size = 100):
     plt.savefig('Images/rr/N_{}.png'.format(Ntrials))
 
 
-def run_a2744():
-    #File is formatted as follows
-    #ID,NAME,z,ra,dec,x ,y,xc,yc,a,f1,f2,g1,g2,xs,ys
-    file = 'a2744_updated.csv'
-    data = np.genfromtxt(file, delimiter=',', skip_header=1)
-    x = data[:,5]
-    y = data[:,6]
-    f1 = data[:,10]
-    f2 = data[:,11]
-    g1 = data[:,12]
-    g2 = data[:,13]
-
-    #To compute the size, lets take the largest separation between two sources
-    #And add 10% to it
-    size = int(1.1 * np.max(np.sqrt((x[:,np.newaxis] - x)**2 + (y[:,np.newaxis] - y)**2)))
-
-    #Create the sources
-    sources = Source(x, y, g1, g2, f1, f2)
-
-    #Compute the weights
-    weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
-    #Process weights
-    map1 = process_weights(weights1, np.linspace(1,60,size), size)
-    map2 = process_weights(weights2, np.linspace(1,60,size), size)
-    map3 = process_weights(weights3, np.linspace(1,60,size), size)
-    
-    np.save('Data/a2744_weights.npy', [weights1, weights2, weights3])
-    #weights1, weights2, weights3 = np.load('a2744_weights.npy', allow_pickle=True)
-    
-    #Find maxima within the weightmaps, output their coordinates and scores
-    line = np.linspace(0,size,100)
-
-    x1,y1,z1 = score_map(map1, threshold=0.5, N = 3)
-    xmax1, ymax1 = line[x1], -line[y1]
-
-    x2,y2,z2 = score_map(map2, threshold=0.5, N = 3)
-    xmax2, ymax2 = line[x2], -line[y2]
-
-    x3,y3,z3 = score_map(map3, threshold=0.5, N = 3)
-    xmax3, ymax3 = line[x3], -line[y3]
-
-    #Get the einstein radius
-    eR1 = find_eR(weights1, x1, y1, np.linspace(1,60,size))
-    eR2 = find_eR(weights2, x2, y2, np.linspace(1,60,size))
-    eR3 = find_eR(weights3, x3, y3, np.linspace(1,60,size))
-
-    #Plot the results
-    fig, ax = plt.subplots(1,3, figsize=(10,5), sharex=True, sharey=True)
-    fig.suptitle('A2744', fontsize=16)
-
-    plots.plot_likelihood_map(ax[0],np.log10(map1+10**-10),None,None,xmax1,ymax1,100*z1,eR1,size,'Shear')
-    plots.plot_likelihood_map(ax[1],np.log10(map2+10**-10),None,None,xmax2,ymax2,100*z2,eR2,size,'Flexion')
-    plots.plot_likelihood_map(ax[2],np.log10(map3+10**-10),None,None,xmax3,ymax3,100*z3,eR3,size,'Flexion + Shear')
-
-    plt.savefig('Images/a2744.png')
-
-
-def create_varied_tests():
-    size = 50
-    Nlens = [1,2]
-    #Create lens
-    xl = [20,-20]
-    yl = [0,0]
-    eR = [5,5]
-
-    #Vary this by number of sources
-    Nsources = [1,2,3,4,5,6,7,8,9,10,20,30,40,50,100,200]
-    xs, ys = make_sources(Nsources[-1], size = size)
-
-    noise = [True, False]
-
-    for Nsource in Nsources:
-        source_x = xs[:Nsource]
-        source_y = ys[:Nsource]
-        for Nlen in Nlens:
-            lenses = Lens(xl[:Nlen], yl[:Nlen], eR[:Nlen])
-            for n in noise:
-                if n:
-                    sources = Source(source_x, source_y, np.random.normal(0,sigma_g,Nsource), np.random.normal(0,sigma_g,Nsource), np.random.normal(0,sigma_f,Nsource), np.random.normal(0,sigma_f,Nsource))
-                else:
-                    sources = Source(source_x, source_y, np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
-
-                sources.calc_shear(lenses)
-                sources.calc_flex(lenses)
-
-                weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
-
-                map1 = process_weights(weights1, np.linspace(1,60,size), size)
-                map2 = process_weights(weights2, np.linspace(1,60,size), size)
-                map3 = process_weights(weights3, np.linspace(1,60,size), size)
-
-                #Find maxima within the weightmaps, output their coordinates and scores
-                line = np.linspace(-size,size,size)
-
-                x1,y1,z1 = score_map(map1, threshold=0.5)
-                xmax1, ymax1 = line[x1], -line[y1]
-
-                x2,y2,z2 = score_map(map2, threshold=0.5)
-                xmax2, ymax2 = line[x2], -line[y2]
-
-                x3,y3,z3 = score_map(map3, threshold=0.5)
-                xmax3, ymax3 = line[x3], -line[y3]
-
-                #Get the einstein radius
-                eR1 = find_eR(weights1, x1, y1, np.linspace(1,60,size))
-                eR2 = find_eR(weights2, x2, y2, np.linspace(1,60,size))
-                eR3 = find_eR(weights3, x3, y3, np.linspace(1,60,size))
-
-                #Plot the results
-                fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
-                fig.suptitle('Likelihood Maps \n Nlens = {}, Nsource = {} \n Noise = {}'.format(Nlen, Nsource, n), fontsize=16)
-
-                plots.plot_likelihood_map(ax[0],np.log10(map1+10**-20),lenses,sources,xmax1,ymax1,100*z1,eR1, size,'Shear')
-                plots.plot_likelihood_map(ax[1],np.log10(map2+10**-20),lenses,sources,xmax2,ymax2,100*z2,eR2, size,'Flexion')
-                plots.plot_likelihood_map(ax[2],np.log10(map3+10**-20),lenses,sources,xmax3,ymax3,100*z3,eR3, size,'Flexion + Shear')
-
-                #Shift the axes up a bit to remove whitespace
-                plt.subplots_adjust(top=1)
-
-                plt.savefig('Images/tests/{}_map_lens_{}_source_{}.png'.format('noiseless' if n == False else 'noisy', Nlen, Nsource))
-                plt.close()
-
-        print('Done with {} sources'.format(Nsource))
-
-
-def fewsourcetest():
-    #Create a very simple lensing field
-
-    size = 50
-    res = 100
-    Nlens = 1
-    Nsource = 4
-
-    #Create lens
-    xl = [0]
-    yl = [0]
-    eR = [5]
-    lenses = Lens(xl, yl, eR)
-
-    #Create sources
-    xs = np.array([20, 20, -20, -20])
-    ys = np.array([20, -20, 20, -20])
-    noise1 = 5*10**-4
-    noise2 = 5*10**-4
-
-
-    sources = Source(xs, ys, np.random.normal(0,noise1,Nsource), np.random.normal(0,noise1,Nsource), np.random.normal(0,noise2,Nsource), np.random.normal(0,noise2,Nsource))
-
-    sources.calc_shear(lenses)
-    sources.calc_flex(lenses)
-
-    weights1, weights2, weights3 = sources.weights(size)
-
-    map1 = utils.process_weights(weights1, np.linspace(1,60,res), res)
-    map2 = utils.process_weights(weights2, np.linspace(1,60,res), res)
-    map3 = utils.process_weights(weights3, np.linspace(1,60,res), res)
-
-    #Find maxima within the weightmaps, output their coordinates and scores
-    line = np.linspace(-size,size,res)
-
-    x1,y1,z1 = score_map(map1, threshold=0.1)
-    xmax1, ymax1 = line[x1], -line[y1]
-
-    x2,y2,z2 = score_map(map2, threshold=0.1)
-    xmax2, ymax2 = line[x2], -line[y2]
-
-    x3,y3,z3 = score_map(map3, threshold=0.1)
-    xmax3, ymax3 = line[x3], -line[y3]
-
-    #Get the einstein radius
-    eR1 = utils.find_eR(weights1, x1, y1, np.linspace(1,60,res))
-    eR2 = utils.find_eR(weights2, x2, y2, np.linspace(1,60,res))
-    eR3 = utils.find_eR(weights3, x3, y3, np.linspace(1,60,res))
-
-    #We can ask the question, given the flexion of each source, what einstein radius would that source
-    #predict at the maximum?
-    #We can then plot this as a function of the einstein radius
-    '''
-    fig, ax = plt.subplots(1,3, figsize=(10,5), sharex=True, sharey=True)
-    
-    for i in range(Nsource):
-        F = np.sqrt(sources.f1[i]**2 + sources.f2[i]**2)
-        dist1 = np.sqrt((xs[i] - xmax1)**2 + (ys[i] - ymax1)**2)
-        dist2 = np.sqrt((xs[i] - xmax2)**2 + (ys[i] - ymax2)**2)
-        dist3 = np.sqrt((xs[i] - xmax3)**2 + (ys[i] - ymax3)**2)
-
-        predict1 = 2*dist1*np.abs(dist1) * F
-        predict2 = 2*dist2*np.abs(dist2) * F       
-        predict3 = 2*dist3*np.abs(dist3) * F
-
-        ax[0].scatter(eR1, predict1, label='Source {}'.format(i))
-        ax[1].scatter(eR2, predict2, label='Source {}'.format(i))
-        ax[2].scatter(eR3, predict3, label='Source {}'.format(i))
-
-    name = ['Shear', 'Flexion', 'Flexion + Shear']
-    for i in range(3):
-        ax[i].plot(np.linspace(0,20,100), np.linspace(0,20,100), label='1:1')
-        ax[i].set_xlabel(r'Located $\theta_E$')
-        ax[i].set_ylabel(r'Predicted $\theta_E$')
-        ax[i].legend()
-        ax[i].set_title(name[i])
-        ax[i].set_xlim([0,20])
-        ax[i].set_ylim([0,20])
-        ax[i].set_aspect('equal', adjustable='box')
-
-    '''
-
-    #Plot the results
-    fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
-    fig.suptitle('Likelihood Maps \n 4 Sources \n Iteration {}'.format(n), fontsize=16)
-
-    plots.plot_likelihood_map(ax[0],np.log10(map1+10**-10),lenses,sources,xmax1,ymax1,100*z1,eR1, size,'Shear')
-    plots.plot_likelihood_map(ax[1],np.log10(map2+10**-10),lenses,sources,xmax2,ymax2,100*z2,eR2, size,'Flexion')
-    plots.plot_likelihood_map(ax[2],np.log10(map3+10**-10),lenses,sources,xmax3,ymax3,100*z3,eR3, size,'Flexion + Shear')
-
-    #Shift the axes up a bit to remove whitespace
-    plt.subplots_adjust(top=1)
-
-    plt.show()
-
-
-def simple_minimization():
-    '''Lets start at the 'true' value in our parameter space and perform a minimization around that value'''
-    size = 50
-    res = 100
-    Nsource = 4
-
-    #Create lens
-    xl = [0]
-    yl = [0]
-    eR = [5]
-    lenses = Lens(xl, yl, eR)
-
-    #Create sources
-    xs = np.array([20, 20, -20, -20])
-    ys = np.array([20, -20, 20, -20])
-    noise1 = 5*10**-4
-    noise2 = 5*10**-4
-
-    sources = Source(xs, ys, np.random.normal(0,noise1,Nsource), np.random.normal(0,noise1,Nsource), np.random.normal(0,noise2,Nsource), np.random.normal(0,noise2,Nsource))
-
-    sources.calc_shear(lenses)
-    sources.calc_flex(lenses)
-
-    weights1, weights2, weights3 = sources.weights(size,sigma_f=10**-2,sigma_g=10**-3)
-
-    map1 = utils.process_weights(weights1, np.linspace(1,60,res))
-    map2 = utils.process_weights(weights2, np.linspace(1,60,res))
-    #map3 = utils.process_weights(weights3, np.linspace(1,60,res))
-
-    #Locate the true position of the lens
-    line = np.linspace(-size,size,res)
-    eR_range = np.linspace(1,60,res)
-    lens_coords = np.argmin(np.sqrt((line - xl[0])**2 + (line - yl[0])**2))
-    eR_coords = np.argmin(np.abs(eR_range - eR[0]))
-    true_lens_loc = [eR_coords, lens_coords, lens_coords]
-
-    #Starting at the true value, lets perform a minimization
-    #We'll use the Nelder-Mead method
-    #We'll start with the shear weighting scheme
-    #We'll use the true value of the lens as the initial guess
-
-    #First, we need to define the function we want to minimize
-    def func(x):
-        #x is a list containing the coordinates of the lens
-        #We want to return the value of the map at those coordinates
-        return -weights1[int(x[0]), int(x[1]), int(x[2])]
-    
-    #Now, we need to define the bounds of the search space
-    bounds = [(0, res-1), (0, res-1), (0, res-1)]
-
-    #Now, we can perform the minimization
-    result = minimize(func, true_lens_loc, method='Nelder-Mead', bounds=bounds)
-    located_coords = result.x
-
-    #Now, we can plot the results
-    fig, ax = plt.subplots(1,2, figsize=(10,5), sharex=True, sharey=True)
-    fig.suptitle('Minimization Results', fontsize=16)
-
-    ax[0].imshow(np.log10(map1+10**-10), cmap = 'gray', extent=[-size,size,-size,size])
-    ax[0].scatter(xs, ys, color='red', marker='x', label='Sources')
-    ax[0].scatter(xl, yl, color='blue', marker='x', label='True Lens: eR = {}'.format(eR[0]))
-    ax[0].scatter(line[int(located_coords[1])], -line[int(located_coords[2])], color='green', marker='x', 
-                  label='Located Lens - Via Minimization: eR = {}'.format(np.round(eR_range[int(located_coords[0])],2)))
-    ax[0].set_title('Shear')
-    ax[0].legend()
-
-    def func(x):
-        #x is a list containing the coordinates of the lens
-        #We want to return the value of the map at those coordinates
-        return -weights2[int(x[0]), int(x[1]), int(x[2])]
-    
-    #Now, we can perform the minimization
-    result = minimize(func, true_lens_loc, method='Nelder-Mead', bounds=bounds)
-    located_coords = result.x
-
-    ax[1].imshow(np.log10(map2+10**-10), cmap = 'gray', extent=[-size,size,-size,size])
-    ax[1].scatter(xs, ys, color='red', marker='x', label='Sources')
-    ax[1].scatter(xl, yl, color='blue', marker='x', label='True Lens: eR = {}'.format(eR[0]))
-    ax[1].scatter(line[int(located_coords[1])], -line[int(located_coords[2])], color='green', marker='x', 
-                  label='Located Lens - Via Minimization: eR = {}'.format(np.round(eR_range[int(located_coords[0])],2)))
-    ax[1].set_title('Flexion')
-    ax[1].legend()
-
-
-    plt.show()
-
-
-if __name__ == '__main__':
-    #Okay, so we're going to create a lensing field and track how the likelihood distribution 
-    #Changes with the addition of each source
-    #Lets start with a single lens and just four sources
-
+def flexion_noise_test(Ntrials):
+    #Look at how the choice of input noise and estimated noise affects the results
     size = 50
     res = size*2
-    Nlens = 1
-    Nsource = 60
-    line = np.linspace(-size,size,res)
+    Nsource = 4
 
     #Create sources as float64 arrays
-    xs, ys = make_sources(Nsource, size = size)
-    #xs = np.array([20, 20, -20, -20])
-    #ys = np.array([20, -20, 20, -20])
+    #xs, ys = make_sources(Nsource, size = size)
+    xs = np.array([20, 20, -20, -20])
+    ys = np.array([20, -20, 20, -20])
     #Change the data type to float64 if it isn't already
     xs = xs.astype(np.float64)
     ys = ys.astype(np.float64)
@@ -610,92 +255,215 @@ if __name__ == '__main__':
     xl = [0]
     yl = [0]
     eR = [5]
-    eR_range = np.linspace(1,60,res)
 
     lenses = Lens(xl, yl, eR)
 
-    #Create sources
-    noise1 = 10**-4 #Noise in shear
-    noise2 = 10**-4 #Noise in flexion
+    #Input noise
+    noise_input = np.logspace(-5,-1,Ntrials)
+    #Estimated noise
+    noise_est = np.logspace(-5,-1,Ntrials)
 
-    #Create Source object and compute lensing signals
-    sources = Source(xs, ys, np.random.normal(0,noise1,Nsource), np.random.normal(0,noise1,Nsource), np.random.normal(0,noise2,Nsource), np.random.normal(0,noise2,Nsource))
-    sources.calc_shear(lenses)
+    output = np.zeros((Ntrials,Ntrials))
+    for i in range(Ntrials):
+        for j in range(Ntrials):
+            sigma = np.exp(np.log(noise_input[i]))
+            sources = Source(xs,ys,np.random.normal(0,sigma,Nsource), np.random.normal(0,sigma,Nsource), np.random.normal(0,sigma,Nsource), np.random.normal(0,sigma,Nsource))
+            sources.calc_flex(lenses)
+
+            noise = np.exp(np.log(noise_est[j]))
+            weights = sources.weights(size,sigma_f=noise,sigma_g=noise, eRmin=1, eRmax=60)
+            weights = [weights[1]] #Only look at flexion
+            maps = utils.process_weights(weights, np.linspace(1,60,res))
+
+            #Locate maxima and get the einstein radius
+            max_coords = score_map(maps, threshold=0.5)
+            eR_coords = utils.find_eR(weights, max_coords)
+
+            max_index = np.argmax(max_coords[0][2])
+            output[i,j] = np.round(eR_coords[0][max_index],2)
+    
+    #Plot the results
+    fig, ax = plt.subplots(1,1, figsize=(10,10), sharex=True, sharey=True)
+    fig.suptitle('Flexion Noise Test', fontsize=16)
+
+    im = ax.imshow(output, cmap='viridis', origin='lower', extent=[-1, -5, -1, -5])
+    fig.colorbar(im, ax=ax)
+    ax.set_xlabel('Input Noise (log scale)')
+    ax.set_ylabel('Estimated Noise (log scale)')
+    ax.set_title('Einstein Radius')
+    plt.show()
+
+
+if __name__ == '__main__':
+    start = time.time()
+    size = 50
+    res = size*2
+    Nsource = 4
+    Nlens = 1
+
+    line = np.linspace(-size,size,res)
+    eR_range = np.linspace(1,60,res)
+
+    xs = np.array([20, 20, -20, -20])
+    ys = np.array([20, -20, 20, -20])
+    #Change the data type to float64 if it isn't already
+    xs = xs.astype(np.float64)
+    ys = ys.astype(np.float64)
+
+    #Create lens
+    xl = [0]
+    yl = [0]
+    eR = [10]
+
+    lenses = Lens(xl, yl, eR)
+
+    shear_noise = 10**-2
+    flex_noise = 10**-3
+
+    #sources = Source(xs,ys,np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
+    sources = Source(xs,ys,np.random.normal(0,shear_noise,Nsource), np.random.normal(0,shear_noise,Nsource), np.random.normal(0,flex_noise,Nsource), np.random.normal(0,flex_noise,Nsource))
     sources.calc_flex(lenses)
-
-    #Compute the weights and process them
-    weights = sources.weights(size,sigma_f=noise2/2,sigma_g=noise1/2, eRmin=eR_range[0], eRmax=eR_range[-1])
-    maps = utils.process_weights(weights, eR_range)
+    sources.calc_shear(lenses)
+    weights = sources.weights(size,sigma_f=flex_noise/10,sigma_g=shear_noise/10, eRmin=1, eRmax=60)
+    maps = utils.process_weights(weights, np.linspace(1,60,res))
 
     #Locate maxima and get the einstein radius
     max_coords = score_map(maps, threshold=0.5)
     eR_coords = utils.find_eR(weights, max_coords)
 
-    #Perform minimization around each maxima to locate the lens
-    bounds = [(0, res-1), (0, res-1), (0, res-1)]
-    #We need to define a constraint that the lens cannot fall outside of the image
-    constraints = [{'type': 'ineq', 'fun': lambda x: x[0] - 1}, {'type': 'ineq', 'fun': lambda x: res - x[0] - 1},
-                    {'type': 'ineq', 'fun': lambda x: x[1] - 1}, {'type': 'ineq', 'fun': lambda x: res - x[1] - 1},
-                    {'type': 'ineq', 'fun': lambda x: x[2] - 1}, {'type': 'ineq', 'fun': lambda x: res - x[2] - 1}]
-
-    def func(x, n):
-        return -weights[n][int(x[0]), int(x[1]), int(x[2])]
-
-    #Now, we can perform the minimization for each local maximum
-    shear_located_coords = []
-    for i in range(len(max_coords[0][0])):
-        starting_guess = [eR_coords[0][i], max_coords[0][1][i], max_coords[0][0][i]]
-        result = minimize(func, starting_guess, args = 0, method='SLSQP', bounds=bounds, constraints=constraints)   
-        shear_located_coords.append(result.x)
-    
-    #Repeat this for flexion   
-    flexion_located_coords = []
-    for i in range(len(max_coords[1][0])):
-        starting_guess = [eR_coords[1][i], max_coords[1][1][i], max_coords[1][0][i]]
-        result = minimize(func, starting_guess, args = 1, method='SLSQP', bounds=bounds, constraints=constraints)
-        flexion_located_coords.append(result.x)
-
-    #And for flexion + shear
-    flexion_shear_located_coords = []
-    for i in range(len(max_coords[2][0])):
-        starting_guess = [eR_coords[2][i], max_coords[2][1][i], max_coords[2][0][i]]
-        result = minimize(func, starting_guess, args = 2, method='SLSQP', bounds=bounds, constraints=constraints)   
-        flexion_shear_located_coords.append(result.x)
-    
-    #Now, we can plot the results
+    #Plot the results
     fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
     fig.suptitle('Likelihood Maps', fontsize=16)
-    labels = ['Shear', 'Flexion', 'Flexion + Shear']
-    located_coords = [shear_located_coords, flexion_located_coords, flexion_shear_located_coords]
-    for n in range(3):
-        #Unpack the coordinates for readability
-        xmax = line[max_coords[n][0]]
-        ymax = -line[max_coords[n][1]]
-        eRmax = eR_range[eR_coords[n]]
 
-        coords = located_coords[n]
-        xcoords = [int(coord[2]) for coord in coords]
-        ycoords = [int(coord[1]) for coord in coords]
-        eRcoords = [int(coord[0]) for coord in coords]
+    for i in range(3):
+        ax[i].imshow(np.log10(maps[i]+10**-20), cmap='RdYlBu_r', extent=[-size, size, -size, size])
+        ax[i].set_xlabel('x (arcseconds)')
+        ax[i].set_ylabel('y (arcseconds)')
+        ax[i].scatter(line[max_coords[i][0][0]], -line[max_coords[i][1][0]], marker='x', color='red',label='Maxima: eR = {}'.format(np.round(eR_range[eR_coords[i][0]],2)))
+        ax[i].scatter(xs, ys, marker='o', color='white', label='Sources')
+        ax[i].scatter(xl, yl, marker='o', color='black', label='Lenses')
+        ax[i].legend()
+    #Shift the axes up a bit to remove whitespace
+    plt.subplots_adjust(top=1)
 
-        ax[n].imshow(np.log10(maps[n]+10**-20), cmap = 'RdYlBu_r', extent=[-size,size,-size,size]) #Log of the likelihood map
-        ax[n].scatter(xs, ys, color='red', marker='+', label='Sources') #Location of sources 
-        ax[n].scatter(xl, yl, color='blue', marker='*', label='True Lens: eR = {}'.format(eR[0])) #Location of lens
-        ax[n].scatter(xmax, ymax, color='green', marker='x', label='Located Lens - Maxima: eR = {}'.format(np.round(eRmax,2))) #Location of maxima
-        ax[n].scatter(line[xcoords], -line[ycoords], color='green', marker='o',
-                        label='Located Lens - Minimization: eR = {}'.format(np.round(eR_range[eRcoords],2))) #Location of maxima via minimization
-        ax[n].set_title(labels[n])
-        ax[n].legend(bbox_to_anchor =(0.5,-0.27), fontsize='7', loc='lower center')
+    stop = time.time()
+    print('Time taken: {} seconds'.format(stop-start))
 
     plt.show()
-
     '''
-    plt.figure()
-    for i in range(res):
-        for j in range(res):
-            plt.plot(eR_range, weights2[:,i,j], alpha=0.1)
-    plt.xlabel(r'$\theta_E$')
-    plt.ylabel('Weight')
-    plt.yscale('log')
-    plt.show()
+    start = time.time()
+    size = 35
+    res = size*2
+    Nsource = 4
+    Nlens = 1
+
+    line = np.linspace(-size,size,res)
+    eR_range = np.linspace(1,60,res)
+
+    xs = np.array([20, 20, -20, -20])
+    ys = np.array([20, -20, 20, -20])
+    #Change the data type to float64 if it isn't already
+    xs = xs.astype(np.float64)
+    ys = ys.astype(np.float64)
+
+    #Create lens
+    xl = [0]
+    yl = [0]
+    eR = [5]
+
+    lenses = Lens(xl, yl, eR)
+
+    shear_noise = 10**-3
+    flex_noise = 10**-3
+
+    sources = Source(xs,ys,np.random.normal(0,shear_noise,Nsource), np.random.normal(0,shear_noise,Nsource), np.random.normal(0,flex_noise,Nsource), np.random.normal(0,flex_noise,Nsource))
+    sources.calc_flex(lenses)
+    sources.calc_shear(lenses)
+    true_weights = sources.weights(size,sigma_f=flex_noise,sigma_g=shear_noise, eRmin=1, eRmax=60)
+    maps = utils.process_weights(true_weights, np.linspace(1,60,res))
+
+    #Locate maxima and get the einstein radius
+    max_coords = score_map(maps, threshold=0.5)
+    eR_coords = utils.find_eR(true_weights, max_coords)
+    
+    #Okay, now try to reconstruct the weights by varying lens parameters, computing the weights, and then comparing the results
+    #to the true weights. The goal is to find the lens parameters that minimize the difference between the true weights and the
+    #reconstructed weights
+
+    #First, we need to define a function that takes in a set of lens parameters and returns the weights
+    def get_weights(params):
+        #params is a list of lens parameters
+        #We need to unpack them
+        xl = params[0]
+        yl = params[1]
+        eR = params[2]
+
+        test_lens = Lens([xl], [yl], [eR])
+        test_sources = Source(xs,ys,np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
+        test_sources.calc_flex(test_lens)
+        test_sources.calc_shear(test_lens)
+        test_weights = test_sources.weights(size,sigma_f=flex_noise,sigma_g=shear_noise, eRmin=1, eRmax=60)
+        return test_weights
+    
+    #Now perform a chi-squared minimization to find the best fit parameters
+    #We need to define a function that takes in a set of lens parameters and returns the chi-squared value
+    def chi_squared(params, n):
+        test_weights = get_weights(params)
+        chi2 = np.sum((true_weights[n] - test_weights[n])**2)
+        return chi2
+    
+    #Now perform the minimization
+    #We need to define a starting point
+    xl0 = 0
+    yl0 = 0
+    eR0 = 5
+    guess = [xl0, yl0, eR0] #This is the true lens position
+
+    #Now perform the minimization
+    #First for shear
+    params0 = [line[max_coords[0][0][0]], line[max_coords[0][1][0]], eR_range[eR_coords[0][0]]]
+    result_max = minimize(chi_squared, params0, args=(0), method='Nelder-Mead')
+    result_true = minimize(chi_squared, guess, args=(0), method='Nelder-Mead')
+
+    #Lets collect all the results together
+    shear_results = [['True', guess, chi_squared(guess, 0)], 
+                     ['Max', params0, chi_squared(params0, 0)], 
+                     ['Max: minimized', result_max.x, chi_squared(result_max.x, 0)],
+                     ['True, minimized', result_true.x, chi_squared(result_true.x, 0)]]
+    print('Shear Results:')
+    print(shear_results)
+    print('-'*50)
+
+    #Now for flexion
+    params1 = [line[max_coords[1][0][0]], line[max_coords[1][1][0]], eR_range[eR_coords[1][0]]]
+    result_max = minimize(chi_squared, params1, args=(1), method='Nelder-Mead')
+    result_true = minimize(chi_squared, guess, args=(1), method='Nelder-Mead')
+
+    #Lets collect all the results together
+    flexion_results = [['True', guess, chi_squared(guess, 1)],
+                          ['Max', params1, chi_squared(params1, 1)],
+                            ['Max: minimized', result_max.x, chi_squared(result_max.x, 1)],
+                            ['True, minimized', result_true.x, chi_squared(result_true.x, 1)]]
+    
+    print('Flexion Results:')
+    print(flexion_results)
+    print('-'*50)
+
+    #Now for shear + flexion
+    params2 = [line[max_coords[2][0][0]], line[max_coords[2][1][0]], eR_range[eR_coords[2][0]]]
+    result_max = minimize(chi_squared, params2, args=(2), method='Nelder-Mead')
+    result_true = minimize(chi_squared, guess, args=(2), method='Nelder-Mead')
+
+    #Lets collect all the results together
+    shear_flexion_results = [['True', guess, chi_squared(guess, 2)],
+                            ['Max', params2, chi_squared(params2, 2)],
+                            ['Max: minimized', result_max.x, chi_squared(result_max.x, 2)],
+                            ['True, minimized', result_true.x, chi_squared(result_true.x, 2)]]
+    
+    print('Shear + Flexion Results:')
+    print(shear_flexion_results)
+    print('-'*50)
+
+    stop = time.time()
+    print('Time taken: {} seconds'.format(stop-start))
     '''

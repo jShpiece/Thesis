@@ -1,5 +1,6 @@
 import numpy as np
 from scipy import integrate
+from numba import njit, prange
 
 class Source:
     '''
@@ -55,19 +56,26 @@ class Source:
         # sigma_g: standard deviation of the shear
         # eRmin: minimum allowed value of eR
         # eRmax: maximum allowed value of eR
-        xs, ys, F1, F2, gamma1, gamma2 = self.x, self.y, self.f1, self.f2, self.gamma1, self.gamma2
+
+        #Initialize the grid
+        xs, ys, F1, F2, gamma1, gamma2 = self.x, self.y, self.f1, self.f2, self.gamma1, self.gamma2 # Read in the source properties
         res = size * 2
         line = np.linspace(-size,size,res)
+        eR_range = np.linspace(eRmin + 0.2, eRmax,res)
         x,y = np.meshgrid(line,line)
+
+        #Compute the shear and flexion for each source (magnitude and angle)
         F = np.sqrt(F1**2 + F2**2)
         phiF = np.arctan2(F2,F1) + np.pi
         gamma = np.sqrt(gamma1**2 + gamma2**2)
         phi_gamma = np.arctan2(gamma2,gamma1) / 2 + np.pi
+
+        #Initialize the weights
         weights1 = np.zeros((res,res,res))
         weights2 = np.zeros((res,res,res))
-        eR_range = np.linspace(eRmin + 0.2, eRmax,res)
 
         for n in range(len(xs)):
+            #Adjust the coordinates to center the source
             xn = x - xs[n]
             yn = y + ys[n] # The y-axis is flipped
             r = np.sqrt(xn**2 + yn**2)
@@ -78,12 +86,11 @@ class Source:
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
 
             if np.sum(shear_contribution) > 0:
-                #weights1 = update_bayesian_posterior(weights1, shear_contribution, weights1)
                 weights1 += np.log(shear_contribution)
 
             if np.sum(flexion_contribution) > 0:
-                #weights2 = update_bayesian_posterior(weights2, flexion_contribution, weights2)
                 weights2 += np.log(flexion_contribution)
+            
         #Return to linear space
         weights1 = np.exp(weights1)
         weights2 = np.exp(weights2)
@@ -130,19 +137,29 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
 
     if signal_type == 'flexion':
         integrand = flexion_integrand
-        filter = np.exp(-r / 20) 
-        coefficient = 2 * filter * r**2 / np.abs(np.cos(phi)) 
+        filter = np.exp(-r / 20) # Flexion will not be considered beyond 20 arcseconds
+        coefficient = 2 * filter * r / np.abs(np.cos(phi))
     elif signal_type == 'shear':
         integrand = shear_integrand
         coefficient = 2 * r / np.abs(np.cos(2 * phi))
 
+    # Cache integrand function call
+    integrand_vals = integrand(eR[:, None, None], signal, r, sigma, phi)
+    
+    # Precompute coefficient and small constant
+    small_const = 1e-5
+    
+    # Cache denominator function call
     for i in range(res):
         for j in range(res):
-            denominator[i, j] = integrate.quad(integrand, eRmin, eRmax, args=(signal, r[i, j], sigma, phi[i, j]))[0]
-            denominator += 1e-10  # Prevent divide by zero errors
-
-    numerator = integrand(eR[:, None, None], signal, r, sigma, phi)
-    weights = coefficient * numerator / denominator + 10 ** -5  # Prevent divide by zero errors
+            denominator[i, j] = integrate.quad(integrand, eRmin, eRmax, args=(signal, r[i, j], sigma, phi[i, j]))[0] 
+            denominator += small_const
+ 
+    # Adjust coefficient to have the correct shape 
+    # Coefficient = coefficient[i,j], weights = weights[k,i,j]
+    coefficient = coefficient[:, :, None]
+    # Calculate weights using cached values
+    weights = coefficient * integrand_vals / denominator + small_const
 
     return weights
 
