@@ -1,6 +1,5 @@
 import numpy as np
 from scipy import integrate
-from numba import njit, prange
 
 class Source:
     '''
@@ -44,7 +43,7 @@ class Source:
             dx = self.x - lenses.x[n]
             dy = self.y - lenses.y[n]
             r2 = dx ** 2 + dy ** 2 + 0.5 ** 2
-            phi = np.arctan2(-dy, dx)
+            phi = np.arctan2(dy, dx)
             self.f1 -= lenses.eR[n] * np.cos(phi) / (2 * r2)
             self.f2 -= lenses.eR[n] * np.sin(phi) / (2 * r2)
 
@@ -66,22 +65,21 @@ class Source:
 
         #Compute the shear and flexion for each source (magnitude and angle)
         F = np.sqrt(F1**2 + F2**2)
-        phiF = np.arctan2(F2,F1) + np.pi
-        gamma = np.sqrt(gamma1**2 + gamma2**2)
-        phi_gamma = np.arctan2(gamma2,gamma1) / 2 + np.pi
+        phiF = np.arctan2(F2,F1) 
+        gamma = np.sqrt(gamma1**2 + gamma2**2) 
+        phi_gamma = np.arctan2(gamma2,gamma1) / 2 
 
         #Initialize the weights
         weights1 = []
         weights2 = []
 
-
         for n in range(len(xs)):
             #Adjust the coordinates to center the source
             xn = x - xs[n]
-            yn = y + ys[n] # The y-axis is flipped
+            yn = y - ys[n] 
             r = np.sqrt(xn**2 + yn**2)
-            phi1 = np.arctan2(-yn,xn) - phi_gamma[n]
-            phi2 = np.arctan2(-yn,xn) + phiF[n] + np.pi/2
+            phi1 = np.arctan2(yn,xn) - phi_gamma[n]
+            phi2 = np.arctan2(yn,xn) - phiF[n] 
 
             shear_contribution = compute_weights(gamma[n], 'shear', r, phi1, eR_range, res, sigma_g, eRmin, eRmax)
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
@@ -107,7 +105,7 @@ class Lens:
 
 def flexion_integrand(eR, F, r, sigma, phi):
     lens_F = -(eR * np.cos(phi)) / (2 * r**2)
-    gaussian_term = np.exp((-(F - lens_F)**2) / (2 * sigma**2))
+    gaussian_term = np.exp((-(F + lens_F)**2) / (2 * sigma**2))
     power_term = np.abs(eR)**-0.95
     return gaussian_term * power_term
 
@@ -126,7 +124,7 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
     if signal_type == 'flexion':
         integrand = flexion_integrand
         filter = np.exp(-r / 20) # Flexion will not be considered beyond 20 arcseconds
-        coefficient = 2 * filter * r / np.abs(np.cos(phi))
+        coefficient = 2 * filter * (r**2) / np.abs(np.cos(phi))
     elif signal_type == 'shear':
         integrand = shear_integrand
         coefficient = 2 * r / np.abs(np.cos(2 * phi))
