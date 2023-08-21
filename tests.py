@@ -12,10 +12,7 @@ import time
 from tqdm import tqdm
 from multiprocessing import Pool
 from scipy.optimize import minimize
-
-#Global variables
-sigma_f = 10**-3 #Noise level for flexion
-sigma_g = 10**-3 #Noise level for shear
+from scipy.signal import convolve
 
 
 def make_sources(Nsource, size = 50):
@@ -93,44 +90,6 @@ def noise_variance():
     plots.plot_likelihood_map(ax[1,2],np.log10(weights3),lenses,sources,xmax3,ymax3,100*z3,size,'Shear Weighting: Underestimate Noise')
 
     plt.savefig('Images/noise_variance.png')
-
-
-def make_lensing_field(Nlens, Nsource = 0, size = 50, Noise = True, centered = False):
-    if Nsource == 0:
-        Nsource = int(10**-2 * size**2)
-    
-    xs, ys = make_sources(Nsource, size = size)
-
-    xl = np.random.uniform(-size,size,Nlens)
-    yl = np.random.uniform(-size,size,Nlens)
-    eR = np.random.uniform(0,10,Nlens)
-
-    if centered:
-        xl[0] = 0
-        yl[0] = 0
-        eR[0] = 5
-
-
-    if Noise:
-        f1 = np.random.normal(0,sigma_f,Nsource)
-        f2 = np.random.normal(0,sigma_f,Nsource)
-        g1 = np.random.normal(0,sigma_g,Nsource)
-        g2 = np.random.normal(0,sigma_g,Nsource)
-    else:
-        f1 = np.zeros(Nsource)
-        f2 = np.zeros(Nsource)
-        g1 = np.zeros(Nsource)
-        g2 = np.zeros(Nsource)
-
-    sources = Source(xs, ys, g1, g2, f1, f2)
-    lenses = Lens(xl, yl, eR)
-
-    sources.calc_shear(lenses)
-    sources.calc_flex(lenses)
-
-    return lenses, sources
-
-
 
 
 def plot_test_map(Noise=False, centered = True, size = 50, Nlens = 1, Nsource = 100):
@@ -294,63 +253,8 @@ def flexion_noise_test(Ntrials):
     plt.show()
 
 
-if __name__ == '__main__':
-    start = time.time()
-    size = 50
-    res = size*2
-    Nsource = 4
-    Nlens = 1
-
-    line = np.linspace(-size,size,res)
-    eR_range = np.linspace(1,60,res)
-
-    xs = np.array([20, 20, -20, -20])
-    ys = np.array([20, -20, 20, -20])
-    #Change the data type to float64 if it isn't already
-    xs = xs.astype(np.float64)
-    ys = ys.astype(np.float64)
-
-    #Create lens
-    xl = [0]
-    yl = [0]
-    eR = [10]
-
-    lenses = Lens(xl, yl, eR)
-
-    shear_noise = 10**-2
-    flex_noise = 10**-3
-
-    #sources = Source(xs,ys,np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
-    sources = Source(xs,ys,np.random.normal(0,shear_noise,Nsource), np.random.normal(0,shear_noise,Nsource), np.random.normal(0,flex_noise,Nsource), np.random.normal(0,flex_noise,Nsource))
-    sources.calc_flex(lenses)
-    sources.calc_shear(lenses)
-    weights = sources.weights(size,sigma_f=flex_noise/10,sigma_g=shear_noise/10, eRmin=1, eRmax=60)
-    maps = utils.process_weights(weights, np.linspace(1,60,res))
-
-    #Locate maxima and get the einstein radius
-    max_coords = score_map(maps, threshold=0.5)
-    eR_coords = utils.find_eR(weights, max_coords)
-
-    #Plot the results
-    fig, ax = plt.subplots(1,3, figsize=(15,10), sharex=True, sharey=True)
-    fig.suptitle('Likelihood Maps', fontsize=16)
-
-    for i in range(3):
-        ax[i].imshow(np.log10(maps[i]+10**-20), cmap='RdYlBu_r', extent=[-size, size, -size, size])
-        ax[i].set_xlabel('x (arcseconds)')
-        ax[i].set_ylabel('y (arcseconds)')
-        ax[i].scatter(line[max_coords[i][0][0]], -line[max_coords[i][1][0]], marker='x', color='red',label='Maxima: eR = {}'.format(np.round(eR_range[eR_coords[i][0]],2)))
-        ax[i].scatter(xs, ys, marker='o', color='white', label='Sources')
-        ax[i].scatter(xl, yl, marker='o', color='black', label='Lenses')
-        ax[i].legend()
-    #Shift the axes up a bit to remove whitespace
-    plt.subplots_adjust(top=1)
-
-    stop = time.time()
-    print('Time taken: {} seconds'.format(stop-start))
-
-    plt.show()
-    '''
+def minimization_test():
+    #This function holds the code I wrote to test minimization approaches
     start = time.time()
     size = 35
     res = size*2
@@ -466,4 +370,140 @@ if __name__ == '__main__':
 
     stop = time.time()
     print('Time taken: {} seconds'.format(stop-start))
-    '''
+
+
+
+if __name__ == '__main__':
+    start = time.time()
+    size = 50
+    res = size*2
+    Nsource = 4
+    Nlens = 1
+
+    line = np.linspace(-size,size,res)
+    eR_range = np.linspace(1,60,res)
+
+    #xs = np.array([20, 20, -20, -20])
+    #ys = np.array([20, -20, 20, -20])
+    xs = np.array([25])
+    ys = np.array([20])
+    #Change the data type to float64 if it isn't already
+    xs = xs.astype(np.float64)
+    ys = ys.astype(np.float64)
+
+    #xs,ys = make_sources(Nsource, size = size)
+
+    #Correct Nsource if necessary
+    Nsource = len(xs) #this just avoids throwing errors if I set source positions manually
+
+    #Create lens
+    xl = [0]
+    yl = [0]
+    eR = [10]
+
+    lenses = Lens(xl, yl, eR)
+
+    shear_noise = 10**-3
+    flex_noise = 10**-3
+
+    estimated_noise = shear_noise * np.array([1e-2, 1e-1, 1, 1e1, 1e2])
+    for n in range(len(estimated_noise)):
+        #sources = Source(xs,ys,np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
+        sources = Source(xs,ys,np.random.normal(0,shear_noise,Nsource), np.random.normal(0,shear_noise,Nsource), np.random.normal(0,flex_noise,Nsource), np.random.normal(0,flex_noise,Nsource))
+        sources.calc_flex(lenses)
+        sources.calc_shear(lenses)
+
+        shear_weights, flex_weights = sources.weights(size,sigma_f=estimated_noise[n],sigma_g=estimated_noise[n], eRmin=1, eRmax=60)
+        shear_weights.append(np.ones_like(shear_weights[0]))
+        flex_weights.append(np.ones_like(flex_weights[0]))
+
+        '''
+        #And plot the results
+        fig, ax = plt.subplots(Nsource,2, figsize=(15,5), sharex=True, sharey=True)
+        fig.suptitle('Source Weights', fontsize=16)
+
+        for i in range(Nsource):
+            ax[i,0].imshow(np.log10(shear_maps[i]), extent=[-size,size,-size,size])
+            ax[i,0].set_title('Shear Weights: Source {}'.format(i+1))
+            ax[i,0].scatter(xs[i],ys[i], marker='x', color='red', label='Source Position')
+            ax[i,0].scatter(xl,yl, marker='x', color='green', label='Lens Position')
+            ax[i,0].scatter(line[shear_max_coords[i][0]], -line[shear_max_coords[i][1]], marker='x', color='blue', 
+                            label='Maxima: eR = {}'.format(np.round(eR_range[shear_eR_coords[i][0]],2)))
+            ax[i,0].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+            ax[i,1].imshow(np.log10(flex_maps[i]), extent=[-size,size,-size,size])
+            ax[i,1].set_title('Flexion Weights: Source {}'.format(i+1))
+            ax[i,1].scatter(xs[i],ys[i], marker='x', color='red', label='Source Position')
+            ax[i,1].scatter(xl,yl, marker='x', color='green', label='Lens Position')
+            ax[i,1].scatter(line[flex_max_coords[i][0]], -line[flex_max_coords[i][1]], marker='x', color='blue', 
+                            label='Maxima: eR = {}'.format(np.round(eR_range[flex_eR_coords[i][0]],2)))
+            ax[i,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+        plt.savefig('Images/source_weights.png')
+        plt.show()
+        '''
+
+        #Okay, lets test some different approaches for merging weights
+
+        #First, straightforward multiplication
+
+        #Shear
+        product_shear_weights = np.prod(np.array(shear_weights), axis=0)
+        #product_shear_weights /= np.sum(product_shear_weights)
+        product_shear_maps = utils.process_weights([product_shear_weights], np.linspace(1,60,res))[0]
+
+        #Flexion
+        product_flex_weights = np.prod(np.array(flex_weights), axis=0)
+        #product_flex_weights /= np.sum(product_flex_weights)
+        product_flex_maps = utils.process_weights([product_flex_weights], np.linspace(1,60,res))[0]
+
+        #Construct the characteristic function for each distribution and then multiply them together
+        def combine_distributions(y1, y2): 
+            y1 /= np.sum(y1) #Normalize
+            y2 /= np.sum(y2)
+
+            combined_distribution = convolve(y1, y2, mode='same', method='auto')
+            combined_distribution /= np.sum(combined_distribution)
+            
+            return combined_distribution
+        
+        #Shear
+        merged_shear_weight = combine_distributions(shear_weights[0], shear_weights[1])
+        for i in range(2, Nsource):
+            merged_shear_weight = combine_distributions(merged_shear_weight, shear_weights[i])
+        merged_shear_maps = utils.process_weights([merged_shear_weight], np.linspace(1,60,res))[0]
+
+        #Flexion
+        merged_flex_weight = combine_distributions(flex_weights[0], flex_weights[1])
+        for i in range(2, Nsource):
+            merged_flex_weight = combine_distributions(merged_flex_weight, flex_weights[i])
+        merged_flex_maps = utils.process_weights([merged_flex_weight], np.linspace(1,60,res))[0]
+
+        #Now plot the results
+        fig, ax = plt.subplots(2,2, figsize=(7,9), sharex=True, sharey=True)
+        fig.suptitle('Likelihood Distributions: Different Merging Methods \n noise / estimated noise = {:.2E}'.format(flex_noise/estimated_noise[n]), fontsize=16)
+
+        titles = ['Product', 'Characteristic Function']
+        left_right = ['Shear', 'Flexion']
+
+        shear_maps = [product_shear_maps, merged_shear_maps]
+        flex_maps = [product_flex_maps, merged_flex_maps]
+        #Dont worry about coordinates right now, lets just plot the maps and label them accurately
+        for i in range(2):
+            ax[i,0].imshow(np.log10(shear_maps[i]+1e-20), extent=[-size,size,-size,size])
+            #Set equal axis aspect ratio
+            ax[i,0].set_aspect('equal', 'box')
+            ax[i,0].set_title('{}: {}'.format(titles[i], left_right[0]))
+            ax[i,0].scatter(xs,ys, marker='x', color='black', label='Source')
+            ax[i,0].scatter(xl,yl, marker='*', color='black', label='Lens')
+            #ax[i,0].legend(loc='center left', bbox_to_anchor=(1.1, 0.5))
+        
+            ax[i,1].imshow(np.log10(flex_maps[i]+1e-20), extent=[-size,size,-size,size])
+            ax[i,1].set_aspect('equal', 'box')
+            ax[i,1].set_title('{}: {}'.format(titles[i], left_right[1]))
+            ax[i,1].scatter(xs,ys, marker='x', color='black', label='Source')
+            ax[i,1].scatter(xl,yl, marker='*', color='black', label='Lens')
+            #ax[i,1].legend(loc='center left', bbox_to_anchor=(1, 0.5))
+
+        plt.savefig('Images/weight_merging_{}sources_noise_{}.png'.format(Nsource,n))
+        plt.show()

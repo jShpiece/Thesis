@@ -55,7 +55,7 @@ def process_weights(weights, eR_range):
     maps = []
     for i in range(len(weights)):
         llmap = np.trapz(weights[i], eR_range, axis=0)
-        llmap = convolver(llmap, makeGaussian(res, 2))
+        llmap = convolver(llmap, makeGaussian(res, 1))
         maps.append(llmap)
     return maps
 
@@ -89,6 +89,7 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     term1 = eR * np.sqrt(np.pi * n) / (sigma)
     term2 = (1 - rmin/rmax) / np.sqrt(1 - (rmin/rmax)**2)
     return term1 * term2
+
 
 def gradient_respecting_bounds(bounds, fun, eps=1e-8):
     '''This function takes in a function and returns the gradient of that function

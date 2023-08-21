@@ -49,7 +49,7 @@ class Source:
             self.f2 -= lenses.eR[n] * np.sin(phi) / (2 * r2)
 
 
-    def weights(self, size, sigma_f = 10**-2, sigma_g = 10**-3, eRmin = 1, eRmax = 60):
+    def weights(self, size, sigma_f, sigma_g, eRmin = 1, eRmax = 60):
         # This function calculates the likelihood of each lensing configuration in a 3D parameter space
         # size: 1/2 size of the grid in arcseconds
         # sigma_f: standard deviation of the flexion
@@ -71,8 +71,9 @@ class Source:
         phi_gamma = np.arctan2(gamma2,gamma1) / 2 + np.pi
 
         #Initialize the weights
-        weights1 = np.zeros((res,res,res))
-        weights2 = np.zeros((res,res,res))
+        weights1 = []
+        weights2 = []
+
 
         for n in range(len(xs)):
             #Adjust the coordinates to center the source
@@ -85,23 +86,10 @@ class Source:
             shear_contribution = compute_weights(gamma[n], 'shear', r, phi1, eR_range, res, sigma_g, eRmin, eRmax)
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
 
-            if np.sum(shear_contribution) > 0:
-                weights1 += np.log(shear_contribution)
-
-            if np.sum(flexion_contribution) > 0:
-                weights2 += np.log(flexion_contribution)
+            weights1.append(shear_contribution)         
+            weights2.append(flexion_contribution)
             
-        #Return to linear space
-        weights1 = np.exp(weights1)
-        weights2 = np.exp(weights2)
-        #Normalize the weights
-        weights1 /= np.sum(weights1)
-        weights2 /= np.sum(weights2)
-
-        weights3 = weights1 * weights2
-        weights3 /= np.sum(weights3)
-        
-        return [weights1, weights2, weights3]
+        return weights1, weights2
 
 
 class Lens:
@@ -157,7 +145,7 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
  
     # Adjust coefficient to have the correct shape 
     # Coefficient = coefficient[i,j], weights = weights[k,i,j]
-    coefficient = coefficient[:, :, None]
+    coefficient = coefficient[None, :, :]
     # Calculate weights using cached values
     weights = coefficient * integrand_vals / denominator + small_const
 
