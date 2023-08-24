@@ -1,5 +1,6 @@
 import numpy as np
 from scipy import integrate
+import multiprocessing
 
 class Source:
     '''
@@ -66,7 +67,7 @@ class Source:
         #Compute the shear and flexion for each source (magnitude and angle)
         F = np.sqrt(F1**2 + F2**2)
         phiF = np.arctan2(F2,F1) 
-        gamma = np.sqrt(gamma1**2 + gamma2**2) 
+        Gamma = np.sqrt(gamma1**2 + gamma2**2) 
         phi_gamma = np.arctan2(gamma2,gamma1) / 2 
 
         #Initialize the weights
@@ -81,7 +82,7 @@ class Source:
             phi1 = np.arctan2(yn,xn) - phi_gamma[n]
             phi2 = np.arctan2(yn,xn) - phiF[n] 
 
-            shear_contribution = compute_weights(gamma[n], 'shear', r, phi1, eR_range, res, sigma_g, eRmin, eRmax)
+            shear_contribution = compute_weights(Gamma[n], 'shear', r, phi1, eR_range, res, sigma_g, eRmin, eRmax)
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
 
             weights1.append(shear_contribution)         
@@ -103,18 +104,24 @@ class Lens:
         self.eR = eR
 
 
-def flexion_integrand(eR, F, r, sigma, phi):
+def flexion_integrand(eR, F, r, phi, sigma):
     lens_F = -(eR * np.cos(phi)) / (2 * r**2)
     gaussian_term = np.exp((-(F + lens_F)**2) / (2 * sigma**2))
     power_term = np.abs(eR)**-0.95
     return gaussian_term * power_term
 
 
-def shear_integrand(eR, gamma, r, sigma, phi):
+def shear_integrand(eR, gamma, r, phi, sigma):
     lens_gamma = -(eR * np.cos(2 * phi)) / (2 * r)
     gaussian_term = np.exp((-(gamma - lens_gamma)**2) / (2 * sigma**2))
     power_term = np.abs(eR)**-0.95
     return gaussian_term * power_term
+
+
+def compute_integral(args):
+    # This function computes the integral of the integrand function
+    integrand, signal, r, phi, sigma = args
+    return integrate.quad(integrand, 1, 60, args=(signal, r, phi, sigma))[0]
 
 
 def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=60):
@@ -123,26 +130,33 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
 
     if signal_type == 'flexion':
         integrand = flexion_integrand
-        filter = np.exp(-r / 20) # Flexion will not be considered beyond 20 arcseconds
+        #filter = np.exp(-r / 20) # Flexion will not be considered beyond 20 arcseconds
+        filter = 1
         coefficient = 2 * filter * (r**2) / np.abs(np.cos(phi))
     elif signal_type == 'shear':
         integrand = shear_integrand
         coefficient = 2 * r / np.abs(np.cos(2 * phi))
 
     # Cache integrand function call
-    integrand_vals = integrand(eR[:, None, None], signal, r, sigma, phi)
+    integrand_vals = integrand(eR[:, None, None], signal, r, phi + np.pi, sigma)
     
     # Precompute coefficient and small constant
     small_const = 1e-5
     
-    # Cache denominator function call
+    # Compute denominator
+    pool = multiprocessing.Pool() 
+    args_list = [(integrand, signal, r[i, j], phi[i, j] + np.pi, sigma) for i in range(res) for j in range(res)]
+    results = pool.map(compute_integral, args_list)
+
     for i in range(res):
         for j in range(res):
-            denominator[i, j] = integrate.quad(integrand, eRmin, eRmax, args=(signal, r[i, j], sigma, phi[i, j]))[0] 
+            denominator[i, j] = results[i * res + j]
             denominator += small_const
+        
+    pool.close()
+    pool.join()
  
     # Adjust coefficient to have the correct shape 
-    # Coefficient = coefficient[i,j], weights = weights[k,i,j]
     coefficient = coefficient[None, :, :]
     # Calculate weights using cached values
     weights = coefficient * integrand_vals / denominator + small_const
@@ -160,8 +174,8 @@ def score_map(maps, threshold=0.1):
     score threshold.
     '''
     coords = []
-    for i in range(len(maps)):
-        colormap = maps[i]
+    for n in range(len(maps)):
+        colormap = maps[n]
         # Step 1: Identify local maxima
         local_maxima = np.zeros_like(colormap, dtype=bool)
         local_maxima[(colormap >= np.roll(colormap, 1, axis=0)) &
