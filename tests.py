@@ -279,7 +279,6 @@ def minimization_test():
 
     shear_noise = 10**-3
     flex_noise = 10**-3
-
     sources = Source(xs,ys,np.random.normal(0,shear_noise,Nsource), np.random.normal(0,shear_noise,Nsource), 
                      np.random.normal(0,flex_noise,Nsource), np.random.normal(0,flex_noise,Nsource))
     sources.calc_flex(lenses)
@@ -294,13 +293,13 @@ def minimization_test():
     #Locate maxima and get the einstein radius
     max_coords = score_map(maps, threshold=0.5)
     eR_coords = utils.find_eR(true_weights, max_coords)
-    
+
     #Okay, now try to reconstruct the weights by varying lens parameters, computing the weights, and then comparing the results
     #to the true weights. The goal is to find the lens parameters that minimize the difference between the true weights and the
     #reconstructed weights
 
     #First, we need to define a function that takes in a set of lens parameters and returns the weights
-    def get_weights(params):
+    def get_weights(params, n):
         #params is a list of lens parameters
         #We need to unpack them
         xl = params[0]
@@ -311,78 +310,109 @@ def minimization_test():
         test_sources = Source(xs,ys,np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
         test_sources.calc_flex(test_lens)
         test_sources.calc_shear(test_lens)
-        test_weights = test_sources.weights(size,sigma_f=flex_noise,sigma_g=shear_noise, eRmin=1, eRmax=60)
+        test_weights = test_sources.weights(size,sigma_f=flex_noise,sigma_g=shear_noise, eRmin=1, eRmax=60)[n]
         return test_weights
     
     #Now perform a chi-squared minimization to find the best fit parameters
     #We need to define a function that takes in a set of lens parameters and returns the chi-squared value
-    def chi_squared(params, n):
-        test_weights = get_weights(params)
-        test_weights = np.exp(np.sum(np.log(np.array(test_weights[n])), axis=0))
+    def chi_squared(params, n, sigma):
+        test_weights = get_weights(params, n)
+        test_weights = np.exp(np.sum(np.log(np.array(test_weights)), axis=0))
 
-        chi2 = np.sum((true_weights[n] - test_weights)**2)
+        chi2 = np.sum((true_weights[n] - test_weights)**2 / sigma**2)
         return chi2
     
+    #We're going to try a brute - force approach
+    #We'll try every combination of lens parameters in a grid
+    #We'll then evaluate the chi-squared value for each combination
+    #And then find the minimum
+
+    xl_range = np.linspace(-size, size, 10)
+    yl_range = np.linspace(-size, size, 10)
+    eR_range = [5]
+
+    chi2_shear = np.zeros((len(xl_range), len(yl_range)))
+    chi2_flex = np.zeros((len(xl_range), len(yl_range)))
+
+    for i in range(len(xl_range)):
+        for j in range(len(yl_range)):
+            params = [xl_range[i], yl_range[j], 5]
+            chi2_shear[i,j] = chi_squared(params, 0, shear_noise)
+            chi2_flex[i,j] = chi_squared(params, 1, flex_noise)
+    
+    #Locate minima
+    min_shear = np.unravel_index(np.argmin(chi2_shear), chi2_shear.shape)
+    min_flex = np.unravel_index(np.argmin(chi2_flex), chi2_flex.shape)
+
+    xmin_shear = xl_range[min_shear[0]]
+    ymin_shear = yl_range[min_shear[1]]
+
+    xmin_flex = xl_range[min_flex[0]]
+    ymin_flex = yl_range[min_flex[1]]
+    
+    #Now plot
+    fig, ax = plt.subplots(1,2, figsize=(10,5), sharex=True, sharey=True)
+    fig.suptitle('Chi-Squared Maps: Fixed eR', fontsize=16)
+
+    im = ax[0].imshow(np.log(chi2_shear), extent=[-size,size,-size,size])
+    fig.colorbar(im, ax=ax[0])
+    ax[0].set_aspect('equal', 'box') #This is a map, so we want the aspect ratio to be equal
+    ax[0].set_title('Shear')
+    ax[0].scatter(xs,ys, marker='x', color='black', label='Source') #Mark the source positions 
+    ax[0].scatter(xl,yl, marker='*', color='black', label='Lens') #Mark the lens position
+    ax[0].scatter(xmin_shear, ymin_shear, marker='o', color='red', label='Minimum') #Mark the minimum
+    ax[0].legend()
+
+    im = ax[1].imshow(np.log(chi2_flex), extent=[-size,size,-size,size])
+    fig.colorbar(im, ax=ax[1])
+    ax[1].set_aspect('equal', 'box') #This is a map, so we want the aspect ratio to be equal
+    ax[1].set_title('Flexion')
+    ax[1].scatter(xs,ys, marker='x', color='black', label='Source') #Mark the source positions
+    ax[1].scatter(xl,yl, marker='*', color='black', label='Lens') #Mark the lens position
+    ax[1].scatter(xmin_flex, ymin_flex, marker='o', color='red', label='Minimum') #Mark the minimum
+    ax[1].legend()
+
+    plt.savefig('Images/chi_squared_map.png')
+    plt.show()
+
+
+
+
+    
+    '''
     #Now perform the minimization
     #We need to define a starting point
     xl0 = 0
     yl0 = 0
     eR0 = 5
-    guess = [xl0, yl0, eR0] #This is the true lens position
+    #guess = [xl0, yl0, eR0] #This is the true lens position
+    #guess = [xl0 + 1, yl0 + 1, eR0 + 1] #This is a guess that is close to the true lens position
+    guess = [xl0, yl0, eR0 + 10] #This is a guess that is far from the true lens position
 
-    #Now perform the minimization
-    #First for shear
-    print('Attempting minimization for shear')
     #Limit minimization to a maximum number of iterations
     N_iter = 10
-    params0 = [line[max_coords[0][0][0]], line[max_coords[0][1][0]], eR_range[eR_coords[0][0]]]
-    result_max = minimize(chi_squared, params0, args=(0), method='Nelder-Mead', options={'maxiter':N_iter}) #Confirm that this will actually finish
-    print('First minimization complete')
-    result_true = minimize(chi_squared, guess, args=(0), method='Nelder-Mead', options={'maxiter':N_iter})
-    print('Second minimization complete')
+    #Set bounds on the parameters
+    xl_bounds = (-size, size)
+    yl_bounds = (-size, size)
+    eR_bounds = (1, 60)
+    bounds = [xl_bounds, yl_bounds, eR_bounds]
+    #Relax the tolerance
+    tol = 1e-3
+    #Set the method - be sure to choose one that allows bounds
+    method = 'Powell'
 
-    #Lets collect all the results together
-    shear_results = [['True', guess, chi_squared(guess, 0)], 
-                     ['True, minimized', result_true.x, chi_squared(result_true.x, 0)],
-                     ['Max', params0, chi_squared(params0, 0)], 
-                     ['Max: minimized', result_max.x, chi_squared(result_max.x, 0)]]
-    print('Shear Results:')
-    print(shear_results)
-    print('-'*100)
+    #Now perform the minimization
+    shear_result = minimize(chi_squared, guess, args=(0, shear_noise), method=method, bounds=bounds, tol=tol, options={'maxiter':N_iter})
+    flex_result = minimize(chi_squared, guess, args=(1, flex_noise), method=method, bounds=bounds, tol=tol,  options={'maxiter':N_iter})
+    print('Minimization complete')
 
-    #Now for flexion
-    params1 = [line[max_coords[1][0][0]], line[max_coords[1][1][0]], eR_range[eR_coords[1][0]]]
-    result_max = minimize(chi_squared, params1, args=(1), method='Nelder-Mead', options={'maxiter':N_iter})
-    result_true = minimize(chi_squared, guess, args=(1), method='Nelder-Mead', options={'maxiter':N_iter})
-
-    #Lets collect all the results together
-    flexion_results = [['True', guess, chi_squared(guess, 1)],
-                        ['True, minimized', result_true.x, chi_squared(result_true.x, 1)],
-                        ['Max', params1, chi_squared(params1, 1)],
-                        ['Max: minimized', result_max.x, chi_squared(result_max.x, 1)]]
-    
-    print('Flexion Results:')
-    print(flexion_results)
-    print('-'*100)
-
-    '''
-    #Now for shear + flexion
-    params2 = [line[max_coords[2][0][0]], line[max_coords[2][1][0]], eR_range[eR_coords[2][0]]]
-    result_max = minimize(chi_squared, params2, args=(2), method='Nelder-Mead')
-    result_true = minimize(chi_squared, guess, args=(2), method='Nelder-Mead')
-
-    #Lets collect all the results together
-    shear_flexion_results = [['True', guess, chi_squared(guess, 2)],
-                            ['Max', params2, chi_squared(params2, 2)],
-                            ['Max: minimized', result_max.x, chi_squared(result_max.x, 2)],
-                            ['True, minimized', result_true.x, chi_squared(result_true.x, 2)]]
-    
-    print('Shear + Flexion Results:')
-    print(shear_flexion_results)
-    print('-'*100)
-    '''
+    print('Shear result')
+    print(shear_result)
+    print('Flexion result')
+    print(flex_result)
     stop = time.time()
     print('Time taken: {} seconds'.format(stop-start))
+    '''
 
 
 
@@ -391,7 +421,7 @@ if __name__ == '__main__':
     raise SystemExit
 
     start = time.time()
-    size = 20
+    size = 50
     res = size*2
     Nsource = 4
     Nlens = 1
@@ -429,24 +459,6 @@ if __name__ == '__main__':
     sources.calc_flex(lenses)
     sources.calc_shear(lenses)
     
-    def get_weights(params):
-        #params is a list of lens parameters
-        #We need to unpack them
-        xl = params[0]
-        yl = params[1]
-        eR = params[2]
-
-        test_lens = Lens([xl], [yl], [eR])
-        test_sources = Source(xs,ys,np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
-        test_sources.calc_flex(test_lens)
-        test_sources.calc_shear(test_lens)
-        test_weights = test_sources.weights(size,sigma_f=flex_noise,sigma_g=shear_noise, eRmin=1, eRmax=60)
-        return test_weights
-
-    def chi_squared(params, true_weights, n):
-        test_weights = get_weights(params)
-        chi2 = np.sum((true_weights - test_weights[n])**2)
-        return chi2
 
     for n in range(len(estimated_noise)):
         shear_weights, flex_weights = sources.weights(size,sigma_f=estimated_noise[n],sigma_g=estimated_noise[n], eRmin=1, eRmax=60)
@@ -465,43 +477,6 @@ if __name__ == '__main__':
         flex_maxima = score_map([product_flex_maps], threshold=0.5)
         flex_eR = utils.find_eR([product_flex_weights], flex_maxima)[0]
 
-        #Lets also perform a local minimization
-        #We need to define a function that takes in a set of lens parameters and returns the chi-squared value
-
-        #Now perform the minimization
-        print('Attempting minimization for estimated noise = {}'.format(estimated_noise[n]))
-        #First for shear
-        params0 = [line[shear_maxima[0][0][0]], line[shear_maxima[0][1][0]], eR_range[shear_eR[0]]]
-        result_max = minimize(chi_squared, params0, args=(product_shear_weights, 0), method='Nelder-Mead')
-        print('First minimization complete')
-        result_true = minimize(chi_squared, [0,0,5], args=(product_shear_weights, 0), method='Nelder-Mead')
-        print('Second minimization complete')
-
-        #Now for flexion
-        params1 = [line[flex_maxima[0][0][0]], line[flex_maxima[0][1][0]], eR_range[flex_eR[0]]]
-        result_max = minimize(chi_squared, params1, args=(product_flex_weights, 1), method='Nelder-Mead')
-        print('Third minimization complete')
-        result_true = minimize(chi_squared, [0,0,5], args=(product_flex_weights, 1), method='Nelder-Mead')
-        print('Fourth minimization complete')
-
-        #Print the results - but lets organize them first
-        print('Estimated Noise: {}'.format(estimated_noise[n]))
-        print('-'*100)
-        shear_results = [['True', [0,0,5], chi_squared([0,0,5], shear_weights)],
-                            ['Max', params0, chi_squared(params0, shear_weights)],
-                            ['Max: minimized', result_max.x, chi_squared(result_max.x, shear_weights)],
-                            ['True, minimized', result_true.x, chi_squared(result_true.x, shear_weights)]]
-        print('Shear Results:')
-        print(shear_results)
-        print('-'*100)
-        
-        flexion_results = [['True', [0,0,5], chi_squared([0,0,5], flex_weights)],
-                            ['Max', params1, chi_squared(params1, flex_weights)],
-                            ['Max: minimized', result_max.x, chi_squared(result_max.x, flex_weights)],
-                            ['True, minimized', result_true.x, chi_squared(result_true.x, flex_weights)]]
-        print('Flexion Results:')
-        print(flexion_results)
-        print('-'*100)
         
         #Now plot the results
         fig, ax = plt.subplots(1,2, figsize=(10,5), sharex=True, sharey=True)
@@ -531,4 +506,4 @@ if __name__ == '__main__':
         ax[1].legend(loc = 'upper right')
 
         plt.savefig('Images/weight_merging_{}sources_noise_{}.png'.format(Nsource,n))
-        #plt.show()
+        plt.show()

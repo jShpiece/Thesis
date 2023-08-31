@@ -80,13 +80,13 @@ class Source:
             yn = y - ys[n] 
             r = np.sqrt(xn**2 + yn**2)
             phi1 = np.arctan2(yn,xn) - phi_gamma[n]
-            phi2 = np.arctan2(yn,xn) - phiF[n] 
+            phi2 = np.arctan2(yn,xn) + phiF[n] 
 
             shear_contribution = compute_weights(Gamma[n], 'shear', r, phi1, eR_range, res, sigma_g, eRmin, eRmax)
             flexion_contribution = compute_weights(F[n], 'flexion', r, phi2, eR_range, res, sigma_f, eRmin, eRmax)
 
-            weights1.append(shear_contribution)         
-            weights2.append(flexion_contribution)
+            weights1.append(shear_contribution + 10**-20)         
+            weights2.append(flexion_contribution + 10**-20)
             
         return weights1, weights2
 
@@ -120,7 +120,7 @@ def shear_integrand(eR, gamma, r, phi, sigma):
 
 def compute_integral(args):
     # This function computes the integral of the integrand function
-    integrand, signal, r, phi, sigma = args
+    integrand, signal, r, phi, sigma = args     
     return integrate.quad(integrand, 1, 60, args=(signal, r, phi, sigma))[0]
 
 
@@ -130,8 +130,8 @@ def compute_weights(signal, signal_type, r, phi, eR, res, sigma, eRmin=1, eRmax=
 
     if signal_type == 'flexion':
         integrand = flexion_integrand
-        #filter = np.exp(-r / 20) # Flexion will not be considered beyond 20 arcseconds
-        filter = 1
+        filter = np.exp(-r / 20) # Flexion will not be considered beyond 20 arcseconds
+        #filter = 1
         coefficient = 2 * filter * (r**2) / np.abs(np.cos(phi))
     elif signal_type == 'shear':
         integrand = shear_integrand
