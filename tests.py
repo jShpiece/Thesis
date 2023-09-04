@@ -288,7 +288,11 @@ def minimization_test():
     true_weights = []
     true_weights.append(np.exp(np.sum(np.log(np.array(shear_weights)), axis=0)))
     true_weights.append(np.exp(np.sum(np.log(np.array(flex_weights)), axis=0)))
-    
+    #Normalize
+    for i in range(len(true_weights)):
+        true_weights[i] /= np.sum(true_weights[i])
+
+
     #Okay, now try to reconstruct the weights by varying lens parameters, computing the weights, and then comparing the results
     #to the true weights. The goal is to find the lens parameters that minimize the difference between the true weights and the
     #reconstructed weights
@@ -300,19 +304,21 @@ def minimization_test():
         test_sources = Source(xs,ys,np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource))
         test_sources.calc_flex(test_lens)
         test_sources.calc_shear(test_lens)
-        test_weights = test_sources.weights(size,sigma_f=flex_noise,sigma_g=shear_noise, eRmin=1, eRmax=30)
-        return test_weights
+        shear_test, flex_text = test_sources.weights(size,sigma_f=flex_noise,sigma_g=shear_noise, eRmin=1, eRmax=30)
+        return shear_test, flex_text
     
     #Now perform a chi-squared minimization to find the best fit parameters
     #We need to define a function that takes in a set of lens parameters and returns the chi-squared value
-    def chi_squared(params, sigma1, sigma2):
+    def chi_squared(params):
         shear_test, flex_test = get_weights(params) #Get the weights
         shear_test = np.exp(np.sum(np.log(np.array(shear_test)), axis=0)) #Take the product of the weights in log space
         flex_test = np.exp(np.sum(np.log(np.array(flex_test)), axis=0))
+        #Normalize
+        shear_test /= np.sum(shear_test)
+        flex_test /= np.sum(flex_test)
 
         chi2_shear = np.sum(((shear_test - true_weights[0])**2) / true_weights[0]) #Compute the chi-squared value
         chi2_flex = np.sum(((flex_test - true_weights[1])**2) / true_weights[1])
-        print(chi2_shear, chi2_flex)
         return chi2_shear, chi2_flex
     
     #We're going to try a brute - force approach
@@ -320,9 +326,9 @@ def minimization_test():
     #We'll then evaluate the chi-squared value for each combination
     #And then find the minimum
 
-    xl_range = np.linspace(-size, size, 5) + 0.5
-    yl_range = np.linspace(-size, size, 5) + 0.5
-    eR_range = np.linspace(1, 30, 20)
+    xl_range = np.linspace(-size, size, 10) + 0.5
+    yl_range = np.linspace(-size, size, 10) + 0.5
+    eR_range = np.linspace(1, 30, 50)
 
     chi2_shear = np.zeros((len(xl_range), len(yl_range)))
     chi2_flex = np.zeros((len(xl_range), len(yl_range)))
@@ -330,7 +336,7 @@ def minimization_test():
     for i in range(len(xl_range)):
         for j in range(len(yl_range)):
             params = [[xl_range[i]], [yl_range[j]], [5]]
-            chi21, chi22 = chi_squared(params, shear_noise, flex_noise)
+            chi21, chi22 = chi_squared(params)
             chi2_shear[i,j] = chi21
             chi2_flex[i,j] = chi22
     
@@ -377,7 +383,7 @@ def minimization_test():
     
     for i in range(len(eR_range)):
         params = [[0], [0], [eR_range[i]]]
-        chi21, chi22 = chi_squared(params, shear_noise, flex_noise)
+        chi21, chi22 = chi_squared(params)
         eR_chi2_shear[i] = chi21
         eR_chi2_flex[i] = chi22
         
@@ -399,8 +405,6 @@ def minimization_test():
     plt.savefig('Images/chi_squared_eR.png')
     
     plt.show()
-
-
 
 
     
