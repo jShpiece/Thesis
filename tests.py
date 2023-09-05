@@ -446,9 +446,6 @@ def minimization_test():
 
 
 if __name__ == '__main__':
-    minimization_test()
-    raise SystemExit
-
     start = time.time()
     size = 50
     res = size*2
