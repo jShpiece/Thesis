@@ -121,17 +121,17 @@ def chi2plot(x,y,e1data,e2data,f1data,f2data,xmax=2,nx=100):
     myval = np.exp(-chi2_all.T)
     plt.imshow(myval,interpolation='none',origin='lower',extent=[-xmax,xmax,-xmax,xmax])
     plt.plot(x,y,'x','o',color='red')
-    plt.savefig('chi2_all.png')
+    plt.savefig('Images/chi2_all.png')
     plt.close()
 
     plt.imshow(np.log(chi2_flex.T),interpolation='none',origin='lower',extent=[-xmax,xmax,-xmax,xmax])
     plt.plot(x,y,'x','o',color='red')
-    plt.savefig('chi2_flex.png')
+    plt.savefig('Images/chi2_flex.png')
     plt.close()
 
     plt.imshow(np.log(chi2_shear.T),interpolation='none',origin='lower',extent=[-xmax,xmax,-xmax,xmax])
     plt.plot(x,y,'x','o',color='red')
-    plt.savefig('chi2_shear.png')
+    plt.savefig('Images/chi2_shear.png')
     plt.close()
 
 
@@ -177,10 +177,11 @@ xlarr, ylarr, tearr = createLenses(nlens=nlens,randompos=False,xmax=xmax)
 ns = 2
 sigf = 0.01
 sigs = 0.1
-x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns,randompos=False,sigf=sigf,sigs=sigs,xmax=xmax)
+x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns,randompos=True,sigf=sigf,sigs=sigs,xmax=xmax)
 
 #Make a plot in a 2x2 range showing chi^2
 
+chi2plot(x,y,e1data,e2data,f1data,f2data,xmax=xmax,nx=100)
 chi2plot1d(x,y,e1data,e2data,f1data,f2data,xmax=6,nx=1000)
 
 #Now minimize chi^2
