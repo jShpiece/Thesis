@@ -1,5 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.optimize as optimize
+from astropy.visualization import hist as fancyhist
+
+sigf = 0.01
+sigs = 0.1
 
 def createLenses(nlens=1,randompos=True,xmax=10):
     #For now, fix theta_E at 1
@@ -11,6 +16,7 @@ def createLenses(nlens=1,randompos=True,xmax=10):
         xlarr = -xmax + 2*xmax*(np.arange(nlens)+0.5)/(nlens)
         ylarr = np.zeros(nlens)
     return xlarr, ylarr, tearr
+
 
 def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
     if randompos == True:
@@ -35,6 +41,7 @@ def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5
             f2data+=sigf*np.random.normal(ns)
     return x,y,e1data,e2data,f1data,f2data
 
+
 def lens(x,y,xlarr,ylarr,tearr):
     dx = x-xlarr
     dy = y-ylarr
@@ -52,15 +59,42 @@ def lens(x,y,xlarr,ylarr,tearr):
 
     return e1,e2,f1,f2
 
-def chi2(x,y,e1data,e2data,f1data,f2data,xltest,yltest,tetest,sigf,sigs,fwgt=1.0,swgt=1.0):
-    #Note - this is a simplified model, without penalties from bayesian priors
 
+def eR_prior(eR):
+    alpha = 0.95
+    beta = 0.22
+    return beta * eR**(-alpha)
+
+
+def signal_prior(signal1, signal2, sigma):
+    #Gaussian prior on signal
+    prior = np.exp(-((signal1 + signal2)**2)/(2*sigma**2))
+    norm = 1.0/np.sqrt(2*np.pi*sigma**2)
+    return norm*prior 
+
+
+def chi2(x,y,e1data,e2data,f1data,f2data,xltest,yltest,tetest,sigf,sigs,fwgt=1.0,swgt=1.0):
+    #Okay, lets introduce some weights to act as a prior
+    #We want to penalize unrealistic values of theta_E
+    #As well as of the shear and flexion
+    #We can do this by adding a prior to the chi^2
+
+    #First, we need to compute the prior
+
+    #Now compute the chi^2
     chi2val = 0.0
     for i in range(len(x)):
         e1,e2,f1,f2 = lens(x[i],y[i],xltest,yltest,tetest)
-        chi2val += (fwgt*(f1data[i]-f1)**2)/(sigf**2) + (fwgt*(f2data[i]-f2)**2)/(sigf**2) + (swgt*(e1data[i]-e1)**2)/(sigs**2) + (swgt*(e2data[i]-e2)**2)/(sigs**2)
+        chif1 = (f1data[i]-f1)**2 / (sigf**2)
+        chif2 = (f2data[i]-f2)**2 / (sigf**2)
+        chie1 = (e1data[i]-e1)**2 / (sigs**2)
+        chie2 = (e2data[i]-e2)**2 / (sigs**2)
+
+        chi2val += fwgt * (chif1 + chif2) + swgt * (chie1 + chie2) 
+
 
     return chi2val
+
 
 def minChi2(x,y,e1data,e2data,f1data,f2data,xlstart,ylstart,testart,sigf,sigs):
     chi2best = chi2(x,y,e1data,e2data,f1data,f2data,xlstart,ylstart,testart,sigf,sigs)
@@ -99,7 +133,7 @@ def minChi2(x,y,e1data,e2data,f1data,f2data,xlstart,ylstart,testart,sigf,sigs):
             tebest = tetest.copy()
             chi2best = chi2test
         else:
-            print('Step too large, reducing step size')
+            #print('Step too large, reducing step size')
             alpha = 0.8*alpha
     return xlbest,ylbest,tebest,chi2best
 
@@ -165,28 +199,195 @@ def chi2plot1d(x,y,e1data,e2data,f1data,f2data,xmax=2,nx=100):
     plt.plot(xarr,np.log(chi2_shear),'-',color='black')
     plt.savefig('Images/chi2_shear_1d.png')
     plt.close()
+    
+    #return xarr,chi2_all,chi2_flex,chi2_shear
 
 
+def minimizer_comparison(Niter):
+    #Compare the home-grown minimizer to scipy.optimize
 
-#Set up configuration
-nlens = 1
-xmax = 2.
-xlarr, ylarr, tearr = createLenses(nlens=nlens,randompos=False,xmax=xmax)
+    #Set up configuration
+    nlens = 1
+    xmax = 2.
+    xlarr, ylarr, tearr = createLenses(nlens=nlens,randompos=False,xmax=xmax)
 
-#Set up sources
-ns = 2
-sigf = 0.01
-sigs = 0.1
-x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns,randompos=True,sigf=sigf,sigs=sigs,xmax=xmax)
+    #Set up sources
+    ns = 1
 
-#Make a plot in a 2x2 range showing chi^2
+    #Create result arrays
+    xhome = np.zeros(Niter)
+    yhome = np.zeros(Niter)
+    tehome = np.zeros(Niter)
+    chi2home = np.zeros(Niter)
 
-chi2plot(x,y,e1data,e2data,f1data,f2data,xmax=xmax,nx=100)
-chi2plot1d(x,y,e1data,e2data,f1data,f2data,xmax=6,nx=1000)
+    xscipy = np.zeros(Niter)
+    yscipy = np.zeros(Niter)
+    tescipy = np.zeros(Niter)
+    chi2scipy = np.zeros(Niter)
 
-#Now minimize chi^2
-xlstart = -xmax+2*xmax*np.random.random(nlens)
-ylstart = -xmax+2*xmax*np.random.random(nlens)
-testart = np.ones(nlens)
-xlbest,ylbest,tebest,chi2best = minChi2(x,y,e1data,e2data,f1data,f2data,xlstart,ylstart,testart,sigf,sigs)
-print('Best fit parameters: ',xlbest,ylbest,tebest,chi2best)
+    for iter in range(Niter):
+        x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns,randompos=True,sigf=sigf,sigs=sigs,xmax=xmax)
+
+        #Make a plot in a 2x2 range showing chi^2
+
+        #chi2plot(x,y,e1data,e2data,f1data,f2data,xmax=xmax,nx=100)
+        #chi2plot1d(x,y,e1data,e2data,f1data,f2data,xmax=6,nx=1000)
+
+        #Now minimize chi^2
+        xlstart = -xmax+2*xmax*np.random.random(nlens)
+        ylstart = -xmax+2*xmax*np.random.random(nlens)
+        testart = np.ones(nlens)
+        xlbest,ylbest,tebest,chi2best = minChi2(x,y,e1data,e2data,f1data,f2data,xlstart,ylstart,testart,sigf,sigs)
+        #print('Best fit parameters: ',xlbest,ylbest,tebest,chi2best)
+
+        def chi2wrapper(guess, params):
+            return chi2(params[0],params[1],params[2],params[3],params[4],params[5],guess[0],guess[1],guess[2],params[6],params[7])
+
+        #Compare to scipy.optimize
+        guess = np.concatenate((xlstart,ylstart,testart))
+        params = [x,y,e1data,e2data,f1data,f2data,sigf,sigs]
+        result = optimize.minimize(chi2wrapper,guess,args=(params))
+        #print('Scipy result: ',result.x,result.fun)
+
+        #Store results
+        xhome[iter] = xlbest[0]
+        yhome[iter] = ylbest[0]
+        tehome[iter] = tebest[0]
+        chi2home[iter] = chi2best
+
+        xscipy[iter] = result.x[0]
+        yscipy[iter] = result.x[1]
+        tescipy[iter] = result.x[2]
+        chi2scipy[iter] = result.fun
+
+    #Remove outliers
+    xhome = xhome[np.abs(xhome)<xmax*100]
+    yhome = yhome[np.abs(yhome)<xmax*100]
+    tehome = tehome[np.abs(tehome)<10]
+    chi2home = chi2home[np.abs(chi2home)<1000]
+
+    xscipy = xscipy[np.abs(xscipy)<xmax*100]
+    yscipy = yscipy[np.abs(yscipy)<xmax*100]
+    tescipy = tescipy[np.abs(tescipy)<10]
+    chi2scipy = chi2scipy[np.abs(chi2scipy)<1000]
+
+    #Plot the results
+    fig, ax = plt.subplots(1,4,figsize=(20,5))
+    fig.suptitle('Comparison of minimizers: {} iterations'.format(Niter))
+
+    fancyhist(xhome, ax=ax[0], bins='scott', histtype='step', density=True, color='k',label='Home: mean = {:.3f}, std = {:.3f}'.format(np.mean(xhome),np.std(xhome)))
+    fancyhist(xscipy, ax=ax[0], bins='scott', histtype='step', density=True, color='r',label='Scipy: mean = {:.3f}, std = {:.3f}'.format(np.mean(xscipy),np.std(xscipy)))
+
+    fancyhist(yhome, ax=ax[1], bins='scott', histtype='step', density=True, color='k',label='Home: mean = {:.3f}, std = {:.3f}'.format(np.mean(yhome),np.std(yhome)))
+    fancyhist(yscipy, ax=ax[1], bins='scott', histtype='step', density=True, color='r',label='Scipy: mean = {:.3f}, std = {:.3f}'.format(np.mean(yscipy),np.std(yscipy)))
+
+    fancyhist(tehome, ax=ax[2], bins='scott', histtype='step', density=True, color='k',label='Home: mean = {:.3f}, std = {:.3f}'.format(np.mean(tehome),np.std(tehome)))
+    fancyhist(tescipy, ax=ax[2], bins='scott', histtype='step', density=True, color='r',label='Scipy: mean = {:.3f}, std = {:.3f}'.format(np.mean(tescipy),np.std(tescipy)))
+
+    fancyhist(chi2home, ax=ax[3], bins='scott', histtype='step', density=True, color='k',label='Home: mean = {:.3f}, std = {:.3f}'.format(np.mean(chi2home),np.std(chi2home)))
+    fancyhist(chi2scipy, ax=ax[3], bins='scott', histtype='step', density=True, color='r',label='Scipy: mean = {:.3f}, std = {:.3f}'.format(np.mean(chi2scipy),np.std(chi2scipy)))
+
+    ax[0].legend()
+    ax[1].legend()
+    ax[2].legend()
+    ax[3].legend()
+
+    ax[0].set_xlabel('x')
+    ax[1].set_xlabel('y')
+    ax[2].set_xlabel('theta_E')
+    ax[3].set_xlabel('chi2')
+
+    ax[0].set_xlim(-10,10)
+    ax[1].set_xlim(-10,10)
+    ax[2].set_xlim(-10,10)
+    #ax[3].set_xlim(0,100)
+
+    plt.savefig('Images/chi2_comparison.png')
+    plt.show()
+
+
+def iterative_minimization(xs,ys,e1data,e2data,f1data,f2data,xlarr,ylarr,tearr,title):
+    #Perform a minimization with the n=1 sources, then add a source and re-minimize until all sources are included
+    fig, ax = plt.subplots(1,3,figsize=(10,5), sharey=True)
+    fig.suptitle('Iterative minimization: {}'.format(title))
+    colors = ['red', 'blue', 'black']
+
+    for i in range(ns):
+        #print(title + ' Adding source ',i+1,' of ',ns)
+        #xlbest, ylbest, erbest, chi2best = minChi2(xs[0:i+1],ys[0:i+1],e1data[0:i+1],e2data[0:i+1],f1data[0:i+1],f2data[0:i+1],xlarr,ylarr,tearr,sigf,sigs)
+        #print('Best fit parameters: ',xlbest,ylbest,erbest,chi2best)
+        x,chi2all,chi2f,chi2s = chi2plot1d(xs[0:i+1],ys[0:i+1],e1data[0:i+1],e2data[0:i+1],f1data[0:i+1],f2data[0:i+1],xmax=6,nx=1000)
+        ax[0].plot(x,np.log(chi2all),'-',label='{} sources'.format(i+1), color=colors[i])
+        ax[1].plot(x,np.log(chi2s),'-',label='{} sources'.format(i+1), color=colors[i])
+        ax[2].plot(x,np.log(chi2f),'-',label='{} sources'.format(i+1), color=colors[i])
+
+
+    ax[0].set_xlabel('x')
+    ax[1].set_xlabel('x')
+    ax[2].set_xlabel('x')
+    ax[0].set_ylabel('ln(chi2)')
+    ax[1].set_ylabel('ln(chi2)')
+    ax[2].set_ylabel('ln(chi2)')
+    ax[0].set_title('All parameters') 
+    ax[1].set_title('Shear only')
+    ax[2].set_title('Flexion only')
+
+    ax[0].set_ylim(0,15)
+    ax[1].set_ylim(0,15)
+    ax[2].set_ylim(0,15)
+    plt.savefig('Images/iterative_minimization_{}.png'.format(title))
+
+
+if __name__ == '__main__':
+    # Set up the true lens configuration
+    nlens=1
+    xmax=2. # The range to consider for the lenses.
+    xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=False,xmax=xmax)
+
+    # Source parameters
+    ns=1
+    x,y,e1data,e2data,f1data,f2data=createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=False)
+
+    # Make a plot in a 2x2 range showing chi^2
+    chi2plot(x,y,f1data,f2data,e1data,e2data,xmax=6,nx=200)
+    chi2plot1d(x,y,e1data,e2data,f1data,f2data,xmax=6,nx=1000)
+
+    # Now find the local min.
+
+    # Take an inital guess.  We assume we know (or can guess) the number of lenses
+    xlstart=-xmax+2*xmax*np.random.random(nlens)
+    ylstart=-xmax+2*xmax*np.random.random(nlens)
+    testart=np.ones(nlens)
+    #testart=abs(0.5+random.random(nlens))
+    xlbest,ylbest,tebest,chi2best=minChi2(x,y,e1data,e2data,f1data,f2data,xlstart,ylstart,testart,sigf,sigs)
+    print(xlbest,ylbest,tebest,chi2best)
+
+    '''
+    #Set up configuration
+    nlens = 1
+    xmax = 2.
+    xlarr, ylarr, tearr = createLenses(nlens=nlens,randompos=False,xmax=xmax)
+
+    #Set up sources
+    ns = 3
+    xs, ys, e1data, e2data, f1data, f2data = createSources(xlarr,ylarr,tearr,ns,randompos=False,sigf=sigf,sigs=sigs,xmax=xmax)
+
+    #Create plot for each possible combination of sources
+    #For 3 sources, there are 6 possible combinations
+    Order1 = [0,1,2]
+    Order2 = [0,2,1]
+    Order3 = [1,0,2]
+    Order4 = [1,2,0]
+    Order5 = [2,0,1]
+    Order6 = [2,1,0]
+
+
+    titles = ['Order1', 'Order2', 'Order3', 'Order4', 'Order5', 'Order6']
+    
+    iterative_minimization(xs[Order1], ys[Order1], e1data[Order1], e2data[Order1], f1data[Order1], f2data[Order1], xlarr, ylarr, tearr, titles[0])
+    iterative_minimization(xs[Order2], ys[Order2], e1data[Order2], e2data[Order2], f1data[Order2], f2data[Order2], xlarr, ylarr, tearr, titles[1])
+    iterative_minimization(xs[Order3], ys[Order3], e1data[Order3], e2data[Order3], f1data[Order3], f2data[Order3], xlarr, ylarr, tearr, titles[2])
+    iterative_minimization(xs[Order4], ys[Order4], e1data[Order4], e2data[Order4], f1data[Order4], f2data[Order4], xlarr, ylarr, tearr, titles[3])
+    iterative_minimization(xs[Order5], ys[Order5], e1data[Order5], e2data[Order5], f1data[Order5], f2data[Order5], xlarr, ylarr, tearr, titles[4])
+    iterative_minimization(xs[Order6], ys[Order6], e1data[Order6], e2data[Order6], f1data[Order6], f2data[Order6], xlarr, ylarr, tearr, titles[5])
+    '''
