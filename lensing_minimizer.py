@@ -54,8 +54,8 @@ def lens(x,y,xlarr,ylarr,tearr):
     f1 = np.sum(-dx*tearr/(2*r*r*r))
     f2 = np.sum(-dy*tearr/(2*r*r*r))
 
-    e1 = np.sum(-tearr/r*cos2phi)
-    e2 = np.sum(-tearr/r*sin2phi)
+    e1 = np.sum(-tearr/(2*r)*cos2phi)
+    e2 = np.sum(-tearr/(2*r)*sin2phi)
 
     return e1,e2,f1,f2
 
@@ -348,21 +348,90 @@ if __name__ == '__main__':
     ns=1
     x,y,e1data,e2data,f1data,f2data=createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=False)
 
-    # Make a plot in a 2x2 range showing chi^2
-    chi2plot(x,y,f1data,f2data,e1data,e2data,xmax=6,nx=200)
-    chi2plot1d(x,y,e1data,e2data,f1data,f2data,xmax=6,nx=1000)
+    xgrid = np.linspace(-10,10,100)
+    dx1 = x[0] - xgrid
 
-    # Now find the local min.
+    eR_flex = -2 * dx1 * np.abs(dx1) * f1data[0]
+    eR_shear = - 2 * np.abs(dx1) * e1data[0]
 
-    # Take an inital guess.  We assume we know (or can guess) the number of lenses
-    xlstart=-xmax+2*xmax*np.random.random(nlens)
-    ylstart=-xmax+2*xmax*np.random.random(nlens)
-    testart=np.ones(nlens)
-    #testart=abs(0.5+random.random(nlens))
-    xlbest,ylbest,tebest,chi2best=minChi2(x,y,e1data,e2data,f1data,f2data,xlstart,ylstart,testart,sigf,sigs)
-    print(xlbest,ylbest,tebest,chi2best)
+    xsolution = e1data[0] / f1data[0]
+    eRsolution = -2 * xsolution * np.abs(xsolution) * f1data[0]
+    print('Analytic solution: ',xsolution,eRsolution)
+    print('True solution: ',x[0] - xlarr[0],1.0)
+    print('Error: ',xsolution - (x[0] - xlarr[0]),eRsolution - 1.0)
+
+    plt.figure()
+    plt.plot(dx1, eR_flex, label='eR flexion prediction')
+    plt.plot(dx1, eR_shear, label='eR shear prediction')
+    plt.scatter(x[0] - xlarr, tearr, label='true lens')
+    plt.scatter(xsolution, eRsolution, label='analytic solution')
+    plt.legend()
+    plt.xlabel('dx - distance from the source')
+    plt.ylabel('eR')
+    plt.savefig('Images/eR.png')
+    plt.show()
+    plt.close()
+
+
+    #Evaluate chi2 for the analytic solution and the true solution
+    chi2_analytic = chi2(x,y,e1data,e2data,f1data,f2data,np.asarray([xsolution]),np.asarray([0.0]),np.asarray([eRsolution]),sigf,sigs,fwgt=0.0)
+    chi2_true = chi2(x,y,e1data,e2data,f1data,f2data,np.asarray([xlarr[0]]),np.asarray([0.0]),np.asarray([1.0]),sigf,sigs,fwgt=0.0)
+    #chi2_zero = chi2(x,y,e1data,e2data,f1data,f2data,np.asarray([x[0]]),np.asarray([0.0]),np.asarray([0.0]),sigf,sigs,swgt=0.0)
+
+    #Perform minimization with different initial guesses
+    xrandom = -xmax+2*xmax*np.random.random(nlens)
+    yguess = 0.0
+    eRguess = 1.0
+
+    xlbest, ylbest, erbest, chi2best = minChi2(x,y,e1data,e2data,f1data,f2data,xrandom,ylarr,tearr,sigf,sigs)
+    print('Best fit parameters - random guess: ',xlbest,ylbest,erbest,chi2best)
+
+    xlbest, ylbest, erbest, chi2best = minChi2(x,y,e1data,e2data,f1data,f2data,np.asarray([xsolution]),np.asarray([0.0]),np.asarray([eRsolution]),sigf,sigs)
+    print('Best fit parameters - analytic solution: ',xlbest,ylbest,erbest,chi2best)
+
+    xlbest, ylbest, erbest, chi2best = minChi2(x,y,e1data,e2data,f1data,f2data,np.asarray([xlarr[0]]),np.asarray([0.0]),np.asarray([1.0]),sigf,sigs)
+    print('Best fit parameters - true solution: ',xlbest,ylbest,erbest,chi2best)
+
+    
+    print('Chi2 for analytic solution: ',chi2_analytic)
+    print('Chi2 for true solution: ',chi2_true)
+    #print('Chi2 for zero solution: ',chi2_zero)
+
+    chi2_flex = np.zeros(100) # chi2 for flexion only, because we're making this prediction from flexion only
+    chi2_shear = np.zeros(100) # chi2 for shear only, because we're making this prediction from shear only
+    chi2_all1 = np.zeros(100) # chi2 for all parameters, using the guess from flexion
+    chi2_all2 = np.zeros(100) # chi2 for all parameters, using the guess from shear
+
+    for i in range(100):
+        chi2_flex[i] = chi2(x,y,e1data,e2data,f1data,f2data,np.asarray([xgrid[i]]),np.asarray([0.0]),np.asarray([eR_flex[i]]),sigf,sigs,swgt=0.0)
+        chi2_shear[i] = chi2(x,y,e1data,e2data,f1data,f2data,np.asarray([xgrid[i]]),np.asarray([0.0]),np.asarray([eR_shear[i]]),sigf,sigs,fwgt=0.0)
+        chi2_all1[i] = chi2(x,y,e1data,e2data,f1data,f2data,np.asarray([xgrid[i]]),np.asarray([0.0]),np.asarray([eR_flex[i]]),sigf,sigs)
+        chi2_all2[i] = chi2(x,y,e1data,e2data,f1data,f2data,np.asarray([xgrid[i]]),np.asarray([0.0]),np.asarray([eR_shear[i]]),sigf,sigs)
+
+    plt.figure()
+    plt.plot(xgrid, np.log(chi2_flex+10**-20), label='chi2_flex')
+    plt.plot(xgrid, np.log(chi2_shear+10**-20), label='chi2_shear')
+    plt.legend()
+    plt.xlabel('x')
+    plt.ylabel('ln(chi2)')
+    plt.savefig('Images/chi2_flex.png')
+    plt.show()
+    plt.close()
+
+    plt.figure()
+    plt.plot(xgrid, np.log(chi2_all1+10**-20), label='chi2 - flex prediction')
+    plt.plot(xgrid, np.log(chi2_all2+10**-20), label='chi2 - shear prediction')
+    plt.scatter(xlarr, tearr, label='true')
+    plt.scatter(x[0], 1.0, label='source')
+    plt.legend()
+    plt.xlabel('x')
+    plt.ylabel('ln(chi2)')
+    plt.savefig('Images/chi2.png')
+    plt.show()
+    plt.close()
 
     '''
+  
     #Set up configuration
     nlens = 1
     xmax = 2.
