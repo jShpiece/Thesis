@@ -185,6 +185,7 @@ def chi2plot1d(x,y,e1data,e2data,f1data,f2data,xmax=2,nx=100):
         chi2_shear[i] = chi2(x,y,e1data,e2data,f1data,f2data,np.asarray([x1]),np.asarray([y1]),np.asarray([1.0]),sigf,sigs,fwgt=0.0)
     
     x0 = x*0.0
+    '''
     plt.plot(x,x0,'o',color='red')
     plt.plot(xarr,np.log(chi2_all),'-',color='black')
     plt.savefig('Images/chi2_all_1d.png')
@@ -199,8 +200,9 @@ def chi2plot1d(x,y,e1data,e2data,f1data,f2data,xmax=2,nx=100):
     plt.plot(xarr,np.log(chi2_shear),'-',color='black')
     plt.savefig('Images/chi2_shear_1d.png')
     plt.close()
+    '''
     
-    #return xarr,chi2_all,chi2_flex,chi2_shear
+    return xarr,chi2_all,chi2_flex,chi2_shear
 
 
 def minimizer_comparison(Niter):
@@ -306,39 +308,60 @@ def minimizer_comparison(Niter):
     plt.show()
 
 
-def iterative_minimization(xs,ys,e1data,e2data,f1data,f2data,xlarr,ylarr,tearr,title):
+def iterative_minimization(xs,ys,e1data,e2data,f1data,f2data,title):
     #Perform a minimization with the n=1 sources, then add a source and re-minimize until all sources are included
-    fig, ax = plt.subplots(1,3,figsize=(10,5), sharey=True)
-    fig.suptitle('Iterative minimization: {}'.format(title))
-    colors = ['red', 'blue', 'black']
+    ns = len(xs)
+    nlens = 1
+    xmax = 2.
+
+    #Take an inital guess.  We assume we know (or can guess) the number of lenses
+    ylstart=np.zeros(nlens)
+    xlstart=-xmax+2*xmax*np.random.random(nlens)
+    testart=np.ones(nlens)
+
+    xlstart1 = xlstart
+    ylstart1 = ylstart
+    testart1 = testart
+
+    #Initialize the plot
+    plt.figure( figsize=(10,10) )
+    plt.title('Iterative minimization: {}'.format(title))
+    colors = ['red', 'blue', 'green', 'orange', 'purple', 'pink', 'brown', 'gray', 'olive', 'black']
+
+    xfit = []
+    chi2fit = []
+
 
     for i in range(ns):
         #print(title + ' Adding source ',i+1,' of ',ns)
-        #xlbest, ylbest, erbest, chi2best = minChi2(xs[0:i+1],ys[0:i+1],e1data[0:i+1],e2data[0:i+1],f1data[0:i+1],f2data[0:i+1],xlarr,ylarr,tearr,sigf,sigs)
+        xlbest, ylbest, erbest, chi2best = minChi2(xs[0:i+1],ys[0:i+1],e1data[0:i+1],e2data[0:i+1],f1data[0:i+1],f2data[0:i+1],xlstart1,ylstart1,testart1,sigf,sigs)
+        #Update the initial guess
+        xlstart1 = xlbest
+        ylstart1 = ylbest
+        testart1 = erbest
+
+        #Store the results
+        xfit.append(xlbest[0])
+        chi2fit.append(chi2best)
+
         #print('Best fit parameters: ',xlbest,ylbest,erbest,chi2best)
         x,chi2all,chi2f,chi2s = chi2plot1d(xs[0:i+1],ys[0:i+1],e1data[0:i+1],e2data[0:i+1],f1data[0:i+1],f2data[0:i+1],xmax=6,nx=1000)
-        ax[0].plot(x,np.log(chi2all),'-',label='{} sources'.format(i+1), color=colors[i])
-        ax[1].plot(x,np.log(chi2s),'-',label='{} sources'.format(i+1), color=colors[i])
-        ax[2].plot(x,np.log(chi2f),'-',label='{} sources'.format(i+1), color=colors[i])
-
-
-    ax[0].set_xlabel('x')
-    ax[1].set_xlabel('x')
-    ax[2].set_xlabel('x')
-    ax[0].set_ylabel('ln(chi2)')
-    ax[1].set_ylabel('ln(chi2)')
-    ax[2].set_ylabel('ln(chi2)')
-    ax[0].set_title('All parameters') 
-    ax[1].set_title('Shear only')
-    ax[2].set_title('Flexion only')
-
-    ax[0].set_ylim(0,15)
-    ax[1].set_ylim(0,15)
-    ax[2].set_ylim(0,15)
+        plt.plot(x, np.log(chi2all), color=colors[i], alpha = 0.2)
+        plt.scatter(xlbest, np.log(chi2best), color=colors[i], label = 'Best fit: x = {:.3f}, chi2 = {:.2f}'.format(xlbest[0],chi2best))
+        
+    plt.xlabel('x')
+    plt.ylabel('log(chi2)')
+    plt.legend()
+    
     plt.savefig('Images/iterative_minimization_{}.png'.format(title))
+    print('Saved Images/iterative_minimization_{}.png'.format(title))
+    plt.close()
+
+    return xfit, chi2fit
 
 
 if __name__ == '__main__':
+    '''
     # Set up the true lens configuration
     nlens=1
     xmax=2. # The range to consider for the lenses.
@@ -438,25 +461,43 @@ if __name__ == '__main__':
     xlarr, ylarr, tearr = createLenses(nlens=nlens,randompos=False,xmax=xmax)
 
     #Set up sources
-    ns = 3
+    ns = 10
     xs, ys, e1data, e2data, f1data, f2data = createSources(xlarr,ylarr,tearr,ns,randompos=False,sigf=sigf,sigs=sigs,xmax=xmax)
 
     #Create plot for each possible combination of sources
-    #For 3 sources, there are 6 possible combinations
-    Order1 = [0,1,2]
-    Order2 = [0,2,1]
-    Order3 = [1,0,2]
-    Order4 = [1,2,0]
-    Order5 = [2,0,1]
-    Order6 = [2,1,0]
+    #For 10 sources, there are 10! = 3628800 possible combinations
+    #Clearly, we can't make a plot for each of these
+    #Instead, we'll choose certain orders that we think are interesting
+    #Lets take 5 possible orders: two random orders, an order arranged by flexion, by shear, and by x (this last one should also essentially be random)
 
+    order1 = [0,1,2,3,4,5,6,7,8,9]
+    order2 = [9,8,7,6,5,4,3,2,1,0]
+    #Find the order arranged by flexion (small to large)
+    order3 = np.argsort(np.abs(f1data))
+    order3 = order3[::-1]
+    #Find the order arranged by shear
+    order4 = np.argsort(np.abs(e1data))
+    order4 = order4[::-1]
+    #Find the order arranged by x
+    order5 = np.argsort(xs)
 
-    titles = ['Order1', 'Order2', 'Order3', 'Order4', 'Order5', 'Order6']
+    #Now make the plots
+    xfit1, chi2fit1 = iterative_minimization(xs[order1],ys[order1],e1data[order1],e2data[order1],f1data[order1],f2data[order1],'random_ordering_1')
+    xfit2, chi2fit2 = iterative_minimization(xs[order2],ys[order2],e1data[order2],e2data[order2],f1data[order2],f2data[order2],'random_ordering_2')
+    xfit3, chi2fit3 = iterative_minimization(xs[order3],ys[order3],e1data[order3],e2data[order3],f1data[order3],f2data[order3],'flexion_ordering')
+    xfit4, chi2fit4 = iterative_minimization(xs[order4],ys[order4],e1data[order4],e2data[order4],f1data[order4],f2data[order4],'shear_ordering')
+    xfit5, chi2fit5 = iterative_minimization(xs[order5],ys[order5],e1data[order5],e2data[order5],f1data[order5],f2data[order5],'x_ordering')
+
+    plt.figure()
+    plt.title('Comparison of iterative minimization')
+    plt.plot(order1, xfit1, '-', color='red', label='Random ordering 1')
+    plt.plot(order1, xfit2, '-', color='blue', label='Random ordering 2')
+    plt.plot(order1, xfit3, '-', color='green', label='Flexion ordering')
+    plt.plot(order1, xfit4, '-', color='orange', label='Shear ordering')
+    plt.plot(order1, xfit5, '-', color='purple', label='x ordering')
+    plt.xlabel('Source number')
+    plt.ylabel('Best fit x')
+    plt.legend()
+    plt.ylim(-6,6)
+    plt.savefig('Images/iterative_minimization_comparison_ns_{}.png'.format(ns))
     
-    iterative_minimization(xs[Order1], ys[Order1], e1data[Order1], e2data[Order1], f1data[Order1], f2data[Order1], xlarr, ylarr, tearr, titles[0])
-    iterative_minimization(xs[Order2], ys[Order2], e1data[Order2], e2data[Order2], f1data[Order2], f2data[Order2], xlarr, ylarr, tearr, titles[1])
-    iterative_minimization(xs[Order3], ys[Order3], e1data[Order3], e2data[Order3], f1data[Order3], f2data[Order3], xlarr, ylarr, tearr, titles[2])
-    iterative_minimization(xs[Order4], ys[Order4], e1data[Order4], e2data[Order4], f1data[Order4], f2data[Order4], xlarr, ylarr, tearr, titles[3])
-    iterative_minimization(xs[Order5], ys[Order5], e1data[Order5], e2data[Order5], f1data[Order5], f2data[Order5], xlarr, ylarr, tearr, titles[4])
-    iterative_minimization(xs[Order6], ys[Order6], e1data[Order6], e2data[Order6], f1data[Order6], f2data[Order6], xlarr, ylarr, tearr, titles[5])
-    '''
