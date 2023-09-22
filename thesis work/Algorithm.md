@@ -1,0 +1,1 @@
+1. Perform a local minimization for each source, 
