@@ -8,23 +8,23 @@
         "type": "tabs",
         "children": [
           {
-            "id": "d20bc4f2d9b969d9",
-            "type": "leaf",
-            "state": {
-              "type": "empty",
-              "state": {}
-            }
-          },
-          {
             "id": "12f8700df52e9b0a",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Algorithm.md",
+                "file": "Minimization start.md",
                 "mode": "source",
                 "source": false
               }
+            }
+          },
+          {
+            "id": "cc56fc146ad24ab4",
+            "type": "leaf",
+            "state": {
+              "type": "graph",
+              "state": {}
             }
           }
         ],
@@ -94,7 +94,6 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Algorithm.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -111,7 +110,6 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Algorithm.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               }
@@ -133,9 +131,7 @@
             "type": "leaf",
             "state": {
               "type": "outline",
-              "state": {
-                "file": "Algorithm.md"
-              }
+              "state": {}
             }
           }
         ]
@@ -155,8 +151,12 @@
       "command-palette:Open command palette": false
     }
   },
-  "active": "12f8700df52e9b0a",
+  "active": "cc56fc146ad24ab4",
   "lastOpenFiles": [
-    "Algorithm.md"
+    "criteria.md",
+    "Algorithm.md",
+    "Chi squared function.md",
+    "Minimization start.md",
+    "penalty function.md"
   ]
 }
