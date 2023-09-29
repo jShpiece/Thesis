@@ -3,4 +3,4 @@ Given a set of candidate lenses, which can we remove out of hand? That is, what 
 - $0.001''<\theta_{E}<60''$ is a criteria that does 3 things - it removes all lenses with a negative amplitude, which cannot exist, it removes all lenses larger than an arcminute, which we do not reasonably expect to occur in a cluster environment, and it removes all lenses smaller than 10^-3 arcseconds, which are too small to be reasonably detected by any pipeline we construct. 
 - There should be a maximum distance the lens can fall from the center - we cannot reasonably locate a lens that is far from all of our sources (and we aren't trying to!).
 - There should not be any lenses that fall right on top of a source - if this *does* happen it will cause the lensing signal of the source to blow up, which would have caused us to already remove the source from our data. In other words - the fact that we are using this source is evidence that there is not a lens very near it. 
-- 
+- Merge lenses that are too close?
