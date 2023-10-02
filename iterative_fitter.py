@@ -1,10 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize as opt
-import time
+import pipeline
+from utils import lens
 
 sigf = 0.01
 sigs = 0.1
+
 
 def createLenses(nlens=1,randompos=True,xmax=10):
     #For now, fix theta_E at 1
@@ -44,189 +46,30 @@ def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5
     return x,y,e1data,e2data,f1data,f2data
 
 
-def lens(x,y,xlarr,ylarr,tearr):
-    #Compute the lensing signals on a single source 
-    #from a set of lenses
-    dx = x-xlarr
-    dy = y-ylarr
-    r = np.sqrt(dx**2+dy**2)
-    cosphi = dx/r
-    sinphi = dy/r
-    cos2phi = cosphi*cosphi-sinphi*sinphi
-    sin2phi = 2*cosphi*sinphi
-
-    f1 = np.sum(-dx*tearr/(2*r*r*r))
-    f2 = np.sum(-dy*tearr/(2*r*r*r))
-
-    e1 = np.sum(-tearr/(2*r)*cos2phi)
-    e2 = np.sum(-tearr/(2*r)*sin2phi)
-
-    return e1,e2,f1,f2
-
-
-def chi2(x,y,e1data,e2data,f1data,f2data,xltest,yltest,tetest,sigf,sigs,fwgt=1.0,swgt=1.0):
-    #Now compute the chi^2
-    chi2val = 0.0
-    for i in range(len(x)):
-        e1,e2,f1,f2 = lens(x[i],y[i],xltest,yltest,tetest)
-        chif1 = (f1data[i]-f1)**2 / (sigf**2)
-        chif2 = (f2data[i]-f2)**2 / (sigf**2)
-        chie1 = (e1data[i]-e1)**2 / (sigs**2)
-        chie2 = (e2data[i]-e2)**2 / (sigs**2)
-
-        chi2val += fwgt * (chif1 + chif2) + swgt * (chie1 + chie2) 
-    return chi2val
-
-
-def chi2wrapper(guess,params):
-    return chi2(params[0],params[1],params[2],params[3],params[4],params[5],guess[0],guess[1],guess[2],params[6],params[7])
-    
-
-def list_winnower(xl,yl,eR,x,y,xmax,threshold_distance=1.0, min_radius=10**-3):
-    winnowed_x = []
-    winnowed_y = []
-    winnowed_eR = []
-
-    for i in range(len(xl)):
-        #Eliminate lenses with an improper einstein radius
-        if eR[i] < min_radius:
-            continue
-
-        if eR[i] > 60:
-            continue
-
-        #Check if the lens is within threshold_distance of any sources
-        too_close = any(np.sqrt((xl[i]-x)**2+(yl[i]-y)**2) < threshold_distance)
-        if too_close:
-            continue
-
-        #Check if the lens is too far from the center
-        if np.sqrt(xl[i]**2+yl[i]**2) > xmax:
-            continue
-
-        #If we get here, the lens is an acceptable candidate
-        winnowed_x.append(xl[i])
-        winnowed_y.append(yl[i])
-        winnowed_eR.append(eR[i])
-
-    return np.array(winnowed_x), np.array(winnowed_y), np.array(winnowed_eR)
-
-
-def iterative_minimizer(xlens,ylens,telens,chi2val,Nsource):
-    while True:
-        #Loop through the lenses and remove them one at a time
-        #to see if the chi^2 value improves
-        for i in range(len(xlens)):
-            xltest = np.delete(xlens,i)
-            yltest = np.delete(ylens,i)
-            tetest = np.delete(telens,i)
-            dof = 4*Nsource - 3*len(xltest) #Each source has 4 data points, each lens has 3 parameters
-            chi2test = chi2(x,y,e1data,e2data,f1data,f2data,xltest,yltest,tetest,sigf,sigs) / dof
-            if chi2test < chi2val:
-                xlens = xltest
-                ylens = yltest
-                telens = tetest
-                chi2val = chi2test
-                break
-        else:
-            print('No more lenses to remove')
-            break
-    
-    if len(xlens) == 0:
-        print('Oops, no lenses left!')
-    
-    return xlens, ylens, telens, chi2val
-
-
-def choose_guess(x,y,e1data,e2data,f1data,f2data):
-    #Choose a guess for the lens position given the source data
-    gamma = np.sqrt(e1data**2+e2data**2)
-    flexion = np.sqrt(f1data**2+f2data**2)
-    phi_flexion = np.arctan2(f2data,f1data) 
-
-    #look, what if we just use the angle from flexion? We know that this should point right to the lens. 
-    #It doesn't seem like we will lose too much information, especially since this is just a starting guess
-    phi = phi_flexion 
-    r = gamma / flexion
-
-    xguess = x + r * np.cos(phi)
-    yguess = y + r * np.sin(phi)
-    eRguess = 2 * gamma * np.abs(r)
-
-    return np.array([xguess, yguess, eRguess])
-
 
 if __name__ == '__main__':
     '''Note to self - chi2 should be calculated per degree of freedom'''
     # Set up the true lens configuration
     nlens=1 # Number of lenses
-    xmax=3. # The range to consider for the lenses.
+    xmax=4. # The range to consider for the lenses.
     xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=True,xmax=xmax)
 
-    source_num = [1,2,3,4,5,6,7,8,9,10]
+    # Set up the true source configuration
+    ns = 4
+    x,y,e1data,e2data,f1data,f2data=createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
 
-    for num in source_num:
-        ns = num
+    # Run the minimization
+    xlens,ylens,eRlens,chi2 = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=True)
 
-        # Source parameters
-        #ns=1 # Number of sources
-        x,y,e1data,e2data,f1data,f2data=createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
-
-        #perform local minimization
-        xlens = np.zeros(ns)
-        ylens = np.zeros(ns)
-        telens = np.zeros(ns)
-        for i in range(ns):
-            #Perform a local minimization
-            params = [[x[i]],[y[i]],[e1data[i]],[e2data[i]],[f1data[i]],[f2data[i]],sigf,sigs]
-            guess = choose_guess(x[i],y[i],e1data[i],e2data[i],f1data[i],f2data[i])
-            res = opt.minimize(chi2wrapper,guess,args=(params))
-            xlens[i] = res.x[0]
-            ylens[i] = res.x[1]
-            telens[i] = res.x[2]
-        dof = 4*len(x) - 3*len(xlens) #Each source has 4 data points, each lens has 3 parameters
-        chi2val = chi2(x,y,e1data,e2data,f1data,f2data,xlens,ylens,telens,sigf,sigs) / dof
-
-        #Plot the results of each step
-        
-        fig, ax = plt.subplots(1,3,figsize=(16,4))
-
-        ax[0].scatter(xlarr,ylarr,s=tearr*50,color='red',marker='x',label='True Lenses',alpha=1.0)
-        ax[0].scatter(xlens,ylens,color='blue',s=np.abs(telens)*50,label='Candidate Lenses: nl = {}'.format(len(xlens)),alpha=0.70)
-        ax[0].scatter(x,y,color='green',s=10,label='Sources',alpha=0.70)
-        ax[0].set_xlim(-xmax,xmax)
-        ax[0].set_ylim(-xmax,xmax)
-        ax[0].set_aspect('equal')
-        ax[0].legend()
-        ax[0].set_title('Candidate Lenses from Local Minimization \n chi^2 = '+str(np.round(chi2val,3)))
-        
-
-        #Perform the winnowing
-        xlens, ylens, telens = list_winnower(xlens,ylens,telens,x,y,xmax)
-        dof = 4*len(x) - 3*len(xlens) #Each source has 4 data points, each lens has 3 parameters
-        chi2val = chi2(x,y,e1data,e2data,f1data,f2data,xlens,ylens,telens,sigf,sigs) / dof
-
-        #Plot the results of the winnowing
-        
-        ax[1].scatter(xlarr,ylarr,s=tearr*50,color='red',marker='x',label='True Lenses',alpha=1.0)
-        ax[1].scatter(xlens,ylens,color='blue',s=telens*50,label='Candidate Lenses: nl = {}'.format(len(xlens)),alpha=0.70)
-        ax[1].set_xlim(-xmax,xmax)
-        ax[1].set_ylim(-xmax,xmax)
-        ax[1].set_aspect('equal')
-        ax[1].legend()
-        ax[1].set_title('Candidate Lenses after Winnowing \n chi^2 = '+str(np.round(chi2val,3)))
-        
-        #Perform iterative minimization
-        xlens, ylens, telens, chi2val = iterative_minimizer(xlens,ylens,telens,chi2val,ns)
-
-        #Plot the results of the iterative minimization
-
-        ax[2].scatter(xlarr,ylarr,s=tearr*50,color='red',marker='x',label='True Lenses',alpha=1.0)
-        ax[2].scatter(xlens,ylens,color='blue',s=telens*50,label='Candidate Lenses: nl = {} \n eR = {}'.format(len(xlens),telens),alpha=0.70)
-        ax[2].set_xlim(-xmax,xmax)
-        ax[2].set_ylim(-xmax,xmax)
-        ax[2].set_aspect('equal')
-        ax[2].legend()
-        ax[2].set_title('Candidate Lenses after Iterative Elimination \n chi^2 = '+str(np.round(chi2val,3)))
-        
-        plt.savefig('images/iterative_fitter_{}lens_{}source.png'.format(nlens,ns),dpi=300,bbox_inches='tight')
+    # Plot the results
+    plt.figure()
+    plt.scatter(xlens,ylens,color='red',label='Recovered Lenses')
+    plt.scatter(x,y,color='blue',label='Sources')
+    plt.scatter(xlarr,ylarr,marker='x',color='green',label='True Lenses')
+    plt.legend()
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.xlim(-xmax,xmax)
+    plt.ylim(-xmax,xmax)
+    plt.gca().set_aspect('equal')
+    plt.show()

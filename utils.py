@@ -45,38 +45,6 @@ def makeGaussian(stamp, sigma):
     return f_g
 
 
-def process_weights(weights, eR_range):
-    '''
-    Take a likelihood map in 3D parameter space, integrate over the eR axis,
-    and convolve with a gaussian kernel to smooth out the map. Then normalize
-    the map and return it.
-    '''
-    res = len(eR_range)
-    maps = []
-    for i in range(len(weights)):
-        llmap = np.trapz(weights[i], eR_range, axis=0)
-        llmap = convolver(llmap, makeGaussian(res, 1))
-        maps.append(llmap)
-    return maps
-
-
-def find_eR(maps, coords):
-    '''
-    Take a likelihood map in 3D parameter space and return the eR value
-    at each maxima.
-    '''
-    output = []
-    for i in range(len(maps)):
-        eR = []
-        x = coords[i][0]
-        y = coords[i][1]
-        for j in range(len(x)):
-            possible_eR = maps[i][:,y[j],x[j]]
-            eR.append(np.argmax(possible_eR, axis=0))
-        output.append(eR)
-    return output
-
-
 def stn_flexion(eR, n, sigma, rmin, rmax):
     #This function calculates the signal to noise ratio of the flexion signal
     term1 = eR * np.sqrt(np.pi * n) / (sigma * rmin)
@@ -91,19 +59,40 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     return term1 * term2
 
 
-def gradient_respecting_bounds(bounds, fun, eps=1e-8):
-    '''This function takes in a function and returns the gradient of that function
-    It is used to correct the bounds being used in SCIPY minimization functions, 
-    because otherwise the minimization function will sometimes try to evaluate the
-    function outside of the bounds, which causes an error.'''
+def lens(x,y,xlarr,ylarr,tearr):
+    #Compute the lensing signals on a single source 
+    #from a set of lenses
+    dx = x-xlarr
+    dy = y-ylarr
+    r = np.sqrt(dx**2+dy**2)
+    cosphi = dx/r
+    sinphi = dy/r
+    cos2phi = cosphi*cosphi-sinphi*sinphi
+    sin2phi = 2*cosphi*sinphi
+
+    f1 = np.sum(-dx*tearr/(2*r*r*r))
+    f2 = np.sum(-dy*tearr/(2*r*r*r))
+
+    e1 = np.sum(-tearr/(2*r)*cos2phi)
+    e2 = np.sum(-tearr/(2*r)*sin2phi)
+
+    return e1,e2,f1,f2
+
+
+def chi2(x,y,e1data,e2data,f1data,f2data,xltest,yltest,tetest,sigf,sigs,fwgt=1.0,swgt=1.0):
+    #Now compute the chi^2
+    chi2val = 0.0
+    for i in range(len(x)):
+        e1,e2,f1,f2 = lens(x[i],y[i],xltest,yltest,tetest)
+        chif1 = (f1data[i]-f1)**2 / (sigf**2)
+        chif2 = (f2data[i]-f2)**2 / (sigf**2)
+        chie1 = (e1data[i]-e1)**2 / (sigs**2)
+        chie2 = (e2data[i]-e2)**2 / (sigs**2)
+
+        chi2val += fwgt * (chif1 + chif2) + swgt * (chie1 + chie2) 
+    return chi2val
+
+
+def chi2wrapper(guess,params):
+    return chi2(params[0],params[1],params[2],params[3],params[4],params[5],guess[0],guess[1],guess[2],params[6],params[7])
     
-    """bounds: list of tuples (lower, upper)"""
-    def gradient(x):
-        fx = fun(x)
-        grad = np.zeros(len(x))
-        for k in range(len(x)):
-            d = np.zeros(len(x))
-            d[k] = eps if x[k] + eps <= bounds[k][1] else -eps
-            grad[k] = (fun(x + d) - fx) / d[k]
-        return grad
-    return gradient
