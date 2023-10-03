@@ -74,7 +74,7 @@ def choose_guess(x,y,e1data,e2data,f1data,f2data):
     yguess = y + r * np.sin(phi)
     eRguess = 2 * gamma * np.abs(r)
 
-    return np.array([xguess, yguess, eRguess])
+    return np.array([[xguess], [yguess], [eRguess]])
 
 
 def perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs,sigf,xmax,flags = False):
