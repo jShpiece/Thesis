@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pipeline
 from utils import createLenses, createSources, lens
 import time
+import warnings
 
 sigf = 0.01
 sigs = 0.1
@@ -42,25 +43,38 @@ def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5
     e2data += np.random.normal(0,sigs,ns)
     f1data += np.random.normal(0,sigf,ns)
     f2data += np.random.normal(0,sigf,ns)
+
+    #Clean up the data - this means removing sources that are too close to the lenses
+    #But lets not cheat, because in real life we won't know where the lenses are
+    #Instead, we check for flexion signals that are too strong
+
+    for i in range(ns):
+        if np.abs(f1data[i]) > 1 or np.abs(f2data[i]) > 1:
+            e1data[i] = 0
+            e2data[i] = 0
+            f1data[i] = 0
+            f2data[i] = 0
+            #No need to remove the source, just set all its signals to zero
    
     return x,y,e1data,e2data,f1data,f2data
 
 
 def simple_implementation():
+    start = time.time()
     #Runs a very simple test of the algorithm, no inputs required
     '''Note to self - chi2 should be calculated per degree of freedom'''
-    start = time.time()
     # Set up the true lens configuration
-    nlens = 2 # Number of lenses
-    xmax = 2 # The range to consider for the lenses.
-    xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=True,xmax=xmax)
+    nlens = 1 # Number of lenses
+    xmax = 5 # The range to consider for the lenses.
+    xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=False,xmax=xmax)
 
     # Set up the true source configuration
-    ns = 2
+    ns = 10 # Number of sources
     x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
 
     # Run the minimization
     xlens,ylens,eRlens,chi2val = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
+
     stop = time.time()
     print('Time elapsed: ', stop-start)
     # Plot the results
@@ -78,9 +92,90 @@ def simple_implementation():
     plt.show()
 
 
+def visualize_algorithm(nlens,nsource,xmax):
+    #Use this to display each step of the algorithm
+    # Set up the true lens configuration
+    xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=False,xmax=xmax)
+    
+    # Set up the true source configuration
+    x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns=nsource,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
+
+    # Initialize the plot
+
+    fig,ax = plt.subplots(2,2,figsize=(10,10),sharex=True,sharey=True)
+    fig.suptitle('Lensing Reconstruction Dmo - {} lenses, {} sources'.format(nlens,nsource))
+
+    def plotter(ax,recovered_x,recovered_y,amplitude,chi2val,title):
+        ax.scatter(recovered_x,recovered_y,s=2*amplitude,color='red',label=r'Recovered Lenses')
+        ax.scatter(x,y,marker='.',color='blue',label='Sources')
+        ax.scatter(xlarr,ylarr,marker='x',color='green',label='True Lenses')
+        ax.legend(bbox_to_anchor=(1.1, 1.05))
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_xlim(-xmax,xmax)
+        ax.set_ylim(-xmax,xmax)
+        ax.set_aspect('equal')
+        ax.set_title(title + '\n $\chi^2$ = %.2f' % chi2val)
+        #Label each recovered lens with its amplitude
+        for i in range(len(recovered_x)):
+            ax.annotate(np.round(amplitude[i],2),(recovered_x[i],recovered_y[i]))
+
+    # Run the minimization
+    xlens,ylens,eRlens = pipeline.initial_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf)
+    chi2val = pipeline.chi2(x,y,e1data,e2data,f1data,f2data,xlens,ylens,eRlens,sigf,sigs)
+    dof = 4*len(x) - 3*len(xlens) #Each source has 4 data points, each lens has 3 parameters
+    chi2val /= dof #Normalize by the number of degrees of freedom
+
+    for i in range(len(xlens)):
+        #for each lens, we will check if the chi^2 value improves if we move the lens a little bit
+
+        dx = 0.1
+        dy = 0.1
+        deR = 0.1
+        for j in range(10):
+            #Move the lens in a circle around the current position
+            xtest = xlens[i] + dx * np.cos(2*np.pi*j/10)
+            ytest = ylens[i] + dy * np.sin(2*np.pi*j/10)
+            eRtest = eRlens[i] + deR
+            chi2test = pipeline.chi2(x,y,e1data,e2data,f1data,f2data,xtest,ytest,eRtest,sigf,sigs) / dof
+            if chi2test < chi2val:
+                #If we get here, the chi^2 value has improved, so we move the lens
+                print('We moved a lens!')
+                chi2val = chi2test
+                xlens[i] = xtest
+                ylens[i] = ytest
+                eRlens[i] = eRtest
+                break
+
+    # Plot the results
+    plotter(ax[0,0],xlens,ylens,eRlens,chi2val,'Initial Minimization')
+
+    # Perform the winnowing
+    xlens,ylens,eRlens = pipeline.list_winnower(xlens,ylens,eRlens,x,y,xmax)
+
+    # Plot the results
+    plotter(ax[0,1],xlens,ylens,eRlens,chi2val,'Winnowing')
+
+    # Perform the merging
+    xlens,ylens,eRlens = pipeline.merge_lenses(xlens,ylens,eRlens)
+    
+    # Plot the results
+    plotter(ax[1,0],xlens,ylens,eRlens,chi2val,'Merging')
+
+    # Perform the iterative minimization
+    xlens,ylens,eRlens,chi2val = pipeline.iterative_minimizer(xlens,ylens,eRlens,chi2val,x,y,e1data,e2data,f1data,f2data,sigf,sigs)
+
+    # Plot the results
+    plotter(ax[1,1],xlens,ylens,eRlens,chi2val,'Iterative Minimization')
+
+    plt.savefig('algorithm_visualization.png')
+    plt.show()
+
+
 
 def bulk_test(ntests): 
-    Nsources = [1,2,3,4,5,6,7,8,9,10]
+    warnings.simplefilter('ignore')
+    Nsources = [1,2,3,4,5]
 
     print('| Nsources | % of solutions empty | % of solutions worse than true solution |')
     for N in Nsources:
@@ -89,9 +184,10 @@ def bulk_test(ntests):
         for i in range(ntests):
             # Set up the true lens configuration
             nlens = 1
-            xmax = 5 #Range of our lensing field - distance from the origin
+            xmax = 2 #Range of our lensing field - distance from the origin
 
             xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=True,xmax=xmax)
+            tearr *= 10 #Make the lensing strength stronger
 
             # Set up the true source configuration
             ns = N
@@ -99,7 +195,7 @@ def bulk_test(ntests):
             true_chi2 = pipeline.chi2(x,y,e1data,e2data,f1data,f2data,xlarr,ylarr,tearr,sigf,sigs)
 
             # Run the minimization
-            xlens,ylens,eRlens,chi2val = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
+            xlens,_,_,chi2val = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
             if len(xlens) == 0:
                 nempty += 1
 
@@ -111,4 +207,6 @@ def bulk_test(ntests):
 
 
 if __name__ == '__main__':
-    bulk_test(100)
+    #visualize_algorithm(1,1,3)
+    simple_implementation()
+    #bulk_test(10000)

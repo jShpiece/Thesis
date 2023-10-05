@@ -156,7 +156,7 @@ def chi2(x, y, e1data, e2data, f1data, f2data, xltest, yltest, tetest, sigf, sig
             total_penalty += eR_penalty_function(eR)
     except TypeError:
         total_penalty += eR_penalty_function(tetest)
-    
+
     chi2val += total_penalty
     
     return chi2val
