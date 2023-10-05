@@ -9,13 +9,6 @@ def list_winnower(xl,yl,eR,x,y,xmax,threshold_distance=1.0, min_radius=10**-3):
     winnowed_eR = []
 
     for i in range(len(xl)):
-        #Eliminate lenses with an improper einstein radius
-        if eR[i] < min_radius:
-            continue
-
-        if eR[i] > 60:
-            continue
-
         #Check if the lens is within threshold_distance of any sources
         too_close = any(np.sqrt((xl[i]-x)**2+(yl[i]-y)**2) < threshold_distance)
         if too_close:
@@ -50,11 +43,12 @@ def iterative_minimizer(xlens,ylens,telens,chi2val,x,y,e1data,e2data,f1data,f2da
                 chi2val = chi2test
                 break
         else:
-            print('No more lenses to remove')
+            #If we get here, no lenses were removed, so we have found the best fit
             break
     
     if len(xlens) == 0:
-        print('Oops, no lenses left!')
+        pass
+        #print('Oops, no lenses left!')
     
     return xlens, ylens, telens, chi2val
 
