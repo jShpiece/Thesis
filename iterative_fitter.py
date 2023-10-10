@@ -4,6 +4,7 @@ import pipeline
 from utils import createLenses, createSources, lens
 import time
 import warnings
+from astropy.visualization import hist as fancyhist
 
 sigf = 0.01
 sigs = 0.1
@@ -73,14 +74,16 @@ def simple_implementation():
     x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
 
     # Run the minimization
-    xlens,ylens,eRlens,chi2val = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
+    xlens,ylens,eRlens,chi2val = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=True)
 
     stop = time.time()
     print('Time elapsed: ', stop-start)
     # Plot the results
     plt.figure()
-    plt.scatter(xlens,ylens,color='red',label=r'Recovered Lenses: $\theta_E$ = {}'.format(eRlens))
-    plt.scatter(x,y,color='blue',label='Sources')
+    plt.scatter(xlens,ylens,color='red',label=r'Recovered Lenses')
+    for i in range(len(xlens)):
+        plt.annotate(np.round(eRlens[i],2),(xlens[i],ylens[i]))
+    plt.scatter(x,y,marker='.',color='blue',label='Sources')
     plt.scatter(xlarr,ylarr,marker='x',color='green',label='True Lenses')
     plt.legend()
     plt.xlabel('x')
@@ -96,6 +99,7 @@ def visualize_algorithm(nlens,nsource,xmax):
     #Use this to display each step of the algorithm
     # Set up the true lens configuration
     xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=False,xmax=xmax)
+    tearr *= 10 #Make the lensing strength stronger
     
     # Set up the true source configuration
     x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns=nsource,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
@@ -103,7 +107,7 @@ def visualize_algorithm(nlens,nsource,xmax):
     # Initialize the plot
 
     fig,ax = plt.subplots(2,2,figsize=(10,10),sharex=True,sharey=True)
-    fig.suptitle('Lensing Reconstruction Dmo - {} lenses, {} sources'.format(nlens,nsource))
+    fig.suptitle('Lensing Reconstruction Demo - {} lenses, {} sources'.format(nlens,nsource))
 
     def plotter(ax,recovered_x,recovered_y,amplitude,chi2val,title):
         ax.scatter(recovered_x,recovered_y,s=2*amplitude,color='red',label=r'Recovered Lenses')
@@ -126,26 +130,6 @@ def visualize_algorithm(nlens,nsource,xmax):
     dof = 4*len(x) - 3*len(xlens) #Each source has 4 data points, each lens has 3 parameters
     chi2val /= dof #Normalize by the number of degrees of freedom
 
-    for i in range(len(xlens)):
-        #for each lens, we will check if the chi^2 value improves if we move the lens a little bit
-
-        dx = 0.1
-        dy = 0.1
-        deR = 0.1
-        for j in range(10):
-            #Move the lens in a circle around the current position
-            xtest = xlens[i] + dx * np.cos(2*np.pi*j/10)
-            ytest = ylens[i] + dy * np.sin(2*np.pi*j/10)
-            eRtest = eRlens[i] + deR
-            chi2test = pipeline.chi2(x,y,e1data,e2data,f1data,f2data,xtest,ytest,eRtest,sigf,sigs) / dof
-            if chi2test < chi2val:
-                #If we get here, the chi^2 value has improved, so we move the lens
-                print('We moved a lens!')
-                chi2val = chi2test
-                xlens[i] = xtest
-                ylens[i] = ytest
-                eRlens[i] = eRtest
-                break
 
     # Plot the results
     plotter(ax[0,0],xlens,ylens,eRlens,chi2val,'Initial Minimization')
@@ -170,7 +154,6 @@ def visualize_algorithm(nlens,nsource,xmax):
 
     plt.savefig('algorithm_visualization.png')
     plt.show()
-
 
 
 def bulk_test(ntests): 
@@ -206,7 +189,70 @@ def bulk_test(ntests):
         print('| {} | {} | {} |'.format(N, nempty/ntests, n_badfit/ntests))
 
 
+def random_realization(Ntrials):
+    warnings.simplefilter('ignore')
+    #Test the accuracy of the algorithm on a random realization of lenses and sources
+    Nlens = 1
+    Nsource = 5
+    xmax = 2
+
+    dx = np.zeros(Ntrials)
+    dy = np.zeros(Ntrials)
+    dtheta = np.zeros(Ntrials)
+
+    for i in range(Ntrials):
+        #Create the lenses and sources
+        xlarr,ylarr,tearr=createLenses(nlens=Nlens,randompos=True,xmax=xmax)
+        x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns=Nsource,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
+
+        #Run the minimization
+        xlens,ylens,eRlens,_ = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
+
+        #Calculate the difference between the true and recovered lens parameters - right now, take the recovered lens closest to the true lens
+        if len(xlens) == 0:
+            #If no lenses were recovered, set the difference to infinity
+            #dx[i] = np.inf
+            #dy[i] = np.inf
+            #dtheta[i] = np.inf
+            continue
+        else:
+            closest_lens = np.argmin((xlarr-xlens)**2 + (ylarr-ylens)**2)
+            dx[i] = xlarr[0] - xlens[closest_lens]
+            dy[i] = ylarr[0] - ylens[closest_lens]
+            dtheta[i] = tearr[0] - eRlens[closest_lens]
+
+    #Remove the infinities and nans
+    dx = dx[np.isfinite(dx)]
+    dy = dy[np.isfinite(dy)]
+    dtheta = dtheta[np.isfinite(dtheta)]
+
+    #Store the results
+    np.save('dx.npy',dx)
+    np.save('dy.npy',dy)
+    np.save('dtheta.npy',dtheta)
+
+    #Plot the results
+    fig,ax = plt.subplots(1,3,figsize=(15,5))
+    fig.suptitle('Random Realization Test - {} lenses, {} sources'.format(Nlens,Nsource))
+
+    fancyhist(dx,ax=ax[0],bins='scott', histtype='step',density=True)
+    ax[0].set_xlabel(r'$\Delta x$')
+    ax[0].set_ylabel('Probability Density')
+    fancyhist(dy,ax=ax[1],bins='scott', histtype='step',density=True)
+    ax[1].set_xlabel(r'$\Delta y$')
+    ax[1].set_ylabel('Probability Density')
+    fancyhist(dtheta,ax=ax[2],bins='scott', histtype='step',density=True)
+    ax[2].set_xlabel(r'$\Delta \theta_E$')
+    ax[2].set_ylabel('Probability Density')
+
+    plt.savefig('random_realization_{}_lens'.format(Nlens))
+    plt.show()
+
+
+
+
 if __name__ == '__main__':
-    #visualize_algorithm(1,1,3)
-    simple_implementation()
+    #visualize_algorithm(1,100,100)
+    #simple_implementation()
     #bulk_test(10000)
+    random_realization(10000)
