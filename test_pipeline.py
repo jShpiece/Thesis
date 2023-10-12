@@ -1,63 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pipeline
-from utils import createLenses, createSources, lens
+from utils import createLenses, createSources
 import time
 import warnings
 from astropy.visualization import hist as fancyhist
 
 sigf = 0.01
 sigs = 0.1
-
-
-def createLenses(nlens=1,randompos=True,xmax=10):
-    #For now, fix theta_E at 1
-    tearr = np.ones(nlens) 
-    if randompos == True:
-        xlarr = -xmax + 2*xmax*np.random.random(nlens)
-        ylarr = -xmax + 2*xmax*np.random.random(nlens)
-    else: #Uniformly spaced lenses
-        xlarr = -xmax + 2*xmax*(np.arange(nlens)+0.5)/(nlens)
-        ylarr = np.zeros(nlens)
-    return xlarr, ylarr, tearr
-
-
-def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
-    if randompos == True:
-        x = -xmax + 2*xmax*np.random.random(ns)
-        y = -xmax + 2*xmax*np.random.random(ns)
-    else: #Uniformly spaced sources
-        x = -xmax + 2*xmax*np.random.random(ns) #Let the sources be randomly distributed in x only
-        y = np.zeros(ns)
-
-    #Apply the lens 
-    e1data = np.zeros(ns)
-    e2data = np.zeros(ns)
-    f1data = np.zeros(ns)
-    f2data = np.zeros(ns)
-
-    for i in range(ns):
-        e1data[i],e2data[i],f1data[i],f2data[i] = lens(x[i],y[i],xlarr,ylarr,tearr)
-    
-    #Add noise
-    e1data += np.random.normal(0,sigs,ns)
-    e2data += np.random.normal(0,sigs,ns)
-    f1data += np.random.normal(0,sigf,ns)
-    f2data += np.random.normal(0,sigf,ns)
-
-    #Clean up the data - this means removing sources that are too close to the lenses
-    #But lets not cheat, because in real life we won't know where the lenses are
-    #Instead, we check for flexion signals that are too strong
-
-    for i in range(ns):
-        if np.abs(f1data[i]) > 1 or np.abs(f2data[i]) > 1:
-            e1data[i] = 0
-            e2data[i] = 0
-            f1data[i] = 0
-            f2data[i] = 0
-            #No need to remove the source, just set all its signals to zero
-   
-    return x,y,e1data,e2data,f1data,f2data
 
 
 def simple_implementation():
@@ -265,4 +215,3 @@ if __name__ == '__main__':
     #bulk_test(10000)
     random_realization(10**5,1,4)
     random_realization(10**5,2,4)
-
