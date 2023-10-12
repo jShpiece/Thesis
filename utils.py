@@ -1,4 +1,3 @@
-#This script holds useful utility functions for my research
 import numpy as np
 
 # ------------------------
@@ -159,4 +158,3 @@ def chi2(x, y, e1data, e2data, f1data, f2data, xltest, yltest, tetest, sigf, sig
 
 def chi2wrapper(guess,params):
     return chi2(params[0],params[1],params[2],params[3],params[4],params[5],guess[0],guess[1],guess[2],params[6],params[7])
-    

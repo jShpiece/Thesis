@@ -15,9 +15,9 @@ def find_initial_lens_positions(x, y, e1, e2, f1, f2, sigs, sigf):
     ns = len(x)
     xlens, ylens, te_lens = np.zeros(ns), np.zeros(ns), np.zeros(ns)
     for i in range(ns):
-        params = [x[i], y[i], e1[i], e2[i], f1[i], f2[i], sigf, sigs]
-        guess = get_initial_guess(*params[:6])
-        result = opt.minimize(chi2wrapper, guess, args=(params,))
+        params = [[x[i]], [y[i]], [e1[i]], [e2[i]], [f1[i]], [f2[i]], sigf, sigs]
+        guess = get_initial_guess(x[i], y[i], e1[i], e2[i], f1[i], f2[i])
+        result = opt.minimize(chi2wrapper, guess, args=(params))
         xlens[i], ylens[i], te_lens[i] = result.x
     return xlens, ylens, te_lens
 
