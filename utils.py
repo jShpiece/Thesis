@@ -122,7 +122,7 @@ def lens(x,y,xlarr,ylarr,tearr):
 def eR_penalty_function(eR, lower_limit=0.0, upper_limit=20.0, lambda_penalty_upper=10.0):
     # Hard lower limit
     if eR < lower_limit:
-        return np.inf
+        return 1e8 #Use an arbitrarily large number - NOT infinity (will yield NaNs)
 
     # Soft upper limit
     if eR > upper_limit:

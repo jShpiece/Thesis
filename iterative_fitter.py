@@ -74,7 +74,7 @@ def simple_implementation():
     x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
 
     # Run the minimization
-    xlens,ylens,eRlens,chi2val = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=True)
+    xlens,ylens,eRlens,chi2val = pipeline.optimize_lens_positions(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=True)
 
     stop = time.time()
     print('Time elapsed: ', stop-start)
@@ -125,7 +125,7 @@ def visualize_algorithm(nlens,nsource,xmax):
             ax.annotate(np.round(amplitude[i],2),(recovered_x[i],recovered_y[i]))
 
     # Run the minimization
-    xlens,ylens,eRlens = pipeline.initial_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf)
+    xlens,ylens,eRlens = pipeline.find_initial_lens_positions(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf)
     chi2val = pipeline.chi2(x,y,e1data,e2data,f1data,f2data,xlens,ylens,eRlens,sigf,sigs)
     dof = 4*len(x) - 3*len(xlens) #Each source has 4 data points, each lens has 3 parameters
     chi2val /= dof #Normalize by the number of degrees of freedom
@@ -135,19 +135,19 @@ def visualize_algorithm(nlens,nsource,xmax):
     plotter(ax[0,0],xlens,ylens,eRlens,chi2val,'Initial Minimization')
 
     # Perform the winnowing
-    xlens,ylens,eRlens = pipeline.list_winnower(xlens,ylens,eRlens,x,y,xmax)
+    xlens,ylens,eRlens = pipeline.filter_lens_positions(xlens,ylens,eRlens,x,y,xmax)
 
     # Plot the results
     plotter(ax[0,1],xlens,ylens,eRlens,chi2val,'Winnowing')
 
     # Perform the merging
-    xlens,ylens,eRlens = pipeline.merge_lenses(xlens,ylens,eRlens)
+    xlens,ylens,eRlens = pipeline.merge_close_lenses(xlens,ylens,eRlens)
     
     # Plot the results
     plotter(ax[1,0],xlens,ylens,eRlens,chi2val,'Merging')
 
     # Perform the iterative minimization
-    xlens,ylens,eRlens,chi2val = pipeline.iterative_minimizer(xlens,ylens,eRlens,chi2val,x,y,e1data,e2data,f1data,f2data,sigf,sigs)
+    xlens,ylens,eRlens,chi2val = pipeline.iterative_elimination(xlens,ylens,eRlens,chi2val,x,y,e1data,e2data,f1data,f2data,sigf,sigs)
 
     # Plot the results
     plotter(ax[1,1],xlens,ylens,eRlens,chi2val,'Iterative Minimization')
@@ -178,7 +178,7 @@ def bulk_test(ntests):
             true_chi2 = pipeline.chi2(x,y,e1data,e2data,f1data,f2data,xlarr,ylarr,tearr,sigf,sigs)
 
             # Run the minimization
-            xlens,_,_,chi2val = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
+            xlens,_,_,chi2val = pipeline.optimize_lens_positions(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
             if len(xlens) == 0:
                 nempty += 1
 
@@ -189,70 +189,80 @@ def bulk_test(ntests):
         print('| {} | {} | {} |'.format(N, nempty/ntests, n_badfit/ntests))
 
 
-def random_realization(Ntrials):
+def random_realization(Ntrials,Nlens=1,Nsource=1):
     warnings.simplefilter('ignore')
     #Test the accuracy of the algorithm on a random realization of lenses and sources
-    Nlens = 1
-    Nsource = 5
-    xmax = 2
+    Nsource = 3
+    xmax = 10
 
-    dx = np.zeros(Ntrials)
-    dy = np.zeros(Ntrials)
-    dtheta = np.zeros(Ntrials)
+    xsol = np.empty((Ntrials,Nlens))
+    ysol = np.empty((Ntrials,Nlens))
+    er = np.empty((Ntrials,Nlens))
 
-    for i in range(Ntrials):
-        #Create the lenses and sources
-        xlarr,ylarr,tearr=createLenses(nlens=Nlens,randompos=True,xmax=xmax)
-        x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns=Nsource,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
+    true_xlens, true_ylens, true_erlens = createLenses(nlens=Nlens, randompos=False, xmax=xmax)
 
-        #Run the minimization
-        xlens,ylens,eRlens,_ = pipeline.perform_minimization(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
+    for trial in range(Ntrials):
+        # Create lenses and sources
+        x, y, e1data, e2data, f1data, f2data = createSources(true_xlens, true_ylens, true_erlens, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
 
-        #Calculate the difference between the true and recovered lens parameters - right now, take the recovered lens closest to the true lens
-        if len(xlens) == 0:
-            #If no lenses were recovered, set the difference to infinity
-            #dx[i] = np.inf
-            #dy[i] = np.inf
-            #dtheta[i] = np.inf
+        # Run the minimization
+        recovered_xlens, recovered_ylens, recovered_erlens, _ = pipeline.optimize_lens_positions(x, y, e1data, e2data, f1data, f2data, sigs=sigs, sigf=sigf, xmax=xmax)
+
+        # If no lens is recovered, skip the current trial
+        if not len(recovered_xlens):
             continue
-        else:
-            closest_lens = np.argmin((xlarr-xlens)**2 + (ylarr-ylens)**2)
-            dx[i] = xlarr[0] - xlens[closest_lens]
-            dy[i] = ylarr[0] - ylens[closest_lens]
-            dtheta[i] = tearr[0] - eRlens[closest_lens]
 
-    #Remove the infinities and nans
-    dx = dx[np.isfinite(dx)]
-    dy = dy[np.isfinite(dy)]
-    dtheta = dtheta[np.isfinite(dtheta)]
+        # Calculate the difference between the true and recovered lens parameters
+        for lens_idx in range(Nlens):
+            # Find the recovered lens closest to the true lens
+            distance_squared = (true_xlens[lens_idx] - recovered_xlens)**2 + (true_ylens[lens_idx] - recovered_ylens)**2
+            closest_lens_idx = np.argmin(distance_squared)
+            
+            xsol[trial][lens_idx] = recovered_xlens[closest_lens_idx]
+            ysol[trial][lens_idx] = recovered_ylens[closest_lens_idx]
+            er[trial][lens_idx] = recovered_erlens[closest_lens_idx]
 
     #Store the results
-    np.save('dx.npy',dx)
-    np.save('dy.npy',dy)
-    np.save('dtheta.npy',dtheta)
+    np.save('dx.npy',xsol)
+    np.save('dy.npy',ysol)
+    np.save('dtheta.npy',er)
 
-    #Plot the results
     fig,ax = plt.subplots(1,3,figsize=(15,5))
     fig.suptitle('Random Realization Test - {} lenses, {} sources'.format(Nlens,Nsource))
 
-    fancyhist(dx,ax=ax[0],bins='scott', histtype='step',density=True)
+    colors = ['black','red','blue','green','orange','purple','pink','brown','gray','cyan']
+
+    for lens_num in range(Nlens):
+        color = colors[lens_num % len(colors)]  # Cycle through colors if Nlens > len(colors)
+
+        xdata = xsol[:,lens_num]
+        ydata = ysol[:,lens_num]
+        erdata = er[:,lens_num]
+
+        fancyhist(xdata[~np.isnan(xdata)],ax=ax[0],bins='scott',histtype='step',density=True,color = color,label=r'$\Delta x$')
+        fancyhist(ydata[~np.isnan(ydata)],ax=ax[1],bins='scott',histtype='step',density=True,color = color,label=r'$\Delta y$')
+        fancyhist(erdata[~np.isnan(erdata)],ax=ax[2],bins='scott',histtype='step',density=True,color = color,label=r'$\Delta \theta_E$')
+
     ax[0].set_xlabel(r'$\Delta x$')
     ax[0].set_ylabel('Probability Density')
-    fancyhist(dy,ax=ax[1],bins='scott', histtype='step',density=True)
     ax[1].set_xlabel(r'$\Delta y$')
     ax[1].set_ylabel('Probability Density')
-    fancyhist(dtheta,ax=ax[2],bins='scott', histtype='step',density=True)
     ax[2].set_xlabel(r'$\Delta \theta_E$')
     ax[2].set_ylabel('Probability Density')
 
+    #Add a vertical line at true positions
+    for i in range(Nlens):
+        ax[0].vlines(true_xlens[i],ymin=0,ymax=1,color=colors[i % len(colors)])
+        ax[1].vlines(true_ylens[i],ymin=0,ymax=1,color=colors[i % len(colors)])
+        ax[2].vlines(true_erlens[i],ymin=0,ymax=1,color=colors[i % len(colors)])
+
     plt.savefig('random_realization_{}_lens'.format(Nlens))
-    plt.show()
-
-
 
 
 if __name__ == '__main__':
     #visualize_algorithm(1,100,100)
     #simple_implementation()
     #bulk_test(10000)
-    random_realization(10000)
+    random_realization(10**5,1,4)
+    random_realization(10**5,2,4)
+
