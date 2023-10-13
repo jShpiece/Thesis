@@ -75,7 +75,7 @@ def visualize_pipeline_steps(nlens, nsource, xmax):
         chi2val = pipeline.chi2(x, y, e1data, e2data, f1data, f2data, xlens, ylens, eRlens, sigf, sigs)
         _plot_results(xlens, ylens, eRlens, x, y, xlarr, ylarr, chi2val, title, ax=ax)
 
-    plt.savefig('algorithm_visualization.png')
+    plt.savefig('Images//algorithm_visualization.png')
     plt.show()
 
 
@@ -237,8 +237,9 @@ if __name__ == '__main__':
     # run_simple_test(1,3,10)
     # visualize_pipeline_steps(1,3,10)
     # bulk_test(100)
-    random_realization(10**5,1,4)
-    random_realization(10**5,2,4)
+    #random_realization(10**4,1,4)
+    #random_realization(10**4,2,4)
+    random_realization(10**4,4,4)
 
 
     '''
