@@ -50,8 +50,12 @@ def merge_close_lenses(xlens, ylens, telens, merger_threshold=1):
     return xlens, ylens, telens
 
 
-def iterative_elimination(xlens, ylens, telens, chi2val, x, y, e1, e2, f1, f2, sigf, sigs):
+def iterative_elimination(xlens, ylens, telens, chi2val, x, y, e1, e2, f1, f2, sigf, sigs, lens_floor=1):
+    # Iteratively eliminate lenses that do not improve the chi^2 value
     while True:
+        if len(xlens) <= lens_floor:
+            # If we have reached the minimum number of lenses, stop
+            break
         best_indices = None
         for i in range(len(xlens)):
             test_xlens = np.delete(xlens, i)

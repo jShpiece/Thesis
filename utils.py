@@ -68,12 +68,18 @@ def createLenses(nlens=1,randompos=True,xmax=10):
 
 
 def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
+    #Create sources for a lensing system and apply the lensing signal
+
+    #Create the sources - require that they be distributed sphericaly
     if randompos == True:
-        x = -xmax + 2*xmax*np.random.random(ns)
-        y = -xmax + 2*xmax*np.random.random(ns)
-    else: #Uniformly spaced sources
-        x = -xmax + 2*xmax*np.random.random(ns) #Let the sources be randomly distributed in x only
-        y = np.zeros(ns)
+        r = xmax*np.sqrt(np.random.random(ns))
+        phi = 2*np.pi*np.random.random(ns)
+    else: #Uniformly spaced sources - single choice of r, uniform phi
+        r = xmax / 2
+        phi = 2*np.pi*(np.arange(ns)+0.5)/(ns)
+    
+    x = r*np.cos(phi)
+    y = r*np.sin(phi)
 
     #Apply the lens 
     e1data = np.zeros(ns)

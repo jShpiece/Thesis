@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pipeline
-from utils import createLenses, createSources
+from utils import createLenses, createSources, print_progress_bar
 import time
 import warnings
 from astropy.visualization import hist as fancyhist
@@ -28,7 +28,7 @@ def _plot_results(xmax, xlens, ylens, eRlens, x, y, xlarr, ylarr, chi2val, title
     ax.set_xlim(-xmax, xmax)
     ax.set_ylim(-xmax, xmax)
     ax.set_aspect('equal')
-    ax.set_title(title + '\n χ^2 = {:.2f}'.format(chi2val))
+    ax.set_title(title + '\n' + r' $\chi^2$ = {:.2f}'.format(chi2val))
 
 
 # ------------------------
@@ -63,18 +63,28 @@ def visualize_pipeline_steps(nlens, nsource, xmax):
     fig.suptitle('Lensing Reconstruction Demo - {} lenses, {} sources'.format(nlens, nsource))
 
     # Define a list of pipeline steps and corresponding titles
-    steps = [
-        ("Initial Minimization", pipeline.find_initial_lens_positions),
-        ("Winnowing", pipeline.filter_lens_positions),
-        ("Merging", pipeline.merge_close_lenses),
-        ("Iterative Minimization", pipeline.iterative_elimination)
-    ]
-    
-    for ax, (title, func) in zip(axarr.ravel(), steps):
-        xlens, ylens, eRlens = func(x, y, e1data, e2data, f1data, f2data, sigs=sigs, sigf=sigf, xmax=xmax)
-        chi2val = pipeline.chi2(x, y, e1data, e2data, f1data, f2data, xlens, ylens, eRlens, sigf, sigs)
-        _plot_results(xlens, ylens, eRlens, x, y, xlarr, ylarr, chi2val, title, ax=ax)
 
+    # Step 1: Find initial lens positions
+    xlens, ylens, eRlens = pipeline.find_initial_lens_positions(x, y, e1data, e2data, f1data, f2data, sigs=sigs, sigf=sigf)
+    chi2val = pipeline.get_chi2_value(x, y, e1data, e2data, f1data, f2data, xlens, ylens, eRlens, sigf, sigs)
+    _plot_results(xmax, xlens, ylens, eRlens, x, y, xlarr, ylarr, chi2val, title = 'Initial Minimization', ax=axarr[0][0])
+
+    # Step 2: Filter lens positions
+    xlens, ylens, eRlens = pipeline.filter_lens_positions(xlens, ylens, eRlens, x, y, xmax)
+    chi2val = pipeline.get_chi2_value(x, y, e1data, e2data, f1data, f2data, xlens, ylens, eRlens, sigf, sigs)
+    _plot_results(xmax, xlens, ylens, eRlens, x, y, xlarr, ylarr, chi2val, title = 'Lens Filtering', ax=axarr[0][1])
+
+    # Step 3: Merge close lenses
+    xlens, ylens, eRlens = pipeline.merge_close_lenses(xlens, ylens, eRlens)
+    chi2val = pipeline.get_chi2_value(x, y, e1data, e2data, f1data, f2data, xlens, ylens, eRlens, sigf, sigs)
+    _plot_results(xmax, xlens, ylens, eRlens, x, y, xlarr, ylarr, chi2val, title = 'Lens Merging', ax=axarr[1][0])
+
+    # Step 4: Iterative elimination
+    xlens, ylens, eRlens, chi2val = pipeline.iterative_elimination(xlens, ylens, eRlens, chi2val, x, y, e1data, e2data, f1data, f2data, sigf, sigs, lens_floor=nlens)
+    _plot_results(xmax, xlens, ylens, eRlens, x, y, xlarr, ylarr, chi2val, title = 'Iterative Elimination', ax=axarr[1][1])
+
+    # Save and show the plot
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
     plt.savefig('Images//algorithm_visualization.png')
     plt.show()
 
@@ -90,15 +100,14 @@ def bulk_test(ntests):
         for i in range(ntests):
             # Set up the true lens configuration
             nlens = 1
-            xmax = 2 #Range of our lensing field - distance from the origin
+            xmax = 5 #Range of our lensing field - distance from the origin
 
             xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=True,xmax=xmax)
-            tearr *= 10 #Make the lensing strength stronger
 
             # Set up the true source configuration
             ns = N
             x,y,e1data,e2data,f1data,f2data = createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
-            true_chi2 = pipeline.chi2(x,y,e1data,e2data,f1data,f2data,xlarr,ylarr,tearr,sigf,sigs)
+            true_chi2 = pipeline.get_chi2_value(x,y,e1data,e2data,f1data,f2data,xlarr,ylarr,tearr,sigf,sigs)
 
             # Run the minimization
             xlens,_,_,chi2val = pipeline.optimize_lens_positions(x,y,e1data,e2data,f1data,f2data,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
@@ -119,6 +128,9 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
     xsol, ysol, er = np.empty((Ntrials, Nlens)), np.empty((Ntrials, Nlens)), np.empty((Ntrials, Nlens))
     # True lens configuration
     true_xlens, true_ylens, true_erlens = createLenses(nlens=Nlens, randompos=False, xmax=xmax)
+
+    # Initialize a progress bar
+    print_progress_bar(0, Ntrials, prefix='Progress:', suffix='Complete', length=50)
 
     for trial in range(Ntrials):
         # Generate source data based on true lens configuration
@@ -143,6 +155,9 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
             xsol[trial][lens_idx] = recovered_xlens[closest_lens_idx]# - true_xlens[lens_idx]
             ysol[trial][lens_idx] = recovered_ylens[closest_lens_idx]# - true_ylens[lens_idx]
             er[trial][lens_idx] = recovered_erlens[closest_lens_idx]# - true_erlens[lens_idx]
+        
+        # Update progress bar
+        print_progress_bar(trial + 1, Ntrials, prefix='Progress:', suffix='Complete', length=50)
 
     # Store results
     np.save('data//dx.npy', xsol)
@@ -234,12 +249,12 @@ def locate_nan_entries():
 
 
 if __name__ == '__main__':
-    # run_simple_test(1,3,10)
-    # visualize_pipeline_steps(1,3,10)
+    #run_simple_test(1,1,10)
+    # visualize_pipeline_steps(1,1,2)
     # bulk_test(100)
     #random_realization(10**4,1,4)
     #random_realization(10**4,2,4)
-    random_realization(10**4,4,4)
+    #random_realization(10**4,2,20,100)
 
 
     '''
@@ -249,3 +264,39 @@ if __name__ == '__main__':
         if not locate_nan_entries():
             break
     '''
+
+    # Store results
+    xsol = np.load('data//dx.npy')
+    ysol = np.load('data//dy.npy')
+    er = np.load('data//dtheta.npy')
+    Nlens = xsol.shape[1]
+    Nsource = 20
+    Ntrials = 10**4
+
+    # True lens configuration
+    true_xlens, true_ylens, true_erlens = createLenses(nlens=Nlens, randompos=False, xmax=100)
+
+    # Plot histograms
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+    colors = ['black', 'blue', 'green', 'orange', 'purple', 'pink', 'brown', 'gray', 'cyan']
+    param_labels = [r'$x$', r'$y$', r'$\theta_E$']
+
+    for lens_num in range(Nlens):
+        color = colors[lens_num % len(colors)]
+        for a, data, param_label in zip(ax, [xsol[:, lens_num], ysol[:, lens_num], er[:, lens_num]], param_labels):
+            label = 'Lens ' + str(lens_num+1)
+            # Using a fancy histogram function (imported from astropy.visualization)
+            fancyhist(data[~np.isnan(data)], ax=a, bins='scott', histtype='step', density=True, color=color, label=label)
+            a.set_xlabel(param_label)
+            a.set_ylabel('Probability Density')
+
+    ax[0].vlines(true_xlens, 0, 0.02, color='red', label='True Lenses')
+    ax[1].vlines(true_ylens, 0, 0.02, color='red', label='True Lenses')
+    ax[2].vlines(true_erlens, 0, 0.5, color='red', label='True Lenses')
+
+    for a in ax:
+        a.legend()
+            
+    fig.suptitle(f'Random Realization Test - {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
+    plt.savefig(f'Images//random_realization_{Nlens}_lens.png')
