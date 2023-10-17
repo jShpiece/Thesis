@@ -1,5 +1,5 @@
 import numpy as np
-from utils import chi2, chi2wrapper
+from utils import chi2, chi2wrapper, combinations_indices_recursive
 import scipy.optimize as opt
 
 
@@ -51,6 +51,33 @@ def merge_close_lenses(xlens, ylens, telens, merger_threshold=1):
 
 
 def iterative_elimination(xlens, ylens, telens, chi2val, x, y, e1, e2, f1, f2, sigf, sigs, lens_floor=1):
+    # What if, instead of iterative removal down to the lens floor, we took the lens_floor as the target?
+    # Go through the set, find every possible combination of lens_floor lenses, and find the best chi^2 value
+    # Then, remove all lenses that are not in the best combination
+
+    allowed_combinations = combinations_indices_recursive(len(xlens), lens_floor)
+    best_chi2val = chi2val
+    best_indices = None
+
+    for combination in allowed_combinations:
+        test_xlens = xlens[combination]
+        test_ylens = ylens[combination]
+        test_telens = telens[combination]
+        dof = 4 * len(x) - 3 * len(test_xlens)
+        new_chi2val = chi2(x, y, e1, e2, f1, f2, test_xlens, test_ylens, test_telens, sigf, sigs) / dof
+        if new_chi2val < best_chi2val:
+            best_chi2val, best_indices = new_chi2val, combination
+    
+    if best_indices is not None:
+        xlens, ylens, telens = xlens[best_indices], ylens[best_indices], telens[best_indices]
+    else:
+        xlens, ylens, telens = np.array([]), np.array([]), np.array([])
+
+    chi2val = best_chi2val
+    # Each combination is a list of 'lens_floor' indices
+    
+
+    '''
     # Iteratively eliminate lenses that do not improve the chi^2 value
     while True:
         if len(xlens) <= lens_floor:
@@ -69,6 +96,7 @@ def iterative_elimination(xlens, ylens, telens, chi2val, x, y, e1, e2, f1, f2, s
         if best_indices is None:
             break
         xlens, ylens, telens = np.delete(xlens, best_indices), np.delete(ylens, best_indices), np.delete(telens, best_indices)
+        '''
     return xlens, ylens, telens, chi2val
 
 

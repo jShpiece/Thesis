@@ -56,6 +56,7 @@ def visualize_pipeline_steps(nlens, nsource, xmax):
     """Visualizes each step of the lensing reconstruction pipeline."""
     # Setup lensing and source configurations
     xlarr, ylarr, tearr = createLenses(nlens=nlens, randompos=False, xmax=xmax)
+    tearr *= 10
     x, y, e1data, e2data, f1data, f2data = createSources(xlarr, ylarr, tearr, ns=nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
 
     # Initialize the plot
@@ -125,7 +126,7 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
     warnings.simplefilter('ignore')
 
     # Store solution arrays
-    xsol, ysol, er = np.empty((Ntrials, Nlens)), np.empty((Ntrials, Nlens)), np.empty((Ntrials, Nlens))
+    xsol, ysol, er = [], [], []
     # True lens configuration
     true_xlens, true_ylens, true_erlens = createLenses(nlens=Nlens, randompos=False, xmax=xmax)
 
@@ -141,23 +142,21 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
 
         # If no lens is recovered, skip the current trial
         if not len(recovered_xlens):
-            # We need to fill the solution arrays with Nan values
-            xsol[trial] = np.nan
-            ysol[trial] = np.nan
-            er[trial] = np.nan
             continue
 
-        # Match recovered lenses with true lenses by minimizing distance
-        for lens_idx in range(Nlens):
-            distance_squared = (true_xlens[lens_idx] - recovered_xlens) ** 2 + (true_ylens[lens_idx] - recovered_ylens) ** 2
-            closest_lens_idx = np.argmin(distance_squared)
-
-            xsol[trial][lens_idx] = recovered_xlens[closest_lens_idx]# - true_xlens[lens_idx]
-            ysol[trial][lens_idx] = recovered_ylens[closest_lens_idx]# - true_ylens[lens_idx]
-            er[trial][lens_idx] = recovered_erlens[closest_lens_idx]# - true_erlens[lens_idx]
+        # Store recovered lens positions - no cheating and only picking the best solution, take everything we get
+        for x, y, z in zip(recovered_xlens, recovered_ylens, recovered_erlens):
+            xsol.append(x)
+            ysol.append(y)
+            er.append(z)
         
         # Update progress bar
         print_progress_bar(trial + 1, Ntrials, prefix='Progress:', suffix='Complete', length=50)
+
+    #Turn solution arrays into numpy arrays
+    xsol = np.array(xsol)
+    ysol = np.array(ysol)
+    er = np.array(er)
 
     # Store results
     np.save('data//dx.npy', xsol)
@@ -171,10 +170,10 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
 
     for lens_num in range(Nlens):
         color = colors[lens_num % len(colors)]
-        for a, data, param_label in zip(ax, [xsol[:, lens_num], ysol[:, lens_num], er[:, lens_num]], param_labels):
+        for a, data, param_label in zip(ax, [xsol,ysol,er], param_labels):
             label = 'Lens ' + str(lens_num+1)
             # Using a fancy histogram function (imported from astropy.visualization)
-            fancyhist(data[~np.isnan(data)], ax=a, bins='scott', histtype='step', density=True, color=color, label=label)
+            fancyhist(data[~np.isnan(data)], ax=a, bins='scott', histtype='step', density=True, color=color)
             a.set_xlabel(param_label)
             a.set_ylabel('Probability Density')
 
@@ -187,7 +186,7 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
             
     fig.suptitle(f'Random Realization Test - {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
-    plt.savefig(f'Images//random_realization_{Nlens}_lens.png')
+    plt.savefig(f'Images//random_realization_{Nlens}_lens_{Nsource}_source.png')
     plt.close()
 
 
@@ -249,12 +248,12 @@ def locate_nan_entries():
 
 
 if __name__ == '__main__':
-    #run_simple_test(1,1,10)
-    # visualize_pipeline_steps(1,1,2)
+    # run_simple_test(2,4,20)
+    #visualize_pipeline_steps(2, 100, 200)
     # bulk_test(100)
-    #random_realization(10**4,1,4)
-    #random_realization(10**4,2,4)
-    #random_realization(10**4,2,20,100)
+    random_realization(10**4,1,4)
+    random_realization(10**4,2,4)
+    # random_realization(10**4,2,20,100)
 
 
     '''
@@ -264,39 +263,3 @@ if __name__ == '__main__':
         if not locate_nan_entries():
             break
     '''
-
-    # Store results
-    xsol = np.load('data//dx.npy')
-    ysol = np.load('data//dy.npy')
-    er = np.load('data//dtheta.npy')
-    Nlens = xsol.shape[1]
-    Nsource = 20
-    Ntrials = 10**4
-
-    # True lens configuration
-    true_xlens, true_ylens, true_erlens = createLenses(nlens=Nlens, randompos=False, xmax=100)
-
-    # Plot histograms
-    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-    colors = ['black', 'blue', 'green', 'orange', 'purple', 'pink', 'brown', 'gray', 'cyan']
-    param_labels = [r'$x$', r'$y$', r'$\theta_E$']
-
-    for lens_num in range(Nlens):
-        color = colors[lens_num % len(colors)]
-        for a, data, param_label in zip(ax, [xsol[:, lens_num], ysol[:, lens_num], er[:, lens_num]], param_labels):
-            label = 'Lens ' + str(lens_num+1)
-            # Using a fancy histogram function (imported from astropy.visualization)
-            fancyhist(data[~np.isnan(data)], ax=a, bins='scott', histtype='step', density=True, color=color, label=label)
-            a.set_xlabel(param_label)
-            a.set_ylabel('Probability Density')
-
-    ax[0].vlines(true_xlens, 0, 0.02, color='red', label='True Lenses')
-    ax[1].vlines(true_ylens, 0, 0.02, color='red', label='True Lenses')
-    ax[2].vlines(true_erlens, 0, 0.5, color='red', label='True Lenses')
-
-    for a in ax:
-        a.legend()
-            
-    fig.suptitle(f'Random Realization Test - {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
-    plt.savefig(f'Images//random_realization_{Nlens}_lens.png')
