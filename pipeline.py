@@ -63,8 +63,7 @@ def iterative_elimination(xlens, ylens, telens, chi2val, x, y, e1, e2, f1, f2, s
         test_xlens = xlens[combination]
         test_ylens = ylens[combination]
         test_telens = telens[combination]
-        dof = 4 * len(x) - 3 * len(test_xlens)
-        new_chi2val = chi2(x, y, e1, e2, f1, f2, test_xlens, test_ylens, test_telens, sigf, sigs) / dof
+        new_chi2val = get_chi2_value(x, y, e1, e2, f1, f2, test_xlens, test_ylens, test_telens, sigf, sigs) 
         if new_chi2val < best_chi2val:
             best_chi2val, best_indices = new_chi2val, combination
     
@@ -74,8 +73,7 @@ def iterative_elimination(xlens, ylens, telens, chi2val, x, y, e1, e2, f1, f2, s
         xlens, ylens, telens = np.array([]), np.array([]), np.array([])
 
     chi2val = best_chi2val
-    # Each combination is a list of 'lens_floor' indices
-    
+   
 
     '''
     # Iteratively eliminate lenses that do not improve the chi^2 value
@@ -111,6 +109,8 @@ def print_step_info(flags,message,x,xlens,chi2val):
 
 def get_chi2_value(x, y, e1, e2, f1, f2, xlens, ylens, telens, sigf, sigs):
     dof = 4 * len(x) - 3 * len(xlens)
+    if dof <= 0:
+        return np.inf
     return chi2(x, y, e1, e2, f1, f2, xlens, ylens, telens, sigf, sigs) / dof
 
 
