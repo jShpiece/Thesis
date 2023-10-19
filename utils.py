@@ -67,38 +67,6 @@ def createLenses(nlens=1,randompos=True,xmax=10):
     return xlarr, ylarr, tearr
 
 
-def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
-    #Create sources for a lensing system and apply the lensing signal
-
-    #Create the sources - require that they be distributed sphericaly
-    if randompos == True:
-        r = xmax*np.sqrt(np.random.random(ns))
-        phi = 2*np.pi*np.random.random(ns)
-    else: #Uniformly spaced sources - single choice of r, uniform phi
-        r = xmax / 2
-        phi = 2*np.pi*(np.arange(ns)+0.5)/(ns)
-    
-    x = r*np.cos(phi)
-    y = r*np.sin(phi)
-
-    #Apply the lens 
-    e1data = np.zeros(ns)
-    e2data = np.zeros(ns)
-    f1data = np.zeros(ns)
-    f2data = np.zeros(ns)
-
-    for i in range(ns):
-        e1data[i],e2data[i],f1data[i],f2data[i] = lens(x[i],y[i],xlarr,ylarr,tearr)
-    
-    #Add noise
-    e1data += np.random.normal(0,sigs,ns)
-    e2data += np.random.normal(0,sigs,ns)
-    f1data += np.random.normal(0,sigf,ns)
-    f2data += np.random.normal(0,sigf,ns)
-   
-    return x,y,e1data,e2data,f1data,f2data
-
-
 def lens(x,y,xlarr,ylarr,tearr):
     #Compute the lensing signals on a single source 
     #from a set of lenses
@@ -131,12 +99,22 @@ def eR_penalty_function(eR, lower_limit=0.0, upper_limit=20.0, lambda_penalty_up
     return 0.0
 
 
-def chi2(x, y, e1data, e2data, f1data, f2data, xltest, yltest, tetest, sigf, sigs, fwgt=1.0, swgt=1.0):
-   
+def chi2(sources, xltest, yltest, tetest, sigf, sigs, fwgt=1.0, swgt=1.0):
+    x, y, e1data, e2data, f1data, f2data = sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2
     # Initialize chi^2 value
     chi2val = 0.0
     
     # Loop through the data points to compute the chi^2 terms
+    # What if we only get one data point?
+    # Turn it into an array of length 1
+    if not isinstance(x, np.ndarray):
+        x = np.array([x])
+        y = np.array([y])
+        e1data = np.array([e1data])
+        e2data = np.array([e2data])
+        f1data = np.array([f1data])
+        f2data = np.array([f2data])
+    
     for i in range(len(x)):
         # Assuming your 'lens' function can handle tetest being an array
         # If not, you may need to modify this part
@@ -163,13 +141,13 @@ def chi2(x, y, e1data, e2data, f1data, f2data, xltest, yltest, tetest, sigf, sig
 
 
 def chi2wrapper(guess,params):
-    return chi2(params[0],params[1],params[2],params[3],params[4],params[5],guess[0],guess[1],guess[2],params[6],params[7])
+    return chi2(params[0],guess[0],guess[1],guess[2],params[1],params[2])
 
 
-def combinations_indices_recursive(n, m, start=0, curr=[]):
+def generate_combinations(n, m, start=0, curr=[]):
     if m == 0:
         yield curr
         return
     for i in range(start, n):
-        yield from combinations_indices_recursive(n, m-1, i+1, curr + [i])
+        yield from generate_combinations(n, m-1, i+1, curr + [i])
 
