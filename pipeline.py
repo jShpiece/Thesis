@@ -3,8 +3,13 @@ from utils import chi2, generate_combinations, lens
 import scipy.optimize as opt
 from concurrent.futures import ProcessPoolExecutor
 
+# ------------------------------
+# Classes
+# ------------------------------
 
 class Source:
+    # Class to store source information. Each source has a position (x, y) 
+    # and ellipticity (e1, e2) and flexion (f1, f2)
     def __init__(self, x, y, e1, e2, f1, f2):
         self.x = x
         self.y = y
@@ -14,6 +19,7 @@ class Source:
         self.f2 = f2
     
     def generate_initial_guess(self):
+        # Generate initial guesses for lens positions from source positions
         phi = np.arctan2(self.f2, self.f1)
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
@@ -22,15 +28,18 @@ class Source:
 
 
 class Lens:
+    # Class to store lens information. Each lens has a position (x, y) and an Einstein radius (te)
     def __init__(self, x, y, te):
         self.x = x
         self.y = y
         self.te = te
 
+    # The following functions are used to optimize lens positions, fitting the lens positions
+    # and strengths to a source population
+
     def optimize_lens_positions(self, sources, sigs, sigf):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
-
         for i in range(len(self.x)):
             one_source = Source(sources.x[i], sources.y[i], sources.e1[i], sources.e2[i], sources.f1[i], sources.f2[i])
             params = [one_source, sigf, sigs]
@@ -66,7 +75,10 @@ class Lens:
             else:
                 i += 1
     
+
     def iterative_elimination(self, chi2val, sources, sigf, sigs, lens_floor=1):
+        # Go through all possible combinations of 'lens_floor' lenses and return the combination
+        # that minimizes the chi^2 value. Repeat until the chi^2 value stops improving.
         best_chi2val = chi2val
         best_indices = None
 
@@ -90,23 +102,10 @@ class Lens:
         else:
             self.x, self.y, self.te = np.array([]), np.array([]), np.array([])
 
-        
-        '''
-        best_chi2val = chi2val
-        best_indices = None
 
-        for combination in generate_combinations(len(self.x), lens_floor):
-            test_lens = Lens(self.x[list(combination)], self.y[list(combination)], self.te[list(combination)])
-            new_chi2val = get_chi2_value(sources, test_lens, sigf, sigs) 
-            if new_chi2val < best_chi2val:
-                best_chi2val, best_indices = new_chi2val, combination
-            
-        if best_indices is not None:
-            self.x, self.y, self.te = self.x[list(best_indices)], self.y[list(best_indices)], self.te[list(best_indices)]
-        else:
-            self.x, self.y, self.te = np.array([]), np.array([]), np.array([])
-        '''
-
+# ------------------------------
+# Initialization functions
+# ------------------------------
 
 def createSources(lenses,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
     #Create sources for a lensing system and apply the lensing signal
@@ -156,7 +155,12 @@ def createLenses(nlens=1,randompos=True,xmax=10):
     return lenses
 
 
+# ------------------------------
+# Helper functions
+# ------------------------------
+
 def print_step_info(flags,message,sources,lenses,chi2val):
+    # Helper function to print out step information
     if flags:
         print(message)
         print('Number of lenses: ', len(lenses.x))
@@ -166,22 +170,30 @@ def print_step_info(flags,message,sources,lenses,chi2val):
 
 
 def get_best_combination(combination, x, y, te, sources, sigf, sigs):
+    # Wrapper function for iterative_elimination to allow for parallelization
     test_lens = Lens(x[list(combination)], y[list(combination)], te[list(combination)])
     new_chi2val = get_chi2_value(sources, test_lens, sigf, sigs)
     return new_chi2val, combination
 
 
 def chi2wrapper(guess,params):
+    # Wrapper function for chi2 to allow for minimization
     lenses = Lens(guess[0], guess[1], guess[2])
     return chi2(params[0],lenses,params[1],params[2])
 
 
 def get_chi2_value(sources, lenses, sigf, sigs):
+    # Calculate the chi^2 value for a given set of sources and lenses
+    # Compute as the reduced chi^2 value
     dof = 4 * len(sources.x) - 3 * len(lenses.x)
     if dof <= 0:
         return np.inf # If dof is negative, there are more lenses than we can fit
     return chi2(sources, lenses, sigf, sigs) / dof
 
+
+# ------------------------------
+# Main function
+# ------------------------------
 
 def fit_lensing_field(sources,sigs,sigf,xmax,lens_floor=1,flags = False):
     '''

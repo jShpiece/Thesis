@@ -262,7 +262,6 @@ def locate_nan_entries():
 
 
 def test_initial_guesser():
-
     # What's the quality of our guesses?
 
     ns = 10 #Number of sources
