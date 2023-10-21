@@ -55,34 +55,22 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     return term1 * term2
 
 
-def createLenses(nlens=1,randompos=True,xmax=10):
-    #For now, fix theta_E at 1
-    tearr = np.ones(nlens) 
-    if randompos == True:
-        xlarr = -xmax + 2*xmax*np.random.random(nlens)
-        ylarr = -xmax + 2*xmax*np.random.random(nlens)
-    else: #Uniformly spaced lenses
-        xlarr = -xmax + 2*xmax*(np.arange(nlens)+0.5)/(nlens)
-        ylarr = np.zeros(nlens)
-    return xlarr, ylarr, tearr
-
-
-def lens(x,y,xlarr,ylarr,tearr):
+def lens(x,y,lenses):
     #Compute the lensing signals on a single source 
     #from a set of lenses
-    dx = x-xlarr
-    dy = y-ylarr
+    dx = x-lenses.x
+    dy = y-lenses.y
     r = np.sqrt(dx**2+dy**2)
     cosphi = dx/r
     sinphi = dy/r
     cos2phi = cosphi*cosphi-sinphi*sinphi
     sin2phi = 2*cosphi*sinphi
 
-    f1 = np.sum(-dx*tearr/(2*r*r*r))
-    f2 = np.sum(-dy*tearr/(2*r*r*r))
+    f1 = np.sum(-dx*lenses.te/(2*r*r*r))
+    f2 = np.sum(-dy*lenses.te/(2*r*r*r))
 
-    e1 = np.sum(-tearr/(2*r)*cos2phi)
-    e2 = np.sum(-tearr/(2*r)*sin2phi)
+    e1 = np.sum(-lenses.te/(2*r)*cos2phi)
+    e2 = np.sum(-lenses.te/(2*r)*sin2phi)
 
     return e1,e2,f1,f2
 
@@ -99,7 +87,7 @@ def eR_penalty_function(eR, lower_limit=0.0, upper_limit=20.0, lambda_penalty_up
     return 0.0
 
 
-def chi2(sources, xltest, yltest, tetest, sigf, sigs, fwgt=1.0, swgt=1.0):
+def chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
     x, y, e1data, e2data, f1data, f2data = sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2
     # Initialize chi^2 value
     chi2val = 0.0
@@ -118,7 +106,7 @@ def chi2(sources, xltest, yltest, tetest, sigf, sigs, fwgt=1.0, swgt=1.0):
     for i in range(len(x)):
         # Assuming your 'lens' function can handle tetest being an array
         # If not, you may need to modify this part
-        e1, e2, f1, f2 = lens(x[i], y[i], xltest, yltest, tetest)
+        e1, e2, f1, f2 = lens(x[i], y[i], lenses)
         
         chif1 = (f1data[i] - f1) ** 2 / (sigf ** 2)
         chif2 = (f2data[i] - f2) ** 2 / (sigf ** 2)
@@ -130,21 +118,18 @@ def chi2(sources, xltest, yltest, tetest, sigf, sigs, fwgt=1.0, swgt=1.0):
     # Add the penalty term for Einstein radii outside the threshold
     total_penalty = 0.0
     try:
-        for eR in tetest:
+        for eR in lenses.te:
             total_penalty += eR_penalty_function(eR)
     except TypeError:
-        total_penalty += eR_penalty_function(tetest)
+        total_penalty += eR_penalty_function(lenses.te)
 
     chi2val += total_penalty
     
     return chi2val
 
 
-def chi2wrapper(guess,params):
-    return chi2(params[0],guess[0],guess[1],guess[2],params[1],params[2])
-
-
 def generate_combinations(n, m, start=0, curr=[]):
+    # Generate all combinations of m elements from a set of n elements
     if m == 0:
         yield curr
         return

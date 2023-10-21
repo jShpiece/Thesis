@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pipeline
-from utils import createLenses, print_progress_bar
+from utils import print_progress_bar, generate_combinations
 import time
 from astropy.visualization import hist as fancyhist
 
@@ -13,7 +13,7 @@ sigs = 0.1
 # Testing Utility Functions
 # ------------------------
 
-def _plot_results(xmax, lenses, x, y, xlarr, ylarr, chi2val, title, ax=None):
+def _plot_results(xmax, lenses, x, y, xl, yl, chi2val, title, ax=None):
     """Private helper function to plot the results of lensing reconstruction."""
     if ax is None:
         fig, ax = plt.subplots()
@@ -21,7 +21,7 @@ def _plot_results(xmax, lenses, x, y, xlarr, ylarr, chi2val, title, ax=None):
     for i, eR in enumerate(lenses.te):
         ax.annotate(round(eR, 2), (lenses.x[i], lenses.y[i]))
     ax.scatter(x, y, marker='.', color='blue', label='Sources')
-    ax.scatter(xlarr, ylarr, marker='x', color='green', label='True Lenses')
+    ax.scatter(xl, yl, marker='x', color='green', label='True Lenses')
     ax.legend()
     ax.set_xlabel('x')
     ax.set_ylabel('y')
@@ -40,24 +40,25 @@ def run_simple_test(Nlens,Nsource,xmax,flags=False):
     start_time = time.time()
 
     # Initialize true lens and source configurations
-    xlarr, ylarr, tearr = createLenses(nlens=Nlens, randompos=False, xmax=xmax)
-    sources = pipeline.createSources(xlarr, ylarr, tearr, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
+    lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
+    sources = pipeline.createSources(lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
 
     # Perform lens position optimization
     lenses, chi2val = pipeline.fit_lensing_field(sources, sigs=sigs, sigf=sigf, xmax=xmax, lens_floor = Nlens, flags=flags)
     
     print('Time elapsed:', time.time() - start_time)
     
-    _plot_results(xmax, lenses, sources.x, sources.y, xlarr, ylarr, chi2val, 'Lensing Reconstruction')
+    _plot_results(xmax, lenses, sources.x, sources.y, lenses.x, lenses.y, chi2val, 'Lensing Reconstruction')
     plt.show()
 
 
 def visualize_pipeline_steps(nlens, nsource, xmax):
     """Visualizes each step of the lensing reconstruction pipeline."""
     # Setup lensing and source configurations
-    xlarr, ylarr, tearr = createLenses(nlens=nlens, randompos=False, xmax=xmax)
-    sources = pipeline.createSources(xlarr, ylarr, tearr, ns=nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
+    lenses = pipeline.createLenses(nlens=nlens, randompos=False, xmax=xmax)
+    sources = pipeline.createSources(lenses, ns=nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
     x,y = sources.x, sources.y
+    xl, yl, te = lenses.x, lenses.y, lenses.te
 
     # Arrange a plot with 5 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
@@ -68,27 +69,27 @@ def visualize_pipeline_steps(nlens, nsource, xmax):
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess()
     chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
-    _plot_results(xmax, lenses, x, y, xlarr, ylarr, chi2val, 'Initial Lens Positions', ax=axarr[0,0])
+    _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Initial Lens Positions', ax=axarr[0,0])
 
     # Step 2: Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, sigs, sigf)
     chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
-    _plot_results(xmax, lenses, x, y, xlarr, ylarr, chi2val, 'Optimized Lens Positions', ax=axarr[0,1])
+    _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Optimized Lens Positions', ax=axarr[0,1])
 
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax)
     chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
-    _plot_results(xmax, lenses, x, y, xlarr, ylarr, chi2val, 'Filtered Lens Positions', ax=axarr[0,2])
+    _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Filtered Lens Positions', ax=axarr[0,2])
 
     # Step 4: Merge lenses that are too close to each other
     lenses.merge_close_lenses()
     chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
-    _plot_results(xmax, lenses, x, y, xlarr, ylarr, chi2val, 'Merged Lens Positions', ax=axarr[1,0])
+    _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Merged Lens Positions', ax=axarr[1,0])
 
     # Step 5: Iterative elimination
     lenses.iterative_elimination(chi2val, sources, sigf, sigs, lens_floor=nlens)
     chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
-    _plot_results(xmax, lenses, x, y, xlarr, ylarr, chi2val, 'Final Lens Positions', ax=axarr[1,1])
+    _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Final Lens Positions', ax=axarr[1,1])
 
     # Save and show the plot
     fig.delaxes(axarr[1,2]) # Remove the empty subplot
@@ -110,16 +111,16 @@ def find_empty_sols(ntests):
             nlens = 1
             xmax = 5 #Range of our lensing field - distance from the origin
 
-            xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=True,xmax=xmax)
+            true_lenses = pipeline.createLenses(nlens=nlens,randompos=True,xmax=xmax)
 
             # Set up the true source configuration
             ns = N
-            sources = pipeline.createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
-            true_chi2 = pipeline.get_chi2_value(sources,xlarr,ylarr,tearr,sigf,sigs)
+            sources = pipeline.createSources(true_lenses,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
+            true_chi2 = pipeline.get_chi2_value(sources,true_lenses,sigf,sigs)
 
             # Run the minimization
-            xlens,_,_,chi2val = pipeline.optimize_lens_positions(sources,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
-            if len(xlens) == 0:
+            lenses,chi2val = pipeline.optimize_lens_positions(sources,sigs=sigs,sigf=sigf,xmax=xmax,flags=False)
+            if len(lenses.x) == 0:
                 nempty += 1
 
             if chi2val > true_chi2:
@@ -133,18 +134,17 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
     # Store solution arrays
     xsol, ysol, er = [], [], []
     # True lens configuration
-    true_xlens, true_ylens, true_erlens = createLenses(nlens=Nlens, randompos=False, xmax=xmax)
+    true_lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
 
     # Initialize a progress bar
     print_progress_bar(0, Ntrials, prefix='Progress:', suffix='Complete', length=50)
 
     for trial in range(Ntrials):
         # Generate source data based on true lens configuration
-        sources = pipeline.createSources(true_xlens, true_ylens, true_erlens, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
+        sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
 
         # Recover lens positions
         lenses, _ = pipeline.fit_lensing_field(sources, sigs=sigs, sigf=sigf, xmax=xmax, lens_floor = Nlens, flags=False)
-
 
         # If no lens is recovered, skip the current trial
         if len(lenses.x) == 0:
@@ -181,9 +181,9 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
             a.set_xlabel(param_label)
             a.set_ylabel('Probability Density')
 
-    ax[0].vlines(true_xlens, 0, 1, color='red', label='True Lenses')
-    ax[1].vlines(true_ylens, 0, 1, color='red', label='True Lenses')
-    ax[2].vlines(true_erlens, 0, 1, color='red', label='True Lenses')
+    ax[0].vlines(true_lenses.x, 0, 1, color='red', label='True Lenses')
+    ax[1].vlines(true_lenses.y, 0, 1, color='red', label='True Lenses')
+    ax[2].vlines(true_lenses.te, 0, 1, color='red', label='True Lenses')
 
     for a in ax:
         a.legend()
@@ -201,53 +201,63 @@ def locate_nan_entries():
     nlens = np.random.randint(1,10)
     xmax = np.random.uniform(2,100) #Range of our lensing field - distance from the origin
 
-    xlarr,ylarr,tearr=createLenses(nlens=nlens,randompos=True,xmax=xmax)
+    true_lenses = pipeline.createLenses(nlens=nlens,randompos=True,xmax=xmax)
     
     # Set up the true source configuration
     ns = nlens * np.random.randint(1,10)
-    sources = pipeline.createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
+    sources = pipeline.createSources(true_lenses,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
 
     # Run the minimization in steps
-    xlens,ylens,eRlens = pipeline.find_initial_lens_positions(sources,sigs=sigs,sigf=sigf)
-    chi2val = pipeline.get_chi2_value(sources, xlens, ylens, eRlens, sigf, sigs)
+    lenses = sources.generate_initial_guess()
+    chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
     # Check for NaNs
     if np.isnan(chi2val):
-        print('NaNs in initial lens positions')
-        print(xlens,ylens,eRlens,chi2val)
+        print('NaNs in initial lens guesses')
+        print(lenses.x,lenses.y,lenses.te,chi2val)
         print('Parameters:')
         print(nlens,ns,xmax)
         return False
     
-    xlens,ylens,eRlens = pipeline.filter_lens_positions(xlens,ylens,eRlens,x,y,xmax)
-    chi2val = pipeline.get_chi2_value(sources, xlens, ylens, eRlens, sigf, sigs)
+    lenses.optimize_lens_positions(sources, sigs, sigf)
+    chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
+    # Check for NaNs
+    if np.isnan(chi2val):
+        print('NaNs in optimized lens positions')
+        print(lenses.x,lenses.y,lenses.te,chi2val)
+        print('Parameters:')
+        print(nlens,ns,xmax)
+        return False
+    
+    lenses.filter_lens_positions(sources, xmax)
+    chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
     # Check for NaNs
     if np.isnan(chi2val):
         print('NaNs in filtered lens positions')
-        print(xlens,ylens,eRlens,chi2val)
+        print(lenses.x,lenses.y,lenses.te,chi2val)
         print('Parameters:')
         print(nlens,ns,xmax)
         return False
     
-    xlens,ylens,eRlens = pipeline.merge_close_lenses(xlens,ylens,eRlens)
-    chi2val = pipeline.get_chi2_value(sources, xlens, ylens, eRlens, sigf, sigs)
+    lenses.merge_close_lenses()
+    chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
     # Check for NaNs
     if np.isnan(chi2val):
         print('NaNs in merged lens positions')
-        print(xlens,ylens,eRlens,chi2val)
+        print(lenses.x,lenses.y,lenses.te,chi2val)
         print('Parameters:')
         print(nlens,ns,xmax)
         return False
     
-    xlens,ylens,eRlens,chi2val = pipeline.iterative_elimination(xlens,ylens,eRlens,chi2val, sources, sigf, sigs)
-    chi2val = pipeline.get_chi2_value(sources, xlens, ylens, eRlens, sigf, sigs)
+    lenses.iterative_elimination(chi2val, sources, sigf, sigs, lens_floor=nlens)
+    chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
     # Check for NaNs
     if np.isnan(chi2val):
         print('NaNs in final lens positions')
-        print(xlens,ylens,eRlens,chi2val)
+        print(lenses.x,lenses.y,lenses.te,chi2val)
         print('Parameters:')
         print(nlens,ns,xmax)
         return False
-    
+
     return True
 
 
@@ -260,10 +270,10 @@ def test_initial_guesser():
     xmax = 5
 
     # Set up the true lens configuration
-    xlarr,ylarr,tearr=createLenses(nlens=nl,randompos=False,xmax=xmax)
+    true_lenses = pipeline.createLenses(nlens=nl,randompos=False,xmax=xmax)
 
     # Set up the true source configuration
-    sources = pipeline.createSources(xlarr,ylarr,tearr,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
+    sources = pipeline.createSources(true_lenses,ns=ns,sigf=sigf,sigs=sigs,randompos=True,xmax=xmax)
 
     # Plot these two configurations
     #xmax *= 1.5
@@ -274,7 +284,7 @@ def test_initial_guesser():
     lenses = sources.generate_initial_guess()
     chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
 
-    _plot_results(xmax, lenses, sources.x, sources.y, xlarr, ylarr, chi2val, 'Initial Guesses', ax=ax[0])
+    _plot_results(xmax, lenses, sources.x, sources.y, xl, yl, chi2val, 'Initial Guesses', ax=ax[0])
     # Draw an arrow from each source to the corresponding lens
     for i in range(len(sources.x)):
         ax[0].arrow(sources.x[i], sources.y[i], lenses.x[i] - sources.x[i], lenses.y[i] - sources.y[i], color='black', alpha=0.5)
@@ -283,7 +293,7 @@ def test_initial_guesser():
     lenses.optimize_lens_positions(sources, sigs, sigf)
     chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
 
-    _plot_results(xmax, lenses, sources.x, sources.y, xlarr, ylarr, chi2val, 'Optimized Guesses', ax=ax[1])
+    _plot_results(xmax, lenses, sources.x, sources.y, xl, yl, chi2val, 'Optimized Guesses', ax=ax[1])
     # Draw an arrow from each source to the corresponding lens
     for i in range(len(sources.x)):
         ax[1].arrow(sources.x[i], sources.y[i], lenses.x[i] - sources.x[i], lenses.y[i] - sources.y[i], color='black', alpha=0.5)
@@ -310,30 +320,28 @@ def test_iterative_elimination():
 
     for i in range(4):
         xsol, ysol, er = [], [], []
-        xlens, ylens, telens = createLenses(nlens=nlens, randompos=False, xmax=xmax[i]) # True lens configuration, fixed for all trials
+        lenses = pipeline.createLenses(nlens=nlens, randompos=False, xmax=xmax[i]) # True lens configuration, fixed for all trials
         # Change the einstein radii to random values between 0.5 and 5
         telens = np.random.uniform(0.5, 5, size=nlens)
         # Initialize a progress bar
         print_progress_bar(0, trials, prefix='Trial {} Progress:'.format(i+1), suffix='Complete', length=50)
         for j in range(trials):
             # Set up the true source configuration - this varies with each trial
-            sources = pipeline.createSources(xlens, ylens, telens, ns=ns[i], sigf=sigf, sigs=sigs, randompos=True, xmax=xmax[i])
+            sources = pipeline.createSources(lenses, ns=ns[i], sigf=sigf, sigs=sigs, randompos=True, xmax=xmax[i])
 
             # Now generate a bunch of random lens positions and see if we can recover the true solution
             fake_lenses = ns[i]
-            fake_x, fake_y, fake_te = createLenses(nlens=fake_lenses, randompos=True, xmax=xmax[i])
+            fake_x, fake_y, fake_te = pipeline.createLenses(nlens=fake_lenses, randompos=True, xmax=xmax[i])
 
             # Combine the true and fake lens positions
-            test_xlens = np.concatenate((xlens, fake_x))
-            test_ylens = np.concatenate((ylens, fake_y))
-            test_telens = np.concatenate((telens, fake_te))
-            chi2val = pipeline.get_chi2_value(sources, test_xlens, test_ylens, test_telens, sigf, sigs)
+            test_lenses = pipeline.Lens(np.concatenate((lenses.x, fake_x)), np.concatenate((lenses.y, fake_y)), np.concatenate((telens, fake_te)))
+            chi2val = pipeline.get_chi2_value(sources, test_lenses, sigf, sigs)
 
             # Run iterative elimination
-            xs, ys, ers, chi2val = pipeline.iterative_elimination(test_xlens, test_ylens, test_telens, chi2val, sources, sigf, sigs, lens_floor=nlens)
+            xs, ys, ers, chi2val = pipeline.iterative_elimination(test_lenses, chi2val, sources, sigf, sigs, lens_floor=nlens)
 
             # If the solution does not match the true solution, record the chi2 value as a ratio of the true chi2 value
-            badsol_chi2.append(chi2val / pipeline.get_chi2_value(sources, xlens, ylens, telens, sigf, sigs))
+            badsol_chi2.append(chi2val / pipeline.get_chi2_value(sources, lenses, sigf, sigs))
 
             # Store the recovered lens positions
             xsol.append(xs)
@@ -351,12 +359,12 @@ def test_iterative_elimination():
 
         for k in range(trials):
             # Check if the true lenses are in the recovered lens positions
-            if np.all(np.isin(xlens, xsol[k])) and np.all(np.isin(ylens, ysol[k])) and np.all(np.isin(telens, er[k])):
+            if np.all(np.isin(lenses.x, xsol[k])) and np.all(np.isin(lenses.y, ysol[k])) and np.all(np.isin(telens, er[k])):
                 success += 1
         
         # Plot the results
         fig, ax = plt.subplots()
-        ax.scatter(xlens, ylens, color='red', marker='X', label='True Lenses')
+        ax.scatter(lenses.x, lenses.y, color='red', marker='X', label='True Lenses')
         ax.scatter(xsol, ysol, color='blue', marker='.', alpha=0.25, label='Recovered Lenses')
         ax.legend()
         ax.set_xlabel('x')
@@ -381,7 +389,10 @@ def test_iterative_elimination():
 
 
 if __name__ == '__main__':
-    # run_simple_test(2, 10, 10, flags=True)
+    run_simple_test(1, 10, 50, flags=True)
+    # run_simple_test(2, 100, 50, flags=True)
+    # run_simple_test(3, 100, 50, flags=True)
+    # run_simple_test(4, 100, 50, flags=True)
     # visualize_pipeline_steps(2, 10, 100)
     # bulk_test(100)
     # random_realization(10**4,1,4)

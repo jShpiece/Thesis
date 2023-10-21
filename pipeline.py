@@ -1,6 +1,7 @@
 import numpy as np
-from utils import chi2, chi2wrapper, generate_combinations, lens
+from utils import chi2, generate_combinations, lens
 import scipy.optimize as opt
+from concurrent.futures import ProcessPoolExecutor
 
 
 class Source:
@@ -69,6 +70,31 @@ class Lens:
         best_chi2val = chi2val
         best_indices = None
 
+        combinations = list(generate_combinations(len(self.x), lens_floor))
+        
+        with ProcessPoolExecutor() as executor:
+            results = list(executor.map(get_best_combination, combinations, 
+                                    [self.x]*len(combinations), 
+                                    [self.y]*len(combinations), 
+                                    [self.te]*len(combinations), 
+                                    [sources]*len(combinations), 
+                                    [sigf]*len(combinations), 
+                                    [sigs]*len(combinations)))
+
+            for new_chi2val, combination in results:
+                if new_chi2val < best_chi2val:
+                    best_chi2val, best_indices = new_chi2val, combination
+                    
+        if best_indices is not None:
+            self.x, self.y, self.te = self.x[list(best_indices)], self.y[list(best_indices)], self.te[list(best_indices)]
+        else:
+            self.x, self.y, self.te = np.array([]), np.array([]), np.array([])
+
+        
+        '''
+        best_chi2val = chi2val
+        best_indices = None
+
         for combination in generate_combinations(len(self.x), lens_floor):
             test_lens = Lens(self.x[list(combination)], self.y[list(combination)], self.te[list(combination)])
             new_chi2val = get_chi2_value(sources, test_lens, sigf, sigs) 
@@ -79,9 +105,10 @@ class Lens:
             self.x, self.y, self.te = self.x[list(best_indices)], self.y[list(best_indices)], self.te[list(best_indices)]
         else:
             self.x, self.y, self.te = np.array([]), np.array([]), np.array([])
+        '''
 
 
-def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
+def createSources(lenses,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
     #Create sources for a lensing system and apply the lensing signal
 
     #Create the sources - require that they be distributed sphericaly
@@ -102,7 +129,7 @@ def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5
     f2data = np.zeros(ns)
 
     for i in range(ns):
-        e1data[i],e2data[i],f1data[i],f2data[i] = lens(x[i],y[i],xlarr,ylarr,tearr)
+        e1data[i],e2data[i],f1data[i],f2data[i] = lens(x[i],y[i],lenses)
     
     #Add noise
     e1data += np.random.normal(0,sigs,ns)
@@ -115,6 +142,20 @@ def createSources(xlarr,ylarr,tearr,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5
     return sources
 
 
+def createLenses(nlens=1,randompos=True,xmax=10):
+    #For now, fix theta_E at 1
+    tearr = np.ones(nlens) 
+    if randompos == True:
+        xlarr = -xmax + 2*xmax*np.random.random(nlens)
+        ylarr = -xmax + 2*xmax*np.random.random(nlens)
+    else: #Uniformly spaced lenses
+        xlarr = -xmax + 2*xmax*(np.arange(nlens)+0.5)/(nlens)
+        ylarr = np.zeros(nlens)
+    
+    lenses = Lens(xlarr, ylarr, tearr)
+    return lenses
+
+
 def print_step_info(flags,message,sources,lenses,chi2val):
     if flags:
         print(message)
@@ -124,11 +165,22 @@ def print_step_info(flags,message,sources,lenses,chi2val):
             print('Chi^2: ', chi2val)
 
 
+def get_best_combination(combination, x, y, te, sources, sigf, sigs):
+    test_lens = Lens(x[list(combination)], y[list(combination)], te[list(combination)])
+    new_chi2val = get_chi2_value(sources, test_lens, sigf, sigs)
+    return new_chi2val, combination
+
+
+def chi2wrapper(guess,params):
+    lenses = Lens(guess[0], guess[1], guess[2])
+    return chi2(params[0],lenses,params[1],params[2])
+
+
 def get_chi2_value(sources, lenses, sigf, sigs):
     dof = 4 * len(sources.x) - 3 * len(lenses.x)
     if dof <= 0:
         return np.inf # If dof is negative, there are more lenses than we can fit
-    return chi2(sources, lenses.x, lenses.y, lenses.te, sigf, sigs) / dof
+    return chi2(sources, lenses, sigf, sigs) / dof
 
 
 def fit_lensing_field(sources,sigs,sigf,xmax,lens_floor=1,flags = False):
