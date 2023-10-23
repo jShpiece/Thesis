@@ -388,11 +388,11 @@ def test_iterative_elimination():
 
 
 if __name__ == '__main__':
-    run_simple_test(1, 10, 50, flags=True)
+    # run_simple_test(1, 10, 10, flags=True)
     # run_simple_test(2, 100, 50, flags=True)
     # run_simple_test(3, 100, 50, flags=True)
     # run_simple_test(4, 100, 50, flags=True)
     # visualize_pipeline_steps(2, 10, 100)
     # bulk_test(100)
-    # random_realization(10**4,1,4)
+    random_realization(10**3,2,10,10)
     # test_initial_guesser()

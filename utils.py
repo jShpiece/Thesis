@@ -15,7 +15,6 @@ def print_progress_bar(iteration, total, prefix='', suffix='',
         print() 
 
 
-
 # ------------------------
 # Image Processing Functions
 # ------------------------
@@ -34,7 +33,6 @@ def create_gaussian_kernel(stamp_size, sigma):
     yp, xp = np.mgrid[-stamp_size / 2:stamp_size / 2, -stamp_size / 2:stamp_size / 2]
     gaussian = np.exp(-((xp / sigma) ** 2 + (yp / sigma) ** 2) / 2)
     return gaussian / np.sum(gaussian)
-
 
 
 # ------------------------
@@ -135,4 +133,3 @@ def generate_combinations(n, m, start=0, curr=[]):
         return
     for i in range(start, n):
         yield from generate_combinations(n, m-1, i+1, curr + [i])
-
