@@ -17,6 +17,22 @@ class Source:
         self.e2 = e2
         self.f1 = f1
         self.f2 = f2
+
+    def filter_sources(self, emax=0.5, fmax = 0.5):
+        # This function removes sources that we suspect are strongly lensed
+        # based on their ellipticity and flexion
+        # For now, we use a simple cutoff
+
+        # Filter out sources with too large of an ellipticity
+        e = np.sqrt(self.e1**2 + self.e2**2)
+        valid_indices = e < emax
+
+        # Filter out sources with too large of a flexion
+        f = np.sqrt(self.f1**2 + self.f2**2)
+        valid_indices = valid_indices & (f < fmax)
+
+        self.x, self.y, self.e1, self.e2, self.f1, self.f2 = self.x[valid_indices], self.y[valid_indices], self.e1[valid_indices], self.e2[valid_indices], self.f1[valid_indices], self.f2[valid_indices]
+
     
     def generate_initial_guess(self):
         # Generate initial guesses for lens positions from source positions
@@ -24,15 +40,16 @@ class Source:
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
         r = gamma / flexion
-        return Lens(self.x + r * np.cos(phi), self.y + r * np.sin(phi), 2 * gamma * np.abs(r))
+        return Lens(self.x + r * np.cos(phi), self.y + r * np.sin(phi), 2 * gamma * np.abs(r), 0)
 
 
 class Lens:
     # Class to store lens information. Each lens has a position (x, y) and an Einstein radius (te)
-    def __init__(self, x, y, te):
+    def __init__(self, x, y, te, chi2):
         self.x = x
         self.y = y
         self.te = te
+        self.chi2 = chi2
 
     # The following functions are used to optimize lens positions, fitting the lens positions
     # and strengths to a source population
@@ -77,30 +94,42 @@ class Lens:
     
 
     def iterative_elimination(self, chi2val, sources, sigf, sigs, lens_floor=1):
+        # Okay, what if we just chose the 'lens_floor' lenses that each had the lowest chi2 value?
+
+        # First, sort the lenses by chi2 value
+        sorted_indices = np.argsort(self.chi2)
+        self.x, self.y, self.te = self.x[sorted_indices], self.y[sorted_indices], self.te[sorted_indices]
+
+        # Then, choose the 'lens_floor' lenses with the lowest chi2 value
+        self.x, self.y, self.te = self.x[:lens_floor], self.y[:lens_floor], self.te[:lens_floor]
+        # And... that's it. We don't need to do anything else here.
+        '''
         # Go through all possible combinations of 'lens_floor' lenses and return the combination
         # that minimizes the chi^2 value. Repeat until the chi^2 value stops improving.
         best_chi2val = chi2val
         best_indices = None
 
         combinations = list(generate_combinations(len(self.x), lens_floor))
-        
-        with ProcessPoolExecutor() as executor:
-            results = list(executor.map(get_best_combination, combinations, 
-                                    [self.x]*len(combinations), 
-                                    [self.y]*len(combinations), 
-                                    [self.te]*len(combinations), 
-                                    [sources]*len(combinations), 
-                                    [sigf]*len(combinations), 
-                                    [sigs]*len(combinations)))
+        for combination in combinations:
+            test_lenses = Lens(self.x[list(combination)], self.y[list(combination)], self.te[list(combination)], self.chi2[list(combination)])
+            test_chi2val = np.sum(test_lenses.chi2) / (4 * len(sources.x) - 3 * len(test_lenses.x))
+            if test_chi2val < best_chi2val:
+                best_chi2val = test_chi2val
+                best_indices = combination
 
-            for new_chi2val, combination in results:
-                if new_chi2val < best_chi2val:
-                    best_chi2val, best_indices = new_chi2val, combination
-                    
         if best_indices is not None:
             self.x, self.y, self.te = self.x[list(best_indices)], self.y[list(best_indices)], self.te[list(best_indices)]
         else:
             self.x, self.y, self.te = np.array([]), np.array([]), np.array([])
+
+        '''
+
+    def update_chi2_values(self, sources, sigf, sigs):
+        # Calculate the raw chi^2 value for each lens, given a set of sources
+        self.chi2 = np.zeros(len(self.x))
+        for i in range(len(self.x)):
+            one_lens = Lens(self.x[i], self.y[i], self.te[i], 0)
+            self.chi2[i] = chi2(sources, one_lens, sigf, sigs)
 
 
 # ------------------------------
@@ -137,6 +166,8 @@ def createSources(lenses,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
     f2data += np.random.normal(0,sigf,ns)
 
     sources = Source(x, y, e1data, e2data, f1data, f2data)
+    # Remove sources that we suspect are strongly lensed
+    sources.filter_sources()
 
     return sources
 
@@ -151,7 +182,7 @@ def createLenses(nlens=1,randompos=True,xmax=10):
         xlarr = -xmax + 2*xmax*(np.arange(nlens)+0.5)/(nlens)
         ylarr = np.zeros(nlens)
     
-    lenses = Lens(xlarr, ylarr, tearr)
+    lenses = Lens(xlarr, ylarr, tearr, 0)
     return lenses
 
 
@@ -169,26 +200,19 @@ def print_step_info(flags,message,sources,lenses,chi2val):
             print('Chi^2: ', chi2val)
 
 
-def get_best_combination(combination, x, y, te, sources, sigf, sigs):
-    # Wrapper function for iterative_elimination to allow for parallelization
-    test_lens = Lens(x[list(combination)], y[list(combination)], te[list(combination)])
-    new_chi2val = get_chi2_value(sources, test_lens, sigf, sigs)
-    return new_chi2val, combination
-
-
 def chi2wrapper(guess,params):
     # Wrapper function for chi2 to allow for minimization
-    lenses = Lens(guess[0], guess[1], guess[2])
+    lenses = Lens(guess[0], guess[1], guess[2], 0)
     return chi2(params[0],lenses,params[1],params[2])
 
 
-def get_chi2_value(sources, lenses, sigf, sigs):
+def get_chi2_value(sources, lenses):
     # Calculate the chi^2 value for a given set of sources and lenses
     # Compute as the reduced chi^2 value
     dof = 4 * len(sources.x) - 3 * len(lenses.x)
     if dof <= 0:
         return np.inf # If dof is negative, there are more lenses than we can fit
-    return chi2(sources, lenses, sigf, sigs) / dof
+    return np.sum(lenses.chi2) / dof
 
 
 # ------------------------------
@@ -220,26 +244,42 @@ def fit_lensing_field(sources,sigs,sigf,xmax,lens_floor=1,flags = False):
 
     # Initialize candidate lenses from source guesses
     lenses = sources.generate_initial_guess()
-    chi2val = get_chi2_value(sources, lenses, sigf, sigs)
+    lenses.update_chi2_values(sources, sigf, sigs)
+    chi2val = get_chi2_value(sources, lenses)
 
     # Optimize lens positions via local minimization
     lenses.optimize_lens_positions(sources, sigs, sigf)
-    chi2val = get_chi2_value(sources, lenses, sigf, sigs)
+    lenses.update_chi2_values(sources, sigf, sigs)
+    chi2val = get_chi2_value(sources, lenses)
     print_step_info(flags, "Initial chi^2:", sources, lenses, chi2val)
     
     # Filter out lenses that are too close to sources or too far from the center
     lenses.filter_lens_positions(sources, xmax)
-    chi2val = get_chi2_value(sources, lenses, sigf, sigs)
+    lenses.update_chi2_values(sources, sigf, sigs)
+    chi2val = get_chi2_value(sources, lenses)
     print_step_info(flags, "After winnowing:", sources, lenses, chi2val)
 
     # Merge lenses that are too close to each other
     lenses.merge_close_lenses()
-    chi2val = get_chi2_value(sources, lenses, sigf, sigs)
+    lenses.update_chi2_values(sources, sigf, sigs)
+    chi2val = get_chi2_value(sources, lenses)
     print_step_info(flags, "After merging:", sources, lenses, chi2val)
     
     # Iteratively eliminate lenses that do not improve the chi^2 value
     lenses.iterative_elimination(chi2val, sources, sigf, sigs, lens_floor=lens_floor)
-    chi2val = get_chi2_value(sources, lenses, sigf, sigs)
+    lenses.update_chi2_values(sources, sigf, sigs)
+    chi2val = get_chi2_value(sources, lenses)
     print_step_info(flags, "After iterative minimization:", sources, lenses, chi2val)
+
+    return lenses, chi2val
+
+    # Perform a final local minimization on the remaining lenses
+    guess = np.concatenate((lenses.x, lenses.y, lenses.te))
+    params = [sources, sigf, sigs]
+    result = opt.minimize(chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
+    lenses = Lens(result.x[0:len(lenses.x)], result.x[len(lenses.x):2*len(lenses.x)], result.x[2*len(lenses.x):], 0)
+    lenses.update_chi2_values(sources, sigf, sigs)
+    chi2val = get_chi2_value(sources, lenses)
+    print_step_info(flags, "After final minimization:", sources, lenses, chi2val)
 
     return lenses, chi2val

@@ -4,6 +4,7 @@ import pipeline
 from utils import print_progress_bar, generate_combinations
 import time
 from astropy.visualization import hist as fancyhist
+import scipy.optimize as opt
 
 # Define default noise parameters
 sigf = 0.01
@@ -36,7 +37,13 @@ def _plot_results(xmax, lenses, x, y, xl, yl, chi2val, title, ax=None):
 # ------------------------
 
 def run_simple_test(Nlens,Nsource,xmax,flags=False):
-    """Runs a basic test of the algorithm."""
+    """Runs a basic test of the algorithm.
+    params:
+        Nlens: number of lenses
+        Nsource: number of sources
+        xmax: range of lensing field
+        flags: if True, print out intermediate results
+    """
     start_time = time.time()
 
     # Initialize true lens and source configurations
@@ -44,16 +51,22 @@ def run_simple_test(Nlens,Nsource,xmax,flags=False):
     sources = pipeline.createSources(lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
 
     # Perform lens position optimization
-    lenses, chi2val = pipeline.fit_lensing_field(sources, sigs=sigs, sigf=sigf, xmax=xmax, lens_floor = Nlens, flags=flags)
+    recovered_lenses, chi2val = pipeline.fit_lensing_field(sources, sigs=sigs, sigf=sigf, xmax=xmax, lens_floor = Nlens, flags=flags)
     
     print('Time elapsed:', time.time() - start_time)
     
-    _plot_results(xmax, lenses, sources.x, sources.y, lenses.x, lenses.y, chi2val, 'Lensing Reconstruction')
+    _plot_results(xmax, recovered_lenses, sources.x, sources.y, lenses.x, lenses.y, chi2val, 'Lensing Reconstruction')
+    plt.savefig('Images//simple_test_{}_lens_{}_source.png'.format(Nlens, Nsource))
     plt.show()
 
 
 def visualize_pipeline_steps(nlens, nsource, xmax):
-    """Visualizes each step of the lensing reconstruction pipeline."""
+    """Visualizes each step of the lensing reconstruction pipeline.
+    params:
+        nlens: number of lenses
+        nsource: number of sources
+        xmax: range of lensing field
+    """
     # Setup lensing and source configurations
     lenses = pipeline.createLenses(nlens=nlens, randompos=False, xmax=xmax)
     sources = pipeline.createSources(lenses, ns=nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
@@ -91,8 +104,15 @@ def visualize_pipeline_steps(nlens, nsource, xmax):
     chi2val = pipeline.get_chi2_value(sources, lenses, sigf, sigs)
     _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Final Lens Positions', ax=axarr[1,1])
 
+    # Step 6: Final minimization
+    params = [sources, sigs, sigf]
+    for i in range(len(lenses.x)):
+        guess = [lenses.x[i], lenses.y[i], lenses.te[i]]
+        result = opt.minimize(pipeline.chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
+        lenses.x[i], lenses.y[i], lenses.te[i] = result.x
+    _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Final Lens Positions', ax=axarr[1,2])
+
     # Save and show the plot
-    fig.delaxes(axarr[1,2]) # Remove the empty subplot
     # Can we shift the bottom two subplots to better center them?
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
     plt.savefig('Images//algorithm_visualization.png')
@@ -100,6 +120,7 @@ def visualize_pipeline_steps(nlens, nsource, xmax):
 
 
 def find_empty_sols(ntests): 
+    # Test function to find out how often the algorithm returns empty solutions
     Nsources = [1,2,3,4,5]
 
     print('| Nsources | % of solutions empty | % of solutions worse than true solution |')
@@ -131,6 +152,16 @@ def find_empty_sols(ntests):
 
 
 def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1):
+    '''
+    Testing function to generate random realizations of the lensing field and test the algorithm's performance
+    params:
+        Ntrials: number of trials to run
+        Nlens: number of lenses
+        Nsource: number of sources
+        xmax: range of lensing field
+        sigf: noise parameter for flexion
+        sigs: noise parameter for shear
+    '''
     # Store solution arrays
     xsol, ysol, er = [], [], []
     # True lens configuration
@@ -181,9 +212,14 @@ def random_realization(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1
             a.set_xlabel(param_label)
             a.set_ylabel('Probability Density')
 
-    ax[0].vlines(true_lenses.x, 0, 1, color='red', label='True Lenses')
-    ax[1].vlines(true_lenses.y, 0, 1, color='red', label='True Lenses')
-    ax[2].vlines(true_lenses.te, 0, 1, color='red', label='True Lenses')
+    # Plot true lens positions
+    # Set maximum height of vertical lines to match the maximum height of the histograms
+    ymax = ax[0].get_ylim()[1]
+    ax[0].vlines(true_lenses.x, 0, ymax, color='red', label='True Lenses')
+    ymax = ax[1].get_ylim()[1]
+    ax[1].vlines(true_lenses.y, 0, ymax, color='red', label='True Lenses')
+    ymax = ax[2].get_ylim()[1]
+    ax[2].vlines(true_lenses.te, 0, ymax, color='red', label='True Lenses')
 
     for a in ax:
         a.legend()
@@ -388,11 +424,8 @@ def test_iterative_elimination():
 
 
 if __name__ == '__main__':
-    # run_simple_test(1, 10, 10, flags=True)
-    # run_simple_test(2, 100, 50, flags=True)
-    # run_simple_test(3, 100, 50, flags=True)
-    # run_simple_test(4, 100, 50, flags=True)
-    # visualize_pipeline_steps(2, 10, 100)
-    # bulk_test(100)
-    random_realization(10**3,2,10,10)
-    # test_initial_guesser()
+    run_simple_test(2, 10, 10, flags=False)
+    # visualize_pipeline_steps(2, 20, 10)
+    # random_realization(10**2,1,100,100)
+
+    #run_simple_test(1, 20, 40, flags=False)
