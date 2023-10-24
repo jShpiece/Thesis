@@ -424,8 +424,8 @@ def test_iterative_elimination():
 
 
 if __name__ == '__main__':
-    run_simple_test(2, 10, 10, flags=False)
+    # run_simple_test(2, 100, 100, flags=False)
     # visualize_pipeline_steps(2, 20, 10)
-    # random_realization(10**2,1,100,100)
+    random_realization(10**3,1,100,100)
 
     #run_simple_test(1, 20, 40, flags=False)

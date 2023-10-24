@@ -64,6 +64,7 @@ class Lens:
             # Adjust the tolerance to make the minimization more accurate
             result = opt.minimize(chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
             self.x[i], self.y[i], self.te[i] = result.x
+            self.chi2[i] = result.fun
         
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=1):
@@ -73,7 +74,7 @@ class Lens:
         too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 2 * xmax
 
         valid_indices = ~(too_close_to_sources | too_far_from_center)
-        self.x, self.y, self.te = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices]
+        self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
     
 
     def merge_close_lenses(self, merger_threshold=1):
@@ -87,7 +88,7 @@ class Lens:
                     self.x[i] = (self.x[i]*weight_i + self.x[j]*weight_j) / (weight_i + weight_j)
                     self.y[i] = (self.y[i]*weight_i + self.y[j]*weight_j) / (weight_i + weight_j)
                     self.te[i] = (weight_i + weight_j) / 2
-                    self.x, self.y, self.te = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j)
+                    self.x, self.y, self.te, self.chi2 = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j), np.delete(self.chi2, j)
                     break
             else:
                 i += 1
@@ -249,19 +250,16 @@ def fit_lensing_field(sources,sigs,sigf,xmax,lens_floor=1,flags = False):
 
     # Optimize lens positions via local minimization
     lenses.optimize_lens_positions(sources, sigs, sigf)
-    lenses.update_chi2_values(sources, sigf, sigs)
     chi2val = get_chi2_value(sources, lenses)
     print_step_info(flags, "Initial chi^2:", sources, lenses, chi2val)
     
     # Filter out lenses that are too close to sources or too far from the center
     lenses.filter_lens_positions(sources, xmax)
-    lenses.update_chi2_values(sources, sigf, sigs)
     chi2val = get_chi2_value(sources, lenses)
     print_step_info(flags, "After winnowing:", sources, lenses, chi2val)
 
     # Merge lenses that are too close to each other
     lenses.merge_close_lenses()
-    lenses.update_chi2_values(sources, sigf, sigs)
     chi2val = get_chi2_value(sources, lenses)
     print_step_info(flags, "After merging:", sources, lenses, chi2val)
     
