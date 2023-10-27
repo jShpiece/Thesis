@@ -51,8 +51,6 @@ class Lens:
         self.te = te
         self.chi2 = chi2
 
-    # The following functions are used to optimize lens positions, fitting the lens positions
-    # and strengths to a source population
 
     def optimize_lens_positions(self, sources, sigs, sigf):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
@@ -64,7 +62,6 @@ class Lens:
             # Adjust the tolerance to make the minimization more accurate
             result = opt.minimize(chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
             self.x[i], self.y[i], self.te[i] = result.x
-            self.chi2[i] = result.fun
         
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=1):
@@ -124,6 +121,7 @@ class Lens:
             self.x, self.y, self.te = np.array([]), np.array([]), np.array([])
 
         '''
+
 
     def update_chi2_values(self, sources, sigf, sigs):
         # Calculate the raw chi^2 value for each lens, given a set of sources
