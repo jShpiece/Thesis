@@ -118,7 +118,7 @@ def chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
     try:
         for eR in lenses.te:
             total_penalty += eR_penalty_function(eR)
-    except TypeError:
+    except TypeError: # If lenses.te is not an array
         total_penalty += eR_penalty_function(lenses.te)
 
     chi2val += total_penalty

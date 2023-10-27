@@ -110,11 +110,7 @@ def visualize_pipeline_steps(nlens, nsource, xmax):
     _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Final Lens Positions', ax=axarr[1,1])
 
     # Step 6: Final minimization
-    params = [sources, sigs, sigf]
-    for i in range(len(lenses.x)):
-        guess = [lenses.x[i], lenses.y[i], lenses.te[i]]
-        result = opt.minimize(pipeline.chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
-        lenses.x[i], lenses.y[i], lenses.te[i] = result.x
+    lenses.full_minimization(sources, sigs, sigf)
     lenses.update_chi2_values(sources, sigs, sigf)
     chi2val = pipeline.get_chi2_value(sources, lenses)
     _plot_results(xmax, lenses, x, y, xl, yl, chi2val, 'Final Lens Positions', ax=axarr[1,2])
@@ -322,8 +318,8 @@ def test_iterative_elimination():
 
 
 if __name__ == '__main__':
-    run_simple_test(2, 100, 50, flags=False)
-    # visualize_pipeline_steps(2, 100, 50)
+    # run_simple_test(2, 10, 10, flags=False)
+    visualize_pipeline_steps(2, 100, 50)
 
     '''
     Nsource = 100

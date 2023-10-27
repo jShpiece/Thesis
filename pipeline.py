@@ -1,7 +1,6 @@
 import numpy as np
-from utils import chi2, generate_combinations, lens
+from utils import chi2, generate_combinations
 import scipy.optimize as opt
-from concurrent.futures import ProcessPoolExecutor
 
 # ------------------------------
 # Classes
@@ -35,12 +34,37 @@ class Source:
 
     
     def generate_initial_guess(self):
-        # Generate initial guesses for lens positions from source positions
+        # Generate initial guesses for possible lens positions based on the source ellipticity and flexion
         phi = np.arctan2(self.f2, self.f1)
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
         r = gamma / flexion
         return Lens(self.x + r * np.cos(phi), self.y + r * np.sin(phi), 2 * gamma * np.abs(r), 0)
+    
+
+    def apply_lensing_effects(self, lenses):
+        # Apply the lensing effects of a set of lenses to the sources
+
+        for i in range(len(lenses.x)):
+            dx = self.x - lenses.x[i]
+            dy = self.y - lenses.y[i]
+            r = np.sqrt(dx**2 + dy**2)
+
+            cosphi = dx/r
+            sinphi = dy/r
+            cos2phi = cosphi*cosphi-sinphi*sinphi
+            sin2phi = 2*cosphi*sinphi
+
+            f1 = np.sum(-dx*lenses.te[i]/(2*r*r*r))
+            f2 = np.sum(-dy*lenses.te[i]/(2*r*r*r))
+
+            e1 = np.sum(-lenses.te[i]/(2*r)*cos2phi)
+            e2 = np.sum(-lenses.te[i]/(2*r)*sin2phi)
+        
+            self.e1 += e1
+            self.e2 += e2
+            self.f1 += f1
+            self.f2 += f2
 
 
 class Lens:
@@ -123,6 +147,13 @@ class Lens:
         '''
 
 
+    def full_minimization(self, sources, sigf, sigs):
+        guess = np.concatenate((self.x, self.y, self.te))
+        params = [sources, sigf, sigs]
+        result = opt.minimize(chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
+        self.x, self.y, self.te = result.x[:len(self.x)], result.x[len(self.x):2*len(self.x)], result.x[2*len(self.x):]
+
+
     def update_chi2_values(self, sources, sigf, sigs):
         # Calculate the raw chi^2 value for each lens, given a set of sources
         self.chi2 = np.zeros(len(self.x))
@@ -149,22 +180,15 @@ def createSources(lenses,ns=1,randompos=True,sigf=0.1,sigs=0.1,xmax=5):
     x = r*np.cos(phi)
     y = r*np.sin(phi)
 
-    #Apply the lens 
-    e1data = np.zeros(ns)
-    e2data = np.zeros(ns)
-    f1data = np.zeros(ns)
-    f2data = np.zeros(ns)
-
-    for i in range(ns):
-        e1data[i],e2data[i],f1data[i],f2data[i] = lens(x[i],y[i],lenses)
-    
-    #Add noise
-    e1data += np.random.normal(0,sigs,ns)
-    e2data += np.random.normal(0,sigs,ns)
-    f1data += np.random.normal(0,sigf,ns)
-    f2data += np.random.normal(0,sigf,ns)
+    #Add noise to the sources
+    e1data = np.random.normal(0,sigs,ns)
+    e2data = np.random.normal(0,sigs,ns)
+    f1data = np.random.normal(0,sigf,ns)
+    f2data = np.random.normal(0,sigf,ns)
 
     sources = Source(x, y, e1data, e2data, f1data, f2data)
+    # Apply the lensing effects of the lenses
+    sources.apply_lensing_effects(lenses)
     # Remove sources that we suspect are strongly lensed
     sources.filter_sources()
 
@@ -270,10 +294,7 @@ def fit_lensing_field(sources,sigs,sigf,xmax,lens_floor=1,flags = False):
     return lenses, chi2val
 
     # Perform a final local minimization on the remaining lenses
-    guess = np.concatenate((lenses.x, lenses.y, lenses.te))
-    params = [sources, sigf, sigs]
-    result = opt.minimize(chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
-    lenses = Lens(result.x[0:len(lenses.x)], result.x[len(lenses.x):2*len(lenses.x)], result.x[2*len(lenses.x):], 0)
+    lenses.full_minimization(sources, sigf, sigs)
     lenses.update_chi2_values(sources, sigf, sigs)
     chi2val = get_chi2_value(sources, lenses)
     print_step_info(flags, "After final minimization:", sources, lenses, chi2val)
