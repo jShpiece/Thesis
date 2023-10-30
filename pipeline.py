@@ -155,6 +155,8 @@ class Lens:
             one_lens = Lens(self.x[i], self.y[i], self.te[i], 0)
             self.chi2[i] = chi2(sources, one_lens, sigf, sigs)
         dof = 4 * len(sources.x) - 3 * len(self.x)
+        if dof <= 0:
+            return np.inf # If dof is negative, there are more lenses than we can fit
         return np.sum(self.chi2) / dof
 
 

@@ -45,6 +45,8 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
             range_val = None
             if param_label in [r'$x$', r'$y$']:
                 range_val = (-xmax, xmax)
+            elif param_label == r'$\theta_E$':
+                range_val = (0, 20)
             fancyhist(data[:, lens_num], ax=a, bins='scott', histtype='step', density=True, color=color, label=f'Lens {lens_num + 1}', range=range_val)
             a.set_xlabel(param_label)
             a.set_ylabel('Probability Density')
@@ -178,13 +180,17 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
         # Update progress bar
         print_progress_bar(trial, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
 
+    np.save('Data//xsol_{}_lens_{}_source'.format(Nlens, Nsource), xsol)
+    np.save('Data//ysol_{}_lens_{}_source'.format(Nlens, Nsource), ysol)
+    np.save('Data//er_{}_lens_{}_source'.format(Nlens, Nsource), er)
+
     return xsol, ysol, er, true_lenses
 
 
 def test_initial_guesser():
     # What's the quality of our guesses?
 
-    ns = 10 #Number of sources
+    ns = 20 #Number of sources
     nl = 2 #Number of lenses
     xmax = 5
 
@@ -202,7 +208,7 @@ def test_initial_guesser():
     fig.suptitle('Checking Initial Guesses', fontsize=16)
     # Generate candidate lenses
     lenses = sources.generate_initial_guess()
-    reducedchi2 = pipeline.get_chi2_value(sources, lenses)
+    reducedchi2 = lenses.update_chi2_values(sources,sigf,sigs)
 
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Initial Guesses', ax=ax[0])
     # Draw an arrow from each source to the corresponding lens
@@ -211,7 +217,7 @@ def test_initial_guesser():
 
     # Perform local minimization
     lenses.optimize_lens_positions(sources, sigs, sigf)
-    reducedchi2 = pipeline.get_chi2_value(sources, lenses)
+    reducedchi2 = lenses.update_chi2_values(sources,sigf,sigs)
 
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Optimized Guesses', ax=ax[1])
     # Draw an arrow from each source to the corresponding lens
@@ -308,18 +314,58 @@ def test_iterative_elimination():
     plt.show()
 
 
+def vary_eR_chi(telens):
+    nlens = 1
+    xmax = 50
+    lenses = pipeline.createLenses(nlens=nlens, randompos=False, xmax=xmax)
+
+    # Set up the true source configuration
+    ns = 100
+    sources = pipeline.createSources(lenses, ns=ns, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
+
+    # Set up the range of einstein radii to test
+    chi2 = np.empty_like(telens)
+
+    for i, te in enumerate(telens):
+        # Change the einstein radii
+        lenses.te = np.array([te])
+        lenses.x = np.random.normal(0, 1, size=nlens)
+        # Calculate the chi2 value
+        chi2[i] = lenses.update_chi2_values(sources, sigf, sigs)
+    
+    return chi2
+
+
 if __name__ == '__main__':
-    test_initial_guesser()
+    # test_initial_guesser()
     # run_simple_test(1, 100, 50, flags=False)
     # visualize_pipeline_steps(2, 100, 50)
 
-    '''
     Nsource = 100
-    Nlens = [1,2,3]
+    Nlens = [1,2]
     xmax = 50
-    Ntrials = 100
+    Ntrials = 1000
 
     for nlens in Nlens:
         xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, sigf=sigf, sigs=sigs)
         plot_random_realizations(xsol, ysol, er, true_lenses, nlens, Nsource, Ntrials, xmax)
+        print('Finished {} lens case'.format(nlens))
+    
+    # This tests the einstein radius which minimizes the chi2 value
+    '''
+    Ntrials = 1000
+    telens = np.linspace(0.1, 5, 100)
+    min_er = np.empty(Ntrials)
+
+    for i in range(Ntrials):
+        chi2 = vary_eR_chi(telens)
+        min_er[i] = telens[np.argmin(chi2)]
+        
+    fig, ax = plt.subplots()
+    fancyhist(min_er, ax=ax, bins='freedman', histtype='step', density=True)
+    ax.set_xlabel(r'$\theta_E$')
+    ax.set_ylabel('Probability Density')
+    ax.set_title('Distribution of Recovered Einstein Radii \n Location offset by a few arcseconds')
+    # plt.savefig('Images//er_distribution.png')
+    plt.show()    
     '''
