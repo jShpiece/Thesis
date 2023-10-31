@@ -53,22 +53,26 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     return term1 * term2
 
 
-def lens(x,y,lenses):
-    #Compute the lensing signals on a single source 
-    #from a set of lenses
-    dx = x-lenses.x
-    dy = y-lenses.y
-    r = np.sqrt(dx**2+dy**2)
-    cosphi = dx/r
-    sinphi = dy/r
-    cos2phi = cosphi*cosphi-sinphi*sinphi
-    sin2phi = 2*cosphi*sinphi
+def lens(sources,lenses):
+    e1 = np.zeros(len(sources.x))
+    e2 = np.zeros(len(sources.x))
+    f1 = np.zeros(len(sources.x))
+    f2 = np.zeros(len(sources.x))
 
-    f1 = np.sum(-dx*lenses.te/(2*r*r*r))
-    f2 = np.sum(-dy*lenses.te/(2*r*r*r))
+    for i in range(len(lenses.x)):
+        dx = sources.x - lenses.x[i]
+        dy = sources.y - lenses.y[i]
+        r = np.sqrt(dx**2 + dy**2)
 
-    e1 = np.sum(-lenses.te/(2*r)*cos2phi)
-    e2 = np.sum(-lenses.te/(2*r)*sin2phi)
+        cosphi = dx/r
+        sinphi = dy/r
+        cos2phi = cosphi*cosphi-sinphi*sinphi
+        sin2phi = 2*cosphi*sinphi
+    
+        e1 += -lenses.te[i]/(2*r)*cos2phi
+        e2 += -lenses.te[i]/(2*r)*sin2phi
+        f1 += -dx*lenses.te[i]/(2*r*r*r)
+        f2 += -dy*lenses.te[i]/(2*r*r*r)
 
     return e1,e2,f1,f2
 
@@ -85,7 +89,7 @@ def eR_penalty_function(eR, lower_limit=0.0, upper_limit=20.0, lambda_penalty_up
     return 0.0
 
 
-def chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
+def compute_chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
     x, y, e1data, e2data, f1data, f2data = sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2
     # Initialize chi^2 value
     chi2val = 0.0
@@ -100,17 +104,15 @@ def chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
         e2data = np.array([e2data])
         f1data = np.array([f1data])
         f2data = np.array([f2data])
-    
+
+    e1, e2, f1, f2 = lens(sources, lenses)
+
     for i in range(len(x)):
-        # Assuming your 'lens' function can handle tetest being an array
-        # If not, you may need to modify this part
-        e1, e2, f1, f2 = lens(x[i], y[i], lenses)
-        
-        chif1 = (f1data[i] - f1) ** 2 / (sigf ** 2)
-        chif2 = (f2data[i] - f2) ** 2 / (sigf ** 2)
-        chie1 = (e1data[i] - e1) ** 2 / (sigs ** 2)
-        chie2 = (e2data[i] - e2) ** 2 / (sigs ** 2)
-        
+        chie1 = (e1data[i] - e1[i]) ** 2 / (sigs ** 2)
+        chie2 = (e2data[i] - e2[i]) ** 2 / (sigs ** 2)
+        chif1 = (f1data[i] - f1[i]) ** 2 / (sigf ** 2)
+        chif2 = (f2data[i] - f2[i]) ** 2 / (sigf ** 2)
+
         chi2val += fwgt * (chif1 + chif2) + swgt * (chie1 + chie2)
     
     # Add the penalty term for Einstein radii outside the threshold

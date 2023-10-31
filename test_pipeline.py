@@ -6,7 +6,7 @@ import time
 from astropy.visualization import hist as fancyhist
 
 # Define default noise parameters
-sigf = 0.01 
+sigf = 0.01
 sigs = 0.1 
 
 # ------------------------
@@ -346,9 +346,30 @@ def vary_eR_chi(telens):
 if __name__ == '__main__':
     # test_initial_guesser()
     # run_simple_test(1, 100, 50, flags=False)
-    # visualize_pipeline_steps(2, 100, 50)
+    visualize_pipeline_steps(2, 100, 50)
 
-    # raise SystemExit
+    raise SystemExit
+
+    nl = 1
+    ns = 10
+    xmax = 5
+
+    lenses = pipeline.createLenses(nlens=nl, randompos=False, xmax=xmax)
+    sources = pipeline.createSources(lenses, ns=ns, sigf=sigf, sigs=sigs, randompos=False, xmax=xmax)
+
+    plt.figure()
+    plt.scatter(lenses.x, lenses.y, color='red', label='Lenses')
+    plt.scatter(sources.x, sources.y, color='blue', label='Sources')
+    plt.quiver(sources.x, sources.y, sources.f1, sources.f2, color='blue', label='Flexion')
+    plt.xlim(-xmax, xmax)
+    plt.ylim(-xmax, xmax)
+    plt.legend()
+    plt.show()
+
+
+
+
+    raise SystemExit
 
     Nsource = 100
     Nlens = [1,2]
