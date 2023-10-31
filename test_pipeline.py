@@ -31,7 +31,7 @@ def _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, title, ax=None):
     ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
 
 
-def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrials, xmax):
+def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrials, xmax, distinguish_lenses=False):
     '''
     Plot histograms of the random realizations.
     '''
@@ -39,6 +39,7 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
     colors = ['black', 'blue', 'green', 'orange', 'purple', 'pink', 'brown', 'gray', 'cyan']
     param_labels = [r'$x$', r'$y$', r'$\theta_E$']
 
+    # Plot histograms of the recovered lens positions
     for lens_num in range(Nlens):
         color = colors[lens_num % len(colors)]
         for a, data, param_label in zip(ax, [xsol, ysol, er], param_labels):
@@ -46,19 +47,22 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
             if param_label in [r'$x$', r'$y$']:
                 range_val = (-xmax, xmax)
             elif param_label == r'$\theta_E$':
-                range_val = (0, 20)
-            fancyhist(data[:, lens_num], ax=a, bins='scott', histtype='step', density=True, color=color, label=f'Lens {lens_num + 1}', range=range_val)
+                range_val = (0, 5)
+            if distinguish_lenses:
+                fancyhist(data[:, lens_num], ax=a, bins='scott', histtype='step', density=True, color=color, label=f'Lens {lens_num + 1}', range=range_val)
+            else:
+                fancyhist(data.flatten(), ax=a, bins='scott', histtype='step', density=True, color=colors[0], label=f'Lens {lens_num + 1}', range=range_val)
             a.set_xlabel(param_label)
             a.set_ylabel('Probability Density')
 
     # Plot true lens positions
     for a, true_value in zip(ax, [true_lenses.x, true_lenses.y, true_lenses.te]):
         a.vlines(true_value, 0, a.get_ylim()[1], color='red', label='True Lenses')
-        a.legend('upper right')
+        a.legend(loc='upper right')
             
     fig.suptitle(f'Random Realization Test - {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(f'Images//random_realization_{Nlens}_lens_{Nsource}_source.png')
+    plt.savefig(f'Images//random_realization_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
     plt.close()
 
 
@@ -179,6 +183,9 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
     
         # Update progress bar
         print_progress_bar(trial, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
+    
+    # Finalize the progress bar so that I don't lose my mind
+    print_progress_bar(Ntrials, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
 
     np.save('Data//xsol_{}_lens_{}_source'.format(Nlens, Nsource), xsol)
     np.save('Data//ysol_{}_lens_{}_source'.format(Nlens, Nsource), ysol)
@@ -341,6 +348,8 @@ if __name__ == '__main__':
     # run_simple_test(1, 100, 50, flags=False)
     # visualize_pipeline_steps(2, 100, 50)
 
+    # raise SystemExit
+
     Nsource = 100
     Nlens = [1,2]
     xmax = 50
@@ -351,8 +360,8 @@ if __name__ == '__main__':
         plot_random_realizations(xsol, ysol, er, true_lenses, nlens, Nsource, Ntrials, xmax)
         print('Finished {} lens case'.format(nlens))
     
-    # This tests the einstein radius which minimizes the chi2 value
     '''
+    # This tests the einstein radius which minimizes the chi2 value
     Ntrials = 1000
     telens = np.linspace(0.1, 5, 100)
     min_er = np.empty(Ntrials)
