@@ -59,10 +59,10 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
     for a, true_value in zip(ax, [true_lenses.x, true_lenses.y, true_lenses.te]):
         a.vlines(true_value, 0, a.get_ylim()[1], color='red', label='True Lenses')
         a.legend(loc='upper right')
-            
+
     fig.suptitle(f'Random Realization Test - {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(f'Images//random_realization_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
+    plt.savefig(f'Images//rand_real//random_realization_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
     plt.close()
 
 
@@ -90,7 +90,7 @@ def run_simple_test(Nlens,Nsource,xmax,flags=False):
     print('Time elapsed:', time.time() - start_time)
     
     _plot_results(xmax, recovered_lenses, sources, lenses.x, lenses.y, reducedchi2, 'Lensing Reconstruction')
-    plt.savefig('Images//simple_test_{}_lens_{}_source.png'.format(Nlens, Nsource))
+    plt.savefig('Images//tests//simple_test_{}_lens_{}_source.png'.format(Nlens, Nsource))
     plt.show()
 
 
@@ -140,22 +140,9 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Final Lens Positions', ax=axarr[1,2])
 
-    # Generate chi2 values for the case where we have no lenses and when we get the true lens positions
-    no_lenses = pipeline.Lens([0], [0], [0], 0)
-    no_lenses.update_chi2_values(sources, sigf, sigs)
-    no_lenses_chi2 = pipeline.get_chi2_value(sources, no_lenses)
-
-    true_lenses.update_chi2_values(sources, sigf, sigs)
-    true_lenses_chi2 = pipeline.get_chi2_value(sources, true_lenses)
-
-    # Label the final subplot with all 3 chi2 values
-
-    axarr[1,2].set_title('Final Lens Positions \n $\chi^2$ = {:.2f} (No Lenses) \n $\chi^2$ = {:.2f} (True Lenses) \n $\chi^2$ = {:.2f} (Recovered Lenses)'.format(no_lenses_chi2, true_lenses_chi2, reducedchi2))
-
     # Save and show the plot
-    # Can we shift the bottom two subplots to better center them?
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
-    plt.savefig('Images//algorithm_visualization.png')
+    plt.savefig('Images//tests//visualization_{}_lens_{}_source.png'.format(Nlens, Nsource))
     plt.show()
 
 
@@ -321,8 +308,7 @@ def test_iterative_elimination():
     plt.show()
 
 
-def vary_eR_chi(telens):
-    nlens = 1
+def vary_eR_chi(telens, nlens, exact_pos = False):
     xmax = 50
     lenses = pipeline.createLenses(nlens=nlens, randompos=False, xmax=xmax)
 
@@ -335,8 +321,9 @@ def vary_eR_chi(telens):
 
     for i, te in enumerate(telens):
         # Change the einstein radii
-        lenses.te = np.array([te])
-        lenses.x = np.random.normal(0, 1, size=nlens)
+        lenses.te = np.full(nlens, te)
+        if not exact_pos:
+            lenses.x = np.random.normal(0, 1, size=nlens) # Randomize the lens positions by a few arcseconds
         # Calculate the chi2 value
         chi2[i] = lenses.update_chi2_values(sources, sigf, sigs)
     
@@ -349,46 +336,14 @@ if __name__ == '__main__':
     visualize_pipeline_steps(2, 100, 50)
 
     raise SystemExit
-
-    nl = 1
-    ns = 10
-    xmax = 5
-
-    lenses = pipeline.createLenses(nlens=nl, randompos=False, xmax=xmax)
-    sources = pipeline.createSources(lenses, ns=ns, sigf=sigf, sigs=sigs, randompos=False, xmax=xmax)
-
-    plt.figure()
-    plt.scatter(lenses.x, lenses.y, color='red', label='Lenses')
-    plt.scatter(sources.x, sources.y, color='blue', label='Sources')
-    plt.quiver(sources.x, sources.y, sources.f1, sources.f2, color='blue', label='Flexion')
-    plt.xlim(-xmax, xmax)
-    plt.ylim(-xmax, xmax)
-    plt.legend()
-    plt.show()
-
-
-
-
-    raise SystemExit
-
-    Nsource = 100
-    Nlens = [1,2]
-    xmax = 50
-    Ntrials = 1000
-
-    for nlens in Nlens:
-        xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, sigf=sigf, sigs=sigs)
-        plot_random_realizations(xsol, ysol, er, true_lenses, nlens, Nsource, Ntrials, xmax)
-        print('Finished {} lens case'.format(nlens))
-    
-    '''
     # This tests the einstein radius which minimizes the chi2 value
     Ntrials = 1000
+    nlens = 2
     telens = np.linspace(0.1, 5, 100)
     min_er = np.empty(Ntrials)
 
     for i in range(Ntrials):
-        chi2 = vary_eR_chi(telens)
+        chi2 = vary_eR_chi(telens, nlens)
         min_er[i] = telens[np.argmin(chi2)]
         
     fig, ax = plt.subplots()
@@ -398,4 +353,4 @@ if __name__ == '__main__':
     ax.set_title('Distribution of Recovered Einstein Radii \n Location offset by a few arcseconds')
     # plt.savefig('Images//er_distribution.png')
     plt.show()    
-    '''
+    

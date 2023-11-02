@@ -39,7 +39,7 @@ class Source:
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
         r = gamma / flexion
-        return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(2 * gamma * np.abs(r)), np.empty_like(self.x))
+        return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(2 * gamma * np.abs(r)), 0)
     
 
     def apply_lensing_effects(self, lenses):
@@ -94,7 +94,7 @@ class Lens:
         zero_te_indices = (self.te == 0)
 
         valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
-        self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
+        self.x, self.y, self.te = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices]
     
 
     def merge_close_lenses(self, merger_threshold=1):
@@ -108,7 +108,7 @@ class Lens:
                     self.x[i] = (self.x[i]*weight_i + self.x[j]*weight_j) / (weight_i + weight_j)
                     self.y[i] = (self.y[i]*weight_i + self.y[j]*weight_j) / (weight_i + weight_j)
                     self.te[i] = (weight_i + weight_j) / 2
-                    self.x, self.y, self.te, self.chi2 = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j), np.delete(self.chi2, j)
+                    self.x, self.y, self.te = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j)
                     break
             else:
                 i += 1
@@ -159,13 +159,14 @@ class Lens:
 
     def update_chi2_values(self, sources, sigf, sigs):
         # Change the chi^2 values of the lenses to reflect the current set of sources
-        # And return the reduced chi^2 value of the set of lenses
+        self.chi2 = np.zeros(len(self.x))
         for i in range(len(self.x)):
             one_lens = Lens(self.x[i], self.y[i], self.te[i], 0)
-            self.chi2[i] = calc_raw_chi2(sources, one_lens, sigf, sigs)
-        dof = calc_degrees_of_freedom(sources, self)
-        total_chi2 = calc_raw_chi2(sources, self, sigf, sigs) # NOT the same thing as the sum of each lens!
-        return total_chi2 / dof
+            self.chi2[i] = compute_chi2(sources, one_lens, sigf, sigs)
+        dof = 4 * len(sources.x) - 3 * len(self.x)
+        if dof <= 0:
+            return np.inf # If dof is negative, there are more lenses than we can fit
+        return np.sum(self.chi2) / dof
 
 
 # ------------------------------
@@ -196,7 +197,7 @@ def createSources(lenses,ns=1,randompos=True,sigf=0.01,sigs=0.1,xmax=5):
     # Apply the lensing effects of the lenses
     sources.apply_lensing_effects(lenses)
     # Remove sources that we suspect are strongly lensed
-    # sources.filter_sources()
+    sources.filter_sources()
 
     return sources
 
@@ -232,34 +233,44 @@ def eR_penalty_function(eR, lower_limit=0.0, upper_limit=20.0, lambda_penalty_up
     return 0.0
 
 
-def calc_degrees_of_freedom(sources, lenses):
-    dof = 4 * len(sources.x) - 3 * len(lenses.x)
-    if dof <= 0:
-        return np.inf
-    return dof
-
-
-def calc_raw_chi2(sources, lenses, sigf, sigs):
-    # Compute the raw chi^2 value for a given set of sources and lenses
-
-    # The source clone object represents the sources after the lensing effects of our 'test' lenses
-    source_clone = Source(sources.x, sources.y, np.zeros_like(sources.e1), np.zeros_like(sources.e2), np.zeros_like(sources.f1), np.zeros_like(sources.f2))
-    source_clone.apply_lensing_effects(lenses) 
+def compute_chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
+    x, y, e1data, e2data, f1data, f2data = sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2
+    # Initialize chi^2 value
+    chi2val = 0.0
     
-    # Now we compare the lensing signals on our source_clone object to the original sources
-    chi1e = ((source_clone.e1 - sources.e1) / sigs) ** 2
-    chi2e = ((source_clone.e2 - sources.e2) / sigs) ** 2
-    chi1f = ((source_clone.f1 - sources.f1) / sigf) ** 2
-    chi2f = ((source_clone.f2 - sources.f2) / sigf) ** 2
+    # Loop through the data points to compute the chi^2 terms
+    # What if we only get one data point?
+    # Turn it into an array of length 1
+    if not isinstance(x, np.ndarray):
+        x = np.array([x])
+        y = np.array([y])
+        e1data = np.array([e1data])
+        e2data = np.array([e2data])
+        f1data = np.array([f1data])
+        f2data = np.array([f2data])
 
-    chi2 = np.sum(chi1e + chi2e + chi1f + chi2f)
+    for i in range(len(x)):
+        one_source = Source(x[i], y[i], 0, 0, 0, 0)
+        one_source.apply_lensing_effects(lenses)
 
-    penalty = 0
-    for eR in lenses.te:
-        penalty += eR_penalty_function(eR)
+        chie1 = (e1data[i] - one_source.e1) ** 2 / (sigs ** 2)
+        chie2 = (e2data[i] - one_source.e2) ** 2 / (sigs ** 2)
+        chif1 = (f1data[i] - one_source.f1) ** 2 / (sigf ** 2)
+        chif2 = (f2data[i] - one_source.f2) ** 2 / (sigf ** 2)
 
-    return chi2 + penalty
+        chi2val += fwgt * (chif1 + chif2) + swgt * (chie1 + chie2)
+    
+    # Add the penalty term for Einstein radii outside the threshold
+    total_penalty = 0.0
+    try:
+        for eR in lenses.te:
+            total_penalty += eR_penalty_function(eR)
+    except TypeError: # If lenses.te is not an array
+        total_penalty += eR_penalty_function(lenses.te)
 
+    chi2val += total_penalty
+    
+    return chi2val
 
 
 
@@ -280,7 +291,16 @@ def print_step_info(flags,message,sources,lenses,reducedchi2):
 def chi2wrapper(guess,params):
     # Wrapper function for chi2 to allow for minimization
     lenses = Lens(guess[0], guess[1], guess[2], 0)
-    return calc_raw_chi2(params[0],lenses,params[1],params[2])
+    return compute_chi2(params[0],lenses,params[1],params[2])
+
+
+def get_chi2_value(sources, lenses):
+    # Calculate the chi^2 value for a given set of sources and lenses
+    # Compute as the reduced chi^2 value
+    dof = 4 * len(sources.x) - 3 * len(lenses.x)
+    if dof <= 0:
+        return np.inf # If dof is negative, there are more lenses than we can fit
+    return np.sum(lenses.chi2) / dof
 
 
 # ------------------------------
