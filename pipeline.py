@@ -1,5 +1,5 @@
 import numpy as np
-# from utils import compute_chi2
+from utils import generate_combinations
 import scipy.optimize as opt
 
 # ------------------------------
@@ -77,13 +77,26 @@ class Lens:
     def optimize_lens_positions(self, sources, sigs, sigf):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
+        max_attempts = 5  
         for i in range(len(self.x)):
             one_source = Source(sources.x[i], sources.y[i], sources.e1[i], sources.e2[i], sources.f1[i], sources.f2[i])
-            params = [one_source, sigf, sigs]
             guess = [self.x[i], self.y[i], self.te[i]] # Class is already initialized with initial guesses\
             # Adjust the tolerance to make the minimization more accurate
-            result = opt.minimize(chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
-            self.x[i], self.y[i], self.te[i] = result.x
+            best_result = None
+            best_params = guess
+            for _ in range(max_attempts):
+                result = opt.minimize(
+                    chi2wrapper, guess, args=([one_source, sigf, sigs]), 
+                    method='Nelder-Mead', 
+                    tol=1e-8, 
+                    options={'maxiter': 1000}
+                )
+
+                if best_result is None or result.fun < best_result.fun:
+                    best_result = result
+                    best_params = result.x
+
+            self.x[i], self.y[i], self.te[i] = best_params[0], best_params[1], best_params[2]
         
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=1):
@@ -115,6 +128,7 @@ class Lens:
     
 
     def iterative_elimination(self, reducedchi2, sources, sigf, sigs, lens_floor=1):
+        '''
         # Okay, what if we just chose the 'lens_floor' lenses that each had the lowest chi2 value?
 
         # First, sort the lenses by chi2 value
@@ -133,7 +147,7 @@ class Lens:
         combinations = list(generate_combinations(len(self.x), lens_floor))
         for combination in combinations:
             test_lenses = Lens(self.x[list(combination)], self.y[list(combination)], self.te[list(combination)], self.chi2[list(combination)])
-            test_reducedchi2 = np.sum(test_lenses.chi2) / (4 * len(sources.x) - 3 * len(test_lenses.x))
+            test_reducedchi2 = test_lenses.update_chi2_values(sources, sigf, sigs)
             if test_reducedchi2 < best_reducedchi2:
                 best_reducedchi2 = test_reducedchi2
                 best_indices = combination
@@ -143,18 +157,28 @@ class Lens:
         else:
             self.x, self.y, self.te = np.array([]), np.array([]), np.array([])
 
-        '''
-
 
     def full_minimization(self, sources, sigf, sigs):
-        # Perform a local minimization on all remaining lenses, using the entire set of sources
-        xl = self.x
-        yl = self.y
-        tel = self.te
-        guess = np.concatenate((xl, yl, tel))
-        params = [sources, sigf, sigs]
-        result = opt.minimize(chi2wrapper, guess, args=(params), method='Nelder-Mead', tol=1e-8)
-        self.x, self.y, self.te = result.x[:len(xl)], result.x[len(xl):2*len(xl)], result.x[2*len(xl):]
+        guess = [self.x, self.y, self.te]
+        max_attempts = 5  # Number of optimization attempts with different initial guesses
+
+        best_result = None
+        best_params = guess
+
+        for _ in range(max_attempts):
+            result = opt.minimize(
+                chi2wrapper, guess, args=([sources, sigf, sigs]),
+                method='Nelder-Mead',  # A robust method that doesn't require gradients
+                tol=1e-8,  # Adjust tolerance for each attempt
+                options={'maxiter': 1000}
+            )
+
+            if best_result is None or result.fun < best_result.fun:
+                best_result = result
+                best_params = result.x
+
+        self.x, self.y, self.te = best_params[:len(self.x)], best_params[len(self.x):2*len(self.x)], best_params[2*len(self.x):]
+
 
 
     def update_chi2_values(self, sources, sigf, sigs):
@@ -219,7 +243,6 @@ def createLenses(nlens=1,randompos=True,xmax=10):
 # Chi^2 functions
 # ------------------------------
 
-
 def eR_penalty_function(eR, lower_limit=0.0, upper_limit=20.0, lambda_penalty_upper=10.0):
     # Hard lower limit
     if eR < lower_limit:
@@ -261,8 +284,6 @@ def calc_raw_chi2(sources, lenses, sigf, sigs):
     return chi2 + penalty
 
 
-
-
 # ------------------------------
 # Helper functions
 # ------------------------------
@@ -279,7 +300,7 @@ def print_step_info(flags,message,sources,lenses,reducedchi2):
 
 def chi2wrapper(guess,params):
     # Wrapper function for chi2 to allow for minimization
-    lenses = Lens(guess[0], guess[1], guess[2], 0)
+    lenses = Lens(guess[0], guess[1], guess[2], [0])
     return calc_raw_chi2(params[0],lenses,params[1],params[2])
 
 
@@ -313,16 +334,19 @@ def fit_lensing_field(sources,sigf,sigs,xmax,lens_floor=1,flags = False):
     # Initialize candidate lenses from source guesses
     lenses = sources.generate_initial_guess()
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
+    print_step_info(flags, "Initial chi^2:", sources, lenses, reducedchi2)
 
+    '''
     # Optimize lens positions via local minimization
     lenses.optimize_lens_positions(sources, sigs, sigf)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "Initial chi^2:", sources, lenses, reducedchi2)
-    
+    print_step_info(flags, "Local Minimization:", sources, lenses, reducedchi2)
+    '''
+
     # Filter out lenses that are too close to sources or too far from the center
     lenses.filter_lens_positions(sources, xmax)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "After winnowing:", sources, lenses, reducedchi2)
+    print_step_info(flags, "After filtering:", sources, lenses, reducedchi2)
 
     # Merge lenses that are too close to each other
     lenses.merge_close_lenses()
@@ -332,11 +356,13 @@ def fit_lensing_field(sources,sigf,sigs,xmax,lens_floor=1,flags = False):
     # Iteratively eliminate lenses that do not improve the chi^2 value
     lenses.iterative_elimination(reducedchi2, sources, sigf, sigs, lens_floor=lens_floor)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "After iterative minimization:", sources, lenses, reducedchi2)
+    print_step_info(flags, "After iterative elimination:", sources, lenses, reducedchi2)
 
+    
     # Perform a final local minimization on the remaining lenses
     lenses.full_minimization(sources, sigf, sigs)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     print_step_info(flags, "After final minimization:", sources, lenses, reducedchi2)
-
+    
+    
     return lenses, reducedchi2

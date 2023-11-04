@@ -60,9 +60,9 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
         a.vlines(true_value, 0, a.get_ylim()[1], color='red', label='True Lenses')
         a.legend(loc='upper right')
 
-    fig.suptitle(f'Random Realization Test - {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
+    fig.suptitle(f'Random Realization Test: Some Minimization \n {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(f'Images//rand_real//random_realization_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
+    plt.savefig(f'Images//rand_real//rr_some_min_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
     plt.close()
 
 
@@ -112,13 +112,23 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
 
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess()
+
+    '''
+    # Implant the true lens positions into the initial guess
+    for i in range(Nlens):
+        lenses.x[i], lenses.y[i] = xl[i], yl[i]
+        lenses.te[i] = true_lenses.te[i]
+    '''
+
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Initial Lens Positions', ax=axarr[0,0])
-
+    
+    '''
     # Step 2: Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, sigf, sigs)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Optimized Lens Positions', ax=axarr[0,1])
+    '''
 
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax)
@@ -138,7 +148,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
     # Step 6: Final minimization
     lenses.full_minimization(sources, sigf, sigs)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Final Lens Positions', ax=axarr[1,2])
+    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Final Minimization', ax=axarr[1,2])
 
     # Save and show the plot
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
@@ -323,7 +333,7 @@ def vary_eR_chi(telens, nlens, exact_pos = False):
         # Change the einstein radii
         lenses.te = np.full(nlens, te)
         if not exact_pos:
-            lenses.x = np.random.normal(0, 1, size=nlens) # Randomize the lens positions by a few arcseconds
+            lenses.x += np.random.normal(0, 1, size=nlens) # Randomize the lens positions by a few arcseconds
         # Calculate the chi2 value
         chi2[i] = lenses.update_chi2_values(sources, sigf, sigs)
     
@@ -332,8 +342,32 @@ def vary_eR_chi(telens, nlens, exact_pos = False):
 
 if __name__ == '__main__':
     # test_initial_guesser()
-    # run_simple_test(1, 100, 50, flags=False)
-    visualize_pipeline_steps(2, 100, 50)
+    # run_simple_test(2, 100, 50, flags=False)
+    # visualize_pipeline_steps(2, 100, 50)
+
+    nlens = [1,2]
+    Ntrials = 1000
+    Nsource = 100
+    xmax = 50
+
+    for nl in nlens:
+        xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nl, Nsource=Nsource, xmax=xmax, sigf=0.01, sigs=0.1)
+        plot_random_realizations(xsol, ysol, er, true_lenses, nl, Nsource, Ntrials, xmax, distinguish_lenses=False)
+
+    raise SystemExit
+
+    nlens = 2
+    telens = np.linspace(0.1, 5, 20)
+    chi2 = vary_eR_chi(telens, nlens, exact_pos=False)
+
+    fig, ax = plt.subplots()
+    ax.plot(telens, chi2)
+    ax.set_xlabel(r'$\theta_E$')
+    ax.set_ylabel(r'$\chi^2$')
+    # ax.set_yscale('log')
+    ax.set_title('Chi2 vs. Einstein Radius: 2 lenses')
+    plt.savefig('Images//chi2_vs_er.png')
+    plt.show()
 
     raise SystemExit
     # This tests the einstein radius which minimizes the chi2 value
