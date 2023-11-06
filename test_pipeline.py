@@ -4,6 +4,7 @@ import pipeline
 from utils import print_progress_bar
 import time
 from astropy.visualization import hist as fancyhist
+import scipy.optimize as opt
 
 # Define default noise parameters
 sigf = 0.01
@@ -13,16 +14,17 @@ sigs = 0.1
 # Testing Plotting Functions
 # ------------------------
 
-def _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, title, ax=None):
+def _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, title, ax=None, legend=True):
     """Private helper function to plot the results of lensing reconstruction."""
     if ax is None:
         fig, ax = plt.subplots()
     ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
     for i, eR in enumerate(lenses.te):
-        ax.annotate(round(eR, 2), (lenses.x[i], lenses.y[i]))
+        ax.annotate(np.round(eR, 2), (lenses.x[i], lenses.y[i]))
     ax.scatter(sources.x, sources.y, marker='.', color='blue', label='Sources')
     ax.scatter(xl, yl, marker='x', color='green', label='True Lenses')
-    ax.legend()
+    if legend:
+        ax.legend()
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     ax.set_xlim(-xmax, xmax)
@@ -194,9 +196,9 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
 def test_initial_guesser():
     # What's the quality of our guesses?
 
-    ns = 20 #Number of sources
+    ns = 100 #Number of sources
     nl = 2 #Number of lenses
-    xmax = 5
+    xmax = 50 #Range of lensing field
 
     # Set up the true lens configuration
     true_lenses = pipeline.createLenses(nlens=nl,randompos=False,xmax=xmax)
@@ -208,26 +210,72 @@ def test_initial_guesser():
     # Plot these two configurations
     #xmax *= 1.5
 
-    fig, ax = plt.subplots(1,2,figsize=(10,5))
+    fig, ax = plt.subplots(2,5,figsize=(10,5), sharex=True, sharey=True)
     fig.suptitle('Checking Initial Guesses', fontsize=16)
     # Generate candidate lenses
     lenses = sources.generate_initial_guess()
     reducedchi2 = lenses.update_chi2_values(sources,sigf,sigs)
 
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Initial Guesses', ax=ax[0])
+    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Initial Guesses', ax=ax[0,0], legend=False)
     # Draw an arrow from each source to the corresponding lens
     for i in range(len(sources.x)):
-        ax[0].arrow(sources.x[i], sources.y[i], lenses.x[i] - sources.x[i], lenses.y[i] - sources.y[i], color='black', alpha=0.5)
+        ax[0,0].arrow(sources.x[i], sources.y[i], lenses.x[i] - sources.x[i], lenses.y[i] - sources.y[i], color='black', alpha=0.5)
 
     # Perform local minimization
-    lenses.optimize_lens_positions(sources, sigs, sigf)
-    reducedchi2 = lenses.update_chi2_values(sources,sigf,sigs)
+    # Test different minimization methods
 
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Optimized Guesses', ax=ax[1])
-    # Draw an arrow from each source to the corresponding lens
-    for i in range(len(sources.x)):
-        ax[1].arrow(sources.x[i], sources.y[i], lenses.x[i] - sources.x[i], lenses.y[i] - sources.y[i], color='black', alpha=0.5)
-    
+    methods = ['Nelder-Mead', 'Powell', 'CG', 'BFGS', 'L-BFGS-B', 'COBYLA', 'SLSQP', 'trust-constr']
+    tol = 1e-8
+    max_attempts = 5  
+
+    for j, method in enumerate(methods):
+        xsol, ysol, ersol = [], [], []
+        # Only use bounds for methods that accept them
+        if method in ['L-BFGS-B', 'TNC', 'SLSQP', 'trust-constr']:
+            bounds = [(-xmax, xmax), (-xmax, xmax), (0, 20)]
+        else:
+            bounds = None
+        for i in range(len(lenses.x)):
+            one_source = pipeline.Source(sources.x[i], sources.y[i], sources.e1[i], sources.e2[i], sources.f1[i], sources.f2[i])
+            guess = [lenses.x[i], lenses.y[i], lenses.te[i]] 
+            params = [one_source, sigf, sigs]
+            best_result = None
+            best_params = guess
+            for _ in range(max_attempts):
+                result = opt.minimize(pipeline.chi2wrapper, guess, args=params, method=method, bounds=bounds, tol=tol, options={'maxiter':1000})
+
+                if best_result is None or result.fun < best_result.fun:
+                    best_result = result
+                    best_params = result.x
+
+            xsol.append(best_params[0])
+            ysol.append(best_params[1])
+            ersol.append(best_params[2])
+        
+        xsol = np.array(xsol)
+        ysol = np.array(ysol)
+        ersol = np.array(ersol)
+        chi2 = np.zeros_like(xsol)
+        
+        lenses_minimized = pipeline.Lens(xsol, ysol, ersol, chi2)
+        chi2val = lenses_minimized.update_chi2_values(sources, sigf, sigs)
+
+        # Plot the results
+        if j+1 > 4:
+            axis = ax[1, j-4]
+        else:
+            axis = ax[0, j+1]
+        _plot_results(xmax, lenses_minimized, sources, xl, yl, chi2val, 'Minimization: {}'.format(method), ax=axis, legend=False)
+
+        # Draw an arrow from each source to the corresponding lens
+        for k in range(len(sources.x)):
+            axis.arrow(sources.x[k], sources.y[k], lenses_minimized.x[k] - sources.x[k], lenses_minimized.y[k] - sources.y[k], color='black', alpha=0.5)
+        
+        print('Finished minimization method {}'.format(method))
+
+    # Remove final plot
+    ax[1,4].axis('off')
+
     plt.tight_layout()
     plt.savefig('Images//quality_of_guesses.png')
     plt.show()
@@ -344,6 +392,10 @@ if __name__ == '__main__':
     # test_initial_guesser()
     # run_simple_test(2, 100, 50, flags=False)
     # visualize_pipeline_steps(2, 100, 50)
+
+    # test_initial_guesser()
+
+    # raise SystemExit
 
     nlens = [1,2]
     Ntrials = 1000

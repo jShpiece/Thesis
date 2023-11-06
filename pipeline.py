@@ -159,16 +159,18 @@ class Lens:
 
 
     def full_minimization(self, sources, sigf, sigs):
-        guess = [self.x, self.y, self.te]
+        guess = self.te
+        params = [self.x, self.y, sources, sigf, sigs]
         max_attempts = 5  # Number of optimization attempts with different initial guesses
+        method = 'Powell'
 
         best_result = None
         best_params = guess
 
         for _ in range(max_attempts):
             result = opt.minimize(
-                chi2wrapper, guess, args=([sources, sigf, sigs]),
-                method='Nelder-Mead',  # A robust method that doesn't require gradients
+                chi2wrapper2, guess, args=params,
+                method=method,  
                 tol=1e-8,  # Adjust tolerance for each attempt
                 options={'maxiter': 1000}
             )
@@ -176,8 +178,10 @@ class Lens:
             if best_result is None or result.fun < best_result.fun:
                 best_result = result
                 best_params = result.x
+        
+        assert result.success, "Optimization failed!"
 
-        self.x, self.y, self.te = best_params[:len(self.x)], best_params[len(self.x):2*len(self.x)], best_params[2*len(self.x):]
+        self.te = best_params
 
 
 
@@ -303,6 +307,10 @@ def chi2wrapper(guess,params):
     lenses = Lens(guess[0], guess[1], guess[2], [0])
     return calc_raw_chi2(params[0],lenses,params[1],params[2])
 
+def chi2wrapper2(guess,params):
+    # Wrapper function for chi2 - only allow eR to vary
+    lenses = Lens(params[0], params[1], guess, np.empty_like(params[0]))
+    return calc_raw_chi2(params[2],lenses,params[3],params[4])
 
 # ------------------------------
 # Main function
