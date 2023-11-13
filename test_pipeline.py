@@ -393,18 +393,33 @@ def vary_eR_chi(telens, nlens, exact_pos = False):
 
 if __name__ == '__main__':
     # test_initial_guesser()
-    # run_simple_test(2, 100, 50, flags=False)
+    # run_simple_test(2, 100, 50, flags=True)
     # visualize_pipeline_steps(2, 100, 50)
 
     # raise SystemExit
 
-    nlens = [1,2]
-    Ntrials = 1000
+    nlens = [2]
+    Ntrials = 500
     Nsource = 100
     xmax = 50
 
     for nl in nlens:
+        old_xsol = np.load('Data//xsol_{}_lens_{}_source.npy'.format(nl, Nsource))
+        old_ysol = np.load('Data//ysol_{}_lens_{}_source.npy'.format(nl, Nsource))
+        old_er = np.load('Data//er_{}_lens_{}_source.npy'.format(nl, Nsource))
+
         xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nl, Nsource=Nsource, xmax=xmax, sigf=0.01, sigs=0.1)
+
+        xsol = np.concatenate((old_xsol, xsol))
+        ysol = np.concatenate((old_ysol, ysol))
+        er = np.concatenate((old_er, er))
+
+        np.save('Data//xsol_{}_lens_{}_source'.format(nl, Nsource), xsol)
+        np.save('Data//ysol_{}_lens_{}_source'.format(nl, Nsource), ysol)
+        np.save('Data//er_{}_lens_{}_source'.format(nl, Nsource), er)
+
+        Ntrials = len(xsol[:, 0])
+
         plot_random_realizations(xsol, ysol, er, true_lenses, nl, Nsource, Ntrials, xmax, distinguish_lenses=False)
 
     raise SystemExit

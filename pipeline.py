@@ -77,7 +77,7 @@ class Lens:
     def optimize_lens_positions(self, sources, sigs, sigf):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
-        max_attempts = 5  
+        max_attempts = 1
         for i in range(len(self.x)):
             one_source = Source(sources.x[i], sources.y[i], sources.e1[i], sources.e2[i], sources.f1[i], sources.f2[i])
             guess = [self.x[i], self.y[i], self.te[i]] # Class is already initialized with initial guesses\
@@ -89,7 +89,7 @@ class Lens:
                     chi2wrapper, guess, args=([one_source, sigf, sigs]), 
                     method='Nelder-Mead', 
                     tol=1e-8, 
-                    options={'maxiter': 1000}
+                    options={'maxiter': 500}
                 )
 
                 if best_result is None or result.fun < best_result.fun:
