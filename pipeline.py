@@ -307,6 +307,7 @@ def chi2wrapper(guess,params):
     lenses = Lens(guess[0], guess[1], guess[2], [0])
     return calc_raw_chi2(params[0],lenses,params[1],params[2])
 
+
 def chi2wrapper2(guess,params):
     # Wrapper function for chi2 - only allow eR to vary
     lenses = Lens(params[0], params[1], guess, np.empty_like(params[0]))
@@ -344,12 +345,12 @@ def fit_lensing_field(sources,sigf,sigs,xmax,lens_floor=1,flags = False):
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     print_step_info(flags, "Initial chi^2:", sources, lenses, reducedchi2)
 
-    '''
+    
     # Optimize lens positions via local minimization
     lenses.optimize_lens_positions(sources, sigs, sigf)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     print_step_info(flags, "Local Minimization:", sources, lenses, reducedchi2)
-    '''
+    
 
     # Filter out lenses that are too close to sources or too far from the center
     lenses.filter_lens_positions(sources, xmax)

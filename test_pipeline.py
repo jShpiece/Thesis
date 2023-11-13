@@ -57,14 +57,17 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
             a.set_xlabel(param_label)
             a.set_ylabel('Probability Density')
 
+    eR_median = np.median(er.flatten())
+    ax[2].vlines(eR_median, 0, ax[2].get_ylim()[1], color='blue', label='Median = {:.2f}'.format(eR_median))
+
     # Plot true lens positions
     for a, true_value in zip(ax, [true_lenses.x, true_lenses.y, true_lenses.te]):
         a.vlines(true_value, 0, a.get_ylim()[1], color='red', label='True Lenses')
         a.legend(loc='upper right')
 
-    fig.suptitle(f'Random Realization Test: Some Minimization \n {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
+    fig.suptitle(f'Random Realization Test \n {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(f'Images//rand_real//rr_some_min_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
+    plt.savefig(f'Images//rand_real//rr{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
     plt.close()
 
 
@@ -110,27 +113,27 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
 
     # Arrange a plot with 5 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle('Lensing Reconstruction Pipeline', fontsize=16)
+    fig.suptitle('Lensing Reconstruction Pipeline: True Solution Injected', fontsize=16)
 
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess()
 
-    '''
+    
     # Implant the true lens positions into the initial guess
     for i in range(Nlens):
         lenses.x[i], lenses.y[i] = xl[i], yl[i]
         lenses.te[i] = true_lenses.te[i]
-    '''
+    
 
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Initial Lens Positions', ax=axarr[0,0])
-    
-    '''
+
+
     # Step 2: Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, sigf, sigs)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Optimized Lens Positions', ax=axarr[0,1])
-    '''
+
 
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax)
@@ -154,7 +157,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
 
     # Save and show the plot
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
-    plt.savefig('Images//tests//visualization_{}_lens_{}_source.png'.format(Nlens, Nsource))
+    plt.savefig('Images//tests//true_sol_{}_lens_{}_source.png'.format(Nlens, Nsource))
     plt.show()
 
 
@@ -196,9 +199,9 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
 def test_initial_guesser():
     # What's the quality of our guesses?
 
-    ns = 100 #Number of sources
+    ns = 10 #Number of sources
     nl = 2 #Number of lenses
-    xmax = 50 #Range of lensing field
+    xmax = 5 #Range of lensing field
 
     # Set up the true lens configuration
     true_lenses = pipeline.createLenses(nlens=nl,randompos=False,xmax=xmax)
@@ -392,8 +395,6 @@ if __name__ == '__main__':
     # test_initial_guesser()
     # run_simple_test(2, 100, 50, flags=False)
     # visualize_pipeline_steps(2, 100, 50)
-
-    # test_initial_guesser()
 
     # raise SystemExit
 
