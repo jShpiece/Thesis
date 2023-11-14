@@ -127,7 +127,7 @@ def compute_chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
     
     return chi2val
 
-
+'''
 def generate_combinations(n, m, start=0, curr=[]):
     # Generate all combinations of m elements from a set of n elements
     if m == 0:
@@ -135,3 +135,34 @@ def generate_combinations(n, m, start=0, curr=[]):
         return
     for i in range(start, n):
         yield from generate_combinations(n, m-1, i+1, curr + [i])
+'''
+
+def generate_combinations(N, m):
+    # Create an array of indices from 0 to N-1
+    indices = np.arange(N)
+
+    # Initialize an empty list to store the combinations
+    combinations_list = []
+
+    # Generate combinations using recursion
+    def generate_combinations_recursive(current_combination, remaining_indices, m):
+        if m == 0:
+            combinations_list.append(current_combination)
+            return
+
+        if len(remaining_indices) < m:
+            return
+
+        first_element = remaining_indices[0]
+        new_combination = current_combination + [first_element]
+        new_remaining_indices = remaining_indices[1:]
+
+        # Include the first element in the combination
+        generate_combinations_recursive(new_combination, new_remaining_indices, m - 1)
+
+        # Exclude the first element from the combination
+        generate_combinations_recursive(current_combination, new_remaining_indices, m)
+
+    generate_combinations_recursive([], indices, m)
+
+    return combinations_list

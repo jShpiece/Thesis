@@ -67,7 +67,7 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
 
     fig.suptitle(f'Random Realization Test \n {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(f'Images//rand_real//rr{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
+    plt.savefig(f'Images//rand_real//rr_testIE_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
     plt.close()
 
 
@@ -113,18 +113,10 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
 
     # Arrange a plot with 5 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle('Lensing Reconstruction Pipeline: True Solution Injected', fontsize=16)
+    fig.suptitle('Lensing Reconstruction Pipeline', fontsize=16)
 
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess()
-
-    
-    # Implant the true lens positions into the initial guess
-    for i in range(Nlens):
-        lenses.x[i], lenses.y[i] = xl[i], yl[i]
-        lenses.te[i] = true_lenses.te[i]
-    
-
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Initial Lens Positions', ax=axarr[0,0])
 
@@ -147,6 +139,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
 
     # Step 5: Iterative elimination
     lenses.iterative_elimination(reducedchi2, sources, sigf, sigs, lens_floor=Nlens)
+    #lenses.parallelized_iteration(reducedchi2, sources, sigf, sigs, lens_floor=Nlens)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Iterative Elimination', ax=axarr[1,1])
 
@@ -157,7 +150,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
 
     # Save and show the plot
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
-    plt.savefig('Images//tests//true_sol_{}_lens_{}_source.png'.format(Nlens, Nsource))
+    plt.savefig('Images//tests//breakdown_{}_lens_{}_source.png'.format(Nlens, Nsource))
     plt.show()
 
 
@@ -393,33 +386,18 @@ def vary_eR_chi(telens, nlens, exact_pos = False):
 
 if __name__ == '__main__':
     # test_initial_guesser()
-    # run_simple_test(2, 100, 50, flags=True)
+    # run_simple_test(1, 100, 50, flags=True)
     # visualize_pipeline_steps(2, 100, 50)
 
     # raise SystemExit
 
-    nlens = [2]
-    Ntrials = 500
+    nlens = [1, 2]
+    Ntrials = 100
     Nsource = 100
     xmax = 50
 
     for nl in nlens:
-        old_xsol = np.load('Data//xsol_{}_lens_{}_source.npy'.format(nl, Nsource))
-        old_ysol = np.load('Data//ysol_{}_lens_{}_source.npy'.format(nl, Nsource))
-        old_er = np.load('Data//er_{}_lens_{}_source.npy'.format(nl, Nsource))
-
         xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nl, Nsource=Nsource, xmax=xmax, sigf=0.01, sigs=0.1)
-
-        xsol = np.concatenate((old_xsol, xsol))
-        ysol = np.concatenate((old_ysol, ysol))
-        er = np.concatenate((old_er, er))
-
-        np.save('Data//xsol_{}_lens_{}_source'.format(nl, Nsource), xsol)
-        np.save('Data//ysol_{}_lens_{}_source'.format(nl, Nsource), ysol)
-        np.save('Data//er_{}_lens_{}_source'.format(nl, Nsource), er)
-
-        Ntrials = len(xsol[:, 0])
-
         plot_random_realizations(xsol, ysol, er, true_lenses, nl, Nsource, Ntrials, xmax, distinguish_lenses=False)
 
     raise SystemExit
