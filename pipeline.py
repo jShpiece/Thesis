@@ -128,7 +128,7 @@ class Lens:
                 i += 1
     
 
-    def iterative_elimination(self, reducedchi2, sources, sigf, sigs, lens_floor=1):
+    def iterative_elimination(self, lens_floor=1):
         # Simply choose the 'lens_floor' lenses with the lowest chi^2 values
         # and eliminate the rest
         
@@ -140,27 +140,6 @@ class Lens:
         if len(self.x) > lens_floor:
             self.x, self.y, self.te, self.chi2 = self.x[:lens_floor], self.y[:lens_floor], self.te[:lens_floor], self.chi2[:lens_floor]
     
-
-    def parallelized_iteration(self, reducedchi2, sources, sigf, sigs, lens_floor=1):
-        # Run the iterative elimination step in parallel
-        combinations = list(generate_combinations(len(self.x), lens_floor))
-        pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())  # Use all available CPU cores
-        # Pass self.x, self.y, self.te, self.chi2 as arguments to process_combination
-        results = pool.starmap(process_combination, [(comb, self.x, self.y, self.te, self.chi2, sources, sigf, sigs) for comb in combinations])
-        pool.close()
-        pool.join()
-
-        best_reducedchi2, best_indices = reducedchi2, None
-        for test_reducedchi2, combination in results:
-            if test_reducedchi2 < best_reducedchi2:
-                best_reducedchi2 = test_reducedchi2
-                best_indices = combination
-
-        if best_indices is not None:
-            self.x, self.y, self.te = self.x[list(best_indices)], self.y[list(best_indices)], self.te[list(best_indices)]
-        else:
-            self.x, self.y, self.te = np.array([]), np.array([]), np.array([])
-
 
     def full_minimization(self, sources, sigf, sigs):
         guess = self.te
@@ -324,26 +303,21 @@ def chi2wrapper(guess,params):
 
 
 def chi2wrapper2(guess,params):
-    # Wrapper function for chi2 - only allow eR to vary
+    # Wrapper function for chi2 to allow constrained minimization - only the einstein radii are allowed to vary
     lenses = Lens(params[0], params[1], guess, np.empty_like(params[0]))
     return calc_raw_chi2(params[2],lenses,params[3],params[4])
 
-
-def process_combination(combination, x, y, te, chi2, sources, sigf, sigs):
-    test_lenses = Lens(x[list(combination)], y[list(combination)], te[list(combination)], chi2[list(combination)])
-    test_reducedchi2 = test_lenses.update_chi2_values(sources, sigf, sigs)
-    return test_reducedchi2, combination
 
 # ------------------------------
 # Main function
 # ------------------------------
 
-def fit_lensing_field(sources,sigf,sigs,xmax,lens_floor=1,flags = False):
+def fit_lensing_field(sources, sigf, sigs, xmax, lens_floor=1, flags = False):
     '''
-    Given a set of sources and their lensing parameters, find the optimal lens positions
-    within a 3d parameter space (x, y, te) via local minimization. Then, filter out lenses
-    that are too close to sources or too far from the center. Finally, iteratively eliminate
-    lenses that do not improve the chi^2 value.
+    This function takes in a set of sources - with positions, ellipticity, and flexion 
+    signals, and attempts to reconstruct the lensing field that produced them. 
+    The lensing field is represented by a set of lenses - with positions and Einstein radii. 
+    The lenses are modeled as Singular Isothermal Spheres (SIS). 
 
     Parameters
     ----------
@@ -356,7 +330,7 @@ def fit_lensing_field(sources,sigf,sigs,xmax,lens_floor=1,flags = False):
     xmax : float
         The maximum distance from the center of the field to the edge
     lens_floor : int
-        The minimum number of lenses to keep
+        The minimum number of lenses to keep - a target number of lenses based on priors
     flags : bool
         Whether to print out step information
     '''
@@ -378,33 +352,30 @@ def fit_lensing_field(sources,sigf,sigs,xmax,lens_floor=1,flags = False):
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     print_step_info(flags, "After filtering:", sources, lenses, reducedchi2)
 
+
     # Merge lenses that are too close to each other
     lenses.merge_close_lenses()
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     print_step_info(flags, "After merging:", sources, lenses, reducedchi2)
     
+
     # Iteratively eliminate lenses that do not improve the chi^2 value
-    # Let's try different values of lens_floor and keep the best reduced chi^2
-    # Remember that the 'best' reduced chi^2 is the closest to 1
     lens_floors = np.arange(1, len(lenses.x) + 1)
     best_dist = np.abs(reducedchi2 - 1)
-    best_lenses = lenses
     for lens_floor in lens_floors:
         # Clone the lenses object
         test_lenses = Lens(lenses.x, lenses.y, lenses.te, lenses.chi2)
-        test_lenses.iterative_elimination(reducedchi2, sources, sigf, sigs, lens_floor=lens_floor)
+        test_lenses.iterative_elimination(lens_floor=lens_floor)
         reducedchi2 = test_lenses.update_chi2_values(sources, sigf, sigs)
         new_dist = np.abs(reducedchi2 - 1)
-        # print('For lens_floor =', lens_floor, ', reduced chi^2 =', reducedchi2)
         if new_dist < best_dist:
             best_dist = new_dist
             best_lenses = test_lenses
     lenses = best_lenses
-    #lenses.iterative_elimination(reducedchi2, sources, sigf, sigs, lens_floor=lens_floor)
-    #lenses.parallelized_iteration(reducedchi2, sources, sigf, sigs, lens_floor=lens_floor)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
     print_step_info(flags, "After iterative elimination:", sources, lenses, reducedchi2)
     
+
     # Perform a final local minimization on the remaining lenses
     lenses.full_minimization(sources, sigf, sigs)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
