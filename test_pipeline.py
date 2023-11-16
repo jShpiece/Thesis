@@ -14,15 +14,16 @@ sigs = 0.1
 # Testing Plotting Functions
 # ------------------------
 
-def _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, title, ax=None, legend=True):
+def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=None, legend=True):
     """Private helper function to plot the results of lensing reconstruction."""
     if ax is None:
         fig, ax = plt.subplots()
     ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
     for i, eR in enumerate(lenses.te):
         ax.annotate(np.round(eR, 2), (lenses.x[i], lenses.y[i]))
-    ax.scatter(sources.x, sources.y, marker='.', color='blue', label='Sources')
-    ax.scatter(xl, yl, marker='x', color='green', label='True Lenses')
+    ax.scatter(sources.x, sources.y, marker='.', color='blue', alpha=0.5, label='Sources')
+    if true_lenses is not None:
+        ax.scatter(true_lenses.x, true_lenses.y, marker='x', color='green', label='True Lenses')
     if legend:
         ax.legend()
     ax.set_xlabel('x')
@@ -216,14 +217,58 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
 
 def reconstruct_system(file, flags=False):
     # Take in a file of sources and reconstruct the lensing system
-    # Read in the data
-    data = np.loadtxt(file)
+
+    # Read in the data (csv)
+    data = np.genfromtxt(file, delimiter=',')
+    # Read the header to get the column names
+    with open(file, 'r') as f:
+        header = f.readline().strip().split(',')
+    # Get the column indices
+    xcol, ycol, qcol, phicol, f1col, f2col = header.index('xs'), header.index('ys'), header.index('q'), header.index('phi'), header.index('f1'), header.index('f2')
+    # Extract the data - omit the header
+    x, y, q, phi, f1, f2 = data[1:, xcol], data[1:, ycol], data[1:, qcol], data[1:, phicol], data[1:, f1col], data[1:, f2col]
+    # Set these to be arrays 
+    x, y, q, phi, f1, f2 = np.array(x), np.array(y), np.array(q), np.array(phi), np.array(f1), np.array(f2)
+
+    # Calculate the shear from q and phi
+    shear_mag = (q-1)/(q+1)
+    e1 = shear_mag * np.cos(2*phi)
+    e2 = shear_mag * np.sin(2*phi)
+  
+    # Set xmax to be the largest distance from the center
+    centroid = np.mean(x), np.mean(y)
+    xmax = np.max(np.sqrt((x - centroid[0])**2 + (y - centroid[1])**2))
+
+    # Set the centroid to be the origin
+    x -= centroid[0]
+    y -= centroid[1]
+
+    flexion = np.sqrt(f1**2 + f2**2)
+    shear = np.sqrt(e1**2 + e2**2)
+    sigf = np.std(flexion)
+    sigs = np.std(shear)
+
+    # Create a source object
+    sources = pipeline.Source(x, y, e1, e2, f1, f2)
+    sources.filter_sources(xmax)
     
+    # Perform lens position optimization
+    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, sigf=sigf, sigs=sigs, xmax=xmax, lens_floor = 1, flags=flags)
+    return recovered_lenses, sources, xmax, reducedchi2
 
 
 if __name__ == '__main__':
     # run_simple_test(1, 100, 50, flags=True)
     # visualize_pipeline_steps(2, 100, 50)
+
+    lenses, sources, xmax, chi2 = reconstruct_system('a2744_clu_lenser.csv', flags=True)
+    _plot_results(xmax, lenses, sources, None, chi2, 'Lensing Reconstruction: A2744', legend=False)
+    plt.savefig('Images//tests//a2744.png')
+    plt.show()
+
+    raise SystemExit
+    # ------------------------
+
 
     Nsource = 100
     xmax = 50

@@ -162,7 +162,9 @@ class Lens:
                 best_result = result
                 best_params = result.x
         
-        assert result.success, "Optimization failed!"
+        # Notify the user if the optimization failed
+        if not best_result.success:
+            print("Optimization failed!")
 
         self.te = best_params
 
@@ -286,12 +288,11 @@ def calc_raw_chi2(sources, lenses, sigf, sigs):
 # Helper functions
 # ------------------------------
 
-def print_step_info(flags,message,sources,lenses,reducedchi2):
+def print_step_info(flags,message,lenses,reducedchi2):
     # Helper function to print out step information
     if flags:
         print(message)
         print('Number of lenses: ', len(lenses.x))
-        print('Number of sources: ', len(sources.x))
         if reducedchi2 is not None:
             print('Chi^2: ', reducedchi2)
 
@@ -338,30 +339,31 @@ def fit_lensing_field(sources, sigf, sigs, xmax, lens_floor=1, flags = False):
     # Initialize candidate lenses from source guesses
     lenses = sources.generate_initial_guess()
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "Initial chi^2:", sources, lenses, reducedchi2)
+    print_step_info(flags, "Initial Guesses:", lenses, reducedchi2)
 
     
     # Optimize lens positions via local minimization
     lenses.optimize_lens_positions(sources, sigs, sigf)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "Local Minimization:", sources, lenses, reducedchi2)
+    print_step_info(flags, "Local Minimization:", lenses, reducedchi2)
     
 
     # Filter out lenses that are too close to sources or too far from the center
     lenses.filter_lens_positions(sources, xmax)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "After filtering:", sources, lenses, reducedchi2)
+    print_step_info(flags, "After Filtering:", lenses, reducedchi2)
 
 
     # Merge lenses that are too close to each other
     lenses.merge_close_lenses()
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "After merging:", sources, lenses, reducedchi2)
+    print_step_info(flags, "After Merging:", lenses, reducedchi2)
     
 
     # Iteratively eliminate lenses that do not improve the chi^2 value
     lens_floors = np.arange(1, len(lenses.x) + 1)
     best_dist = np.abs(reducedchi2 - 1)
+    best_lenses = lenses
     for lens_floor in lens_floors:
         # Clone the lenses object
         test_lenses = Lens(lenses.x, lenses.y, lenses.te, lenses.chi2)
@@ -373,13 +375,13 @@ def fit_lensing_field(sources, sigf, sigs, xmax, lens_floor=1, flags = False):
             best_lenses = test_lenses
     lenses = best_lenses
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "After iterative elimination:", sources, lenses, reducedchi2)
+    print_step_info(flags, "After Iterative Elimination:", lenses, reducedchi2)
     
 
     # Perform a final local minimization on the remaining lenses
     lenses.full_minimization(sources, sigf, sigs)
     reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    print_step_info(flags, "After final minimization:", sources, lenses, reducedchi2)
+    print_step_info(flags, "After Final Minimization:", lenses, reducedchi2)
     
     
     return lenses, reducedchi2
