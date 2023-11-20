@@ -4,7 +4,7 @@ import pipeline
 from utils import print_progress_bar
 import time
 from astropy.visualization import hist as fancyhist
-import scipy.optimize as opt
+import warnings
 
 # Define default noise parameters
 sigf = 0.01
@@ -28,8 +28,9 @@ def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=Non
         ax.legend()
     ax.set_xlabel('x')
     ax.set_ylabel('y')
-    ax.set_xlim(-xmax, xmax)
-    ax.set_ylim(-xmax, xmax)
+    if xmax is not None:
+        ax.set_xlim(-xmax, xmax)
+        ax.set_ylim(-xmax, xmax)
     ax.set_aspect('equal')
     ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
 
@@ -243,17 +244,35 @@ def reconstruct_system(file, flags=False):
     x -= centroid[0]
     y -= centroid[1]
 
-    flexion = np.sqrt(f1**2 + f2**2)
-    shear = np.sqrt(e1**2 + e2**2)
-    sigf = np.std(flexion)
-    sigs = np.std(shear)
-
     # Create a source object
-    sources = pipeline.Source(x, y, e1, e2, f1, f2)
-    sources.filter_sources(xmax)
-    
+    acol = header.index('a')
+    a = np.array(data[1:, acol])
+
+    test_source_object = pipeline.Source(x, y, e1, e2, f1, f2, 0, 0)
+
+    valid_indices = test_source_object.filter_sources(a)
+
+    x, y, e1, e2, f1, f2, a = x[valid_indices], y[valid_indices], e1[valid_indices], e2[valid_indices], f1[valid_indices], f2[valid_indices], a[valid_indices]
+
+    # Compute noise parameters
+    sigs_mag = np.mean([np.std(e1), np.std(e2)])
+    sigs = np.ones_like(x) * sigs_mag
+
+    sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
+    sigf = sigaf / a 
+
+    # Create source object
+    sources = pipeline.Source(x, y, e1, e2, f1, f2, sigs, sigf)
+
     # Perform lens position optimization
-    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, sigf=sigf, sigs=sigs, xmax=xmax, lens_floor = 1, flags=flags)
+    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, lens_floor = 1, flags=flags)
+
+    # Move our sourecs and lenses back to the original centroid
+    sources.x += centroid[0]
+    sources.y += centroid[1]
+    recovered_lenses.x += centroid[0]
+    recovered_lenses.y += centroid[1]
+
     return recovered_lenses, sources, xmax, reducedchi2
 
 
@@ -261,9 +280,35 @@ if __name__ == '__main__':
     # run_simple_test(1, 100, 50, flags=True)
     # visualize_pipeline_steps(2, 100, 50)
 
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+
     lenses, sources, xmax, chi2 = reconstruct_system('a2744_clu_lenser.csv', flags=True)
-    _plot_results(xmax, lenses, sources, None, chi2, 'Lensing Reconstruction: A2744', legend=False)
-    plt.savefig('Images//tests//a2744.png')
+
+    fig, ax = plt.subplots(figsize=(10, 10)) 
+    _plot_results(None, lenses, sources, None, chi2, 'Lensing Reconstruction: A2744 - Cluster Field', ax=ax)
+    plt.savefig('Images//abel//a2744_clu.png')
+    # Generate a convergence map of the lensing field, spanning the range of the sources
+    x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
+    y = np.linspace(min(sources.y)-20, max(sources.y)+20, 100)
+
+    X, Y = np.meshgrid(x, y)
+    kappa = np.zeros_like(X)
+    for i in range(len(x)):
+        for j in range(len(y)):
+            for k in range(len(lenses.x)):
+                r = np.sqrt((x[i] - lenses.x[k])**2 + (y[j] - lenses.y[k])**2)
+                kappa[j, i] += lenses.te[k] / (2 * r)
+
+    #plt.figure(figsize=(10, 10))
+    levels = np.linspace(np.min(kappa), np.max(kappa), 100)
+    ax.contour(X, Y, kappa, levels=levels, cmap='gray', linewidths=0.5, linestyles='solid', label='Convergence Map')
+    #plt.scatter(lenses.x - centroid[0], lenses.y - centroid[1], color='red', label='Recovered Lenses')
+    #plt.xlim(-xmax, xmax)
+    #plt.ylim(-xmax, xmax)
+    ax.legend()
+    #plt.title('Convergence Map: A2744')
+    plt.savefig('Images//abel//a2744_kappa_clu.png')
+
     plt.show()
 
     raise SystemExit
