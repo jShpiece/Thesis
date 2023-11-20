@@ -300,8 +300,8 @@ if __name__ == '__main__':
                 kappa[j, i] += lenses.te[k] / (2 * r)
 
     #plt.figure(figsize=(10, 10))
-    levels = np.linspace(np.min(kappa), np.max(kappa), 100)
-    ax.contour(X, Y, kappa, levels=levels, cmap='gray', linewidths=0.5, linestyles='solid', label='Convergence Map')
+    levels = np.linspace(np.min(kappa), np.max(kappa), 50)
+    ax.contour(X, Y, kappa, levels=levels, cmap='gray', linewidths=0.5, linestyles='solid')
     #plt.scatter(lenses.x - centroid[0], lenses.y - centroid[1], color='red', label='Recovered Lenses')
     #plt.xlim(-xmax, xmax)
     #plt.ylim(-xmax, xmax)
