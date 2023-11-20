@@ -284,6 +284,9 @@ if __name__ == '__main__':
 
     lenses, sources, xmax, chi2 = reconstruct_system('a2744_clu_lenser.csv', flags=True)
 
+    # Store the results
+    np.save('Data//a2744_clu_lenses', lenses)
+
     fig, ax = plt.subplots(figsize=(10, 10)) 
     _plot_results(None, lenses, sources, None, chi2, 'Lensing Reconstruction: A2744 - Cluster Field', ax=ax)
     plt.savefig('Images//abel//a2744_clu.png')
