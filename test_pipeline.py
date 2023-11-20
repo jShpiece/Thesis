@@ -269,7 +269,6 @@ if __name__ == '__main__':
     raise SystemExit
     # ------------------------
 
-
     Nsource = 100
     xmax = 50
     Nlens = 2
