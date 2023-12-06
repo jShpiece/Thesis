@@ -5,6 +5,10 @@ from utils import print_progress_bar
 import time
 from astropy.visualization import hist as fancyhist
 import warnings
+from astropy.io import fits
+from astropy.visualization import ImageNormalize, LogStretch
+from matplotlib import cm
+from astropy import units as u
 
 # Define default noise parameters
 sigf = 0.01
@@ -276,9 +280,49 @@ def reconstruct_system(file, flags=False):
     return recovered_lenses, sources, xmax, reducedchi2
 
 
+def overlay_real_img(image_path:str, ax, conv:np.ndarray, nlevels:int=7) -> None:
+    """
+    Method to overlay **arr** map contours onto the **image**
+
+    @image: Path to image containing cluster to overlay contours
+    @ax: matplotlib axis object where the image is to be displayed
+    @conv: a 2D numpy array containing the contours to overlay
+    @nlevels: Number of contours
+   
+    """
+    # open fits file
+    img = fits.open(image_path)
+    img_data = img['SCI'].data
+
+    CDELT = img['SCI'].header['CDELT1'] * u.deg
+    ROWS, COLS = img['SCI'].data.shape
+    fsize = max(ROWS*CDELT, COLS*CDELT)
+
+    unit = u.arcsec
+
+    # Code to overlay contours associated with a (N1 X N2) image onto a window of physical size (fize X fsize)
+    ROWS, COLS = conv.shape
+    X = np.linspace(0, fsize.to(unit).value, ROWS)
+    Y = np.linspace(0, fsize.to(unit).value, COLS)
+
+    # contour levels
+    levels = np.linspace(conv.min(), conv.max(), nlevels)
+
+    norm = ImageNormalize(img_data, vmin=0, vmax=10, stretch=LogStretch())
+    extent = [0, fsize.to(unit).value, 0, fsize.to(unit).value] # to display appropriate frame size in matplotlib window
+
+    im = ax.imshow(img['SCI'].data, norm=norm, origin='lower', cmap='gray_r', extent=extent) # plot the science image
+    contours = ax.contour(X, Y, conv, levels, linestyles='solid') # plot contours
+    ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
+    colorbar = plt.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04) # add colorbar
+
+
+
 if __name__ == '__main__':
     # run_simple_test(1, 100, 50, flags=True)
     # visualize_pipeline_steps(2, 100, 50)
+
+    img_loc = 'Data/jw02756-o003_t001_nircam_clear-f444w_i2d.fits'
 
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -286,10 +330,8 @@ if __name__ == '__main__':
 
     # Store the results
     np.save('Data//a2744_clu_lenses', lenses)
+    np.save('Data//a2744_clu_sources', sources)
 
-    fig, ax = plt.subplots(figsize=(10, 10)) 
-    _plot_results(None, lenses, sources, None, chi2, 'Lensing Reconstruction: A2744 - Cluster Field', ax=ax)
-    plt.savefig('Images//abel//a2744_clu.png')
     # Generate a convergence map of the lensing field, spanning the range of the sources
     x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
     y = np.linspace(min(sources.y)-20, max(sources.y)+20, 100)
@@ -302,14 +344,16 @@ if __name__ == '__main__':
                 r = np.sqrt((x[i] - lenses.x[k])**2 + (y[j] - lenses.y[k])**2)
                 kappa[j, i] += lenses.te[k] / (2 * r)
 
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.set_xlabel('x (arcsec)')
+    ax.set_ylabel('y (arcsec)')
+    ax.set_title('A2744: Reconstructed Convergence Map')
+
+    overlay_real_img(img_loc, ax, kappa, nlevels=20)
+
     #plt.figure(figsize=(10, 10))
-    levels = np.linspace(np.min(kappa), np.max(kappa), 50)
-    ax.contour(X, Y, kappa, levels=levels, cmap='gray', linewidths=0.5, linestyles='solid')
-    #plt.scatter(lenses.x - centroid[0], lenses.y - centroid[1], color='red', label='Recovered Lenses')
-    #plt.xlim(-xmax, xmax)
-    #plt.ylim(-xmax, xmax)
-    ax.legend()
-    #plt.title('Convergence Map: A2744')
+    #levels = np.linspace(np.min(kappa), np.max(kappa), 50)
+    #ax.contour(X, Y, kappa, levels=levels, cmap='gray', linewidths=0.5, linestyles='solid')
     plt.savefig('Images//abel//a2744_kappa_clu.png')
 
     plt.show()
