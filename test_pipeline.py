@@ -312,10 +312,11 @@ def overlay_real_img(image_path:str, ax, conv:np.ndarray, nlevels:int=7) -> None
     extent = [0, fsize.to(unit).value, 0, fsize.to(unit).value] # to display appropriate frame size in matplotlib window
 
     im = ax.imshow(img['SCI'].data, norm=norm, origin='lower', cmap='gray_r', extent=extent) # plot the science image
-    contours = ax.contour(X, Y, conv, levels, linestyles='solid') # plot contours
+    contours = ax.contour(X, Y, conv, levels, cmap='gray_r', linestyles='solid') # plot contours
     ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
-    colorbar = plt.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04) # add colorbar
+    # colorbar = plt.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04) # add colorbar
 
+    return None
 
 
 if __name__ == '__main__':
@@ -326,11 +327,17 @@ if __name__ == '__main__':
 
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-    lenses, sources, xmax, chi2 = reconstruct_system('a2744_clu_lenser.csv', flags=True)
+    # lenses, sources, xmax, chi2 = reconstruct_system('a2744_clu_lenser.csv', flags=True)
 
-    # Store the results
-    np.save('Data//a2744_clu_lenses', lenses)
-    np.save('Data//a2744_clu_sources', sources)
+    # Save the class objects so that we can replot without having to rerun the code
+    # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
+    # np.save('Data//a2744_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
+
+    
+    # Put code here for loading our saved class objects
+    lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
+    sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
+    chi2 = lenses.update_chi2_values(sources)
 
     # Generate a convergence map of the lensing field, spanning the range of the sources
     x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
@@ -338,11 +345,16 @@ if __name__ == '__main__':
 
     X, Y = np.meshgrid(x, y)
     kappa = np.zeros_like(X)
-    for i in range(len(x)):
-        for j in range(len(y)):
-            for k in range(len(lenses.x)):
-                r = np.sqrt((x[i] - lenses.x[k])**2 + (y[j] - lenses.y[k])**2)
-                kappa[j, i] += lenses.te[k] / (2 * r)
+    for k in range(len(lenses.x)):
+        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2)
+        kappa += lenses.te[k] / (2 * r)
+
+    plt.figure()
+    plt.imshow(np.log(kappa), origin='lower')
+    plt.colorbar()
+    plt.savefig('Images//abel//a2744_kappa.png')
+    plt.show()
+    # raise SystemExit
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.set_xlabel('x (arcsec)')
