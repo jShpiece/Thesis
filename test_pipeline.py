@@ -77,6 +77,31 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
     plt.close()
 
 
+def get_img_data(fits_file_path) -> np.ndarray:
+    # Get the image data from the fits file
+    fits_file = fits.open(fits_file_path)
+    img_data = fits_file[0].data
+    header = fits_file[0].header
+    return img_data, header
+
+
+def get_coords(csv_file_path, coord_type='pixels') -> np.ndarray:
+    # coord_type can be 'pixels' or 'degrees'
+    # Read in the data (csv)
+    data = np.genfromtxt(csv_file_path, delimiter=',')
+    # Read the header to get the column names
+    with open(csv_file_path, 'r') as f:
+        header = f.readline().strip().split(',')
+    # Get the column indices
+    if coord_type == 'pixels':
+        xcol, ycol = header.index('X_IMAGE'), header.index('Y_IMAGE')
+    elif coord_type == 'degrees':
+        xcol, ycol = header.index('X_WORLD'), header.index('Y_WORLD')
+    else:
+        raise ValueError('coord_type must be "pixels" or "degrees"')
+    xcol, ycol = data[1:, xcol], data[1:, ycol]
+    return np.array([xcol, ycol]).T
+
 # ------------------------
 # Test Implementation Functions
 # ------------------------
@@ -258,6 +283,9 @@ def reconstruct_system(file, flags=False):
 
     x, y, e1, e2, f1, f2, a = x[valid_indices], y[valid_indices], e1[valid_indices], e2[valid_indices], f1[valid_indices], f2[valid_indices], a[valid_indices]
 
+    x += 115 # Offset between image and catalog
+    y += 55 # Offset between image and catalog
+
     # Compute noise parameters
     sigs_mag = np.mean([np.std(e1), np.std(e2)])
     sigs = np.ones_like(x) * sigs_mag
@@ -312,28 +340,33 @@ def overlay_real_img(image_path:str, ax, conv:np.ndarray, nlevels:int=7) -> None
     extent = [0, fsize.to(unit).value, 0, fsize.to(unit).value] # to display appropriate frame size in matplotlib window
 
     im = ax.imshow(img['SCI'].data, norm=norm, origin='lower', cmap='gray_r', extent=extent) # plot the science image
-    contours = ax.contour(X, Y, conv, levels, cmap='gray_r', linestyles='solid') # plot contours
+    contours = ax.contour(X, Y, conv, levels, cmap='plasma', linestyles='solid') # plot contours
     ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
-    # colorbar = plt.colorbar(im, ax=ax, orientation='vertical', fraction=0.046, pad=0.04) # add colorbar
 
     return None
 
 
 if __name__ == '__main__':
-    # run_simple_test(1, 100, 50, flags=True)
-    # visualize_pipeline_steps(2, 100, 50)
+    fits_file_path = 'Data\color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+    csv_file_path = 'a2744_clu_lenser.csv'
 
-    img_loc = 'Data/jw02756-o003_t001_nircam_clear-f444w_i2d.fits'
+    img_data, header = get_img_data(fits_file_path)
+    # This image data is 3D - choose the first layer
+    img_data1 = img_data[0, :, :]
+    img_data2 = img_data[1, :, :]
+    img_data3 = img_data[2, :, :]
+    coords = get_coords(csv_file_path, coord_type='pixels')
+    x_pix = coords[:, 0]
+    y_pix = coords[:, 1]
 
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-    # lenses, sources, xmax, chi2 = reconstruct_system('a2744_clu_lenser.csv', flags=True)
+    lenses, sources, xmax, chi2 = reconstruct_system('a2744_clu_lenser.csv', flags=True)
 
     # Save the class objects so that we can replot without having to rerun the code
     # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
     # np.save('Data//a2744_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
 
-    
     # Put code here for loading our saved class objects
     lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
     sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
@@ -343,29 +376,28 @@ if __name__ == '__main__':
     x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
     y = np.linspace(min(sources.y)-20, max(sources.y)+20, 100)
 
+    extent = [min(x), max(x), min(y), max(y)]
+
     X, Y = np.meshgrid(x, y)
     kappa = np.zeros_like(X)
     for k in range(len(lenses.x)):
         r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2)
         kappa += lenses.te[k] / (2 * r)
 
-    plt.figure()
-    plt.imshow(np.log(kappa), origin='lower')
-    plt.colorbar()
-    plt.savefig('Images//abel//a2744_kappa.png')
-    plt.show()
-    # raise SystemExit
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.set_xlabel('x (arcsec)')
     ax.set_ylabel('y (arcsec)')
     ax.set_title('A2744: Reconstructed Convergence Map')
+    norm = ImageNormalize(img_data1, vmin=0, vmax=1, stretch=LogStretch())
+    ax.imshow(img_data1, cmap='gray_r', origin='lower', norm=norm, extent=extent)
+    ax.imshow(img_data2, cmap='gray_r', origin='lower', norm=norm, extent=extent, alpha=0.5)
+    # ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.5)
+    levels = np.linspace(np.min(kappa), np.max(kappa), 20)
 
-    overlay_real_img(img_loc, ax, kappa, nlevels=20)
+    contours = ax.contour(X, Y, kappa, levels, cmap='plasma', linestyles='solid') # plot contours
+    ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
 
-    #plt.figure(figsize=(10, 10))
-    #levels = np.linspace(np.min(kappa), np.max(kappa), 50)
-    #ax.contour(X, Y, kappa, levels=levels, cmap='gray', linewidths=0.5, linestyles='solid')
     plt.savefig('Images//abel//a2744_kappa_clu.png')
 
     plt.show()
