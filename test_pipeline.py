@@ -245,7 +245,7 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
     return num_recovered
 
 
-def reconstruct_system(file, flags=False):
+def reconstruct_system(file, flags=False, rand = False):
     # Take in a file of sources and reconstruct the lensing system
 
     # Read in the data (csv)
@@ -269,10 +269,6 @@ def reconstruct_system(file, flags=False):
     centroid = np.mean(x), np.mean(y)
     xmax = np.max(np.sqrt((x - centroid[0])**2 + (y - centroid[1])**2))
 
-    # Set the centroid to be the origin
-    x -= centroid[0]
-    y -= centroid[1]
-
     # Create a source object
     acol = header.index('a')
     a = np.array(data[1:, acol])
@@ -292,6 +288,16 @@ def reconstruct_system(file, flags=False):
 
     sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
     sigf = sigaf / a 
+
+    if rand:
+        # randomize the e1, e2 and f1, f2 vectors by rotating them by a random angle
+        rand_angle = np.random.uniform(0, 2*np.pi, len(e1))
+        e1, e2 = e1 * np.cos(2*rand_angle) - e2 * np.sin(2*rand_angle), e1 * np.sin(2*rand_angle) + e2 * np.cos(2*rand_angle)
+        f1, f2 = f1 * np.cos(rand_angle) - f2 * np.sin(rand_angle), f1 * np.sin(rand_angle) + f2 * np.cos(rand_angle)
+
+    # Set the centroid to be the origin
+    x -= centroid[0]
+    y -= centroid[1]
 
     # Create source object
     sources = pipeline.Source(x, y, e1, e2, f1, f2, sigs, sigf)
@@ -346,7 +352,7 @@ def overlay_real_img(image_path:str, ax, conv:np.ndarray, nlevels:int=7) -> None
     return None
 
 
-if __name__ == '__main__':
+def plot_a2774_field():
     fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
     csv_file_path = 'a2744_clu_lenser.csv'
 
@@ -359,27 +365,18 @@ if __name__ == '__main__':
     x_pix = coords[:, 0]
     y_pix = coords[:, 1]
 
-    plt.figure()
-    norm = ImageNormalize(img_data1, vmin=0, vmax=1, stretch=LogStretch())
-    plt.imshow(img_data1, cmap='gray_r', origin='lower', norm=norm)
-    plt.imshow(img_data2, cmap='gray_r', origin='lower', norm=norm)
-    plt.scatter(x_pix + 115, y_pix + 55, s=2, c='r', label = 'Catalogue Objects', alpha=0.5)
-    plt.show()
-
-    raise SystemExit
-
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-    lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True)
+    lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True, rand=True)
 
     # Save the class objects so that we can replot without having to rerun the code
     # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
     # np.save('Data//a2744_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
 
     # Put code here for loading our saved class objects
-    lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
-    sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
-    chi2 = lenses.update_chi2_values(sources)
+    # lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
+    #sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
+    #chi2 = lenses.update_chi2_values(sources)
 
     # Generate a convergence map of the lensing field, spanning the range of the sources
     x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
@@ -407,7 +404,65 @@ if __name__ == '__main__':
     contours = ax.contour(X, Y, kappa, levels, cmap='plasma', linestyles='solid') # plot contours
     ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
 
-    plt.savefig('Images//abel//a2744_kappa_clu.png')
+    plt.savefig('Images//abel//a2744_kappa_clu_rand_2.png')
+
+    plt.show()
+
+
+if __name__ == '__main__':
+    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+    csv_file_path = 'a2744_par_lenser.csv'
+
+    img_data, header = get_img_data(fits_file_path)
+    # This image data is 3D - choose the first layer
+    img_data1 = img_data[0, :, :]
+    img_data2 = img_data[1, :, :]
+    img_data3 = img_data[2, :, :]
+    coords = get_coords(csv_file_path, coord_type='pixels')
+    x_pix = coords[:, 0]
+    y_pix = coords[:, 1]
+
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+    lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True, rand=False)
+
+    plt.figure()
+    plt.hist(lenses.te, bins='scott')
+    plt.show()
+
+    # Save the class objects so that we can replot without having to rerun the code
+    # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
+    # np.save('Data//a2744_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
+
+    # Put code here for loading our saved class objects
+    # lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
+    #sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
+    #chi2 = lenses.update_chi2_values(sources)
+
+    # Generate a convergence map of the lensing field, spanning the range of the sources
+    x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
+    y = np.linspace(min(sources.y)-20, max(sources.y)+20, 100)
+
+    extent = [min(x), max(x), min(y), max(y)]
+
+    X, Y = np.meshgrid(x, y)
+    kappa = np.zeros_like(X)
+    for k in range(len(lenses.x)):
+        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + (0.5)**2)
+        kappa += lenses.te[k] / (2 * r)
+
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.set_xlabel('x (arcsec)')
+    ax.set_ylabel('y (arcsec)')
+    ax.set_title('A2744 Parallel Field: Reconstructed Convergence Map')
+    # ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.5)
+    levels = np.linspace(np.min(kappa), np.max(kappa), 20)
+
+    contours = ax.contour(X, Y, kappa, levels, cmap='plasma', linestyles='solid') # plot contours
+    ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
+
+    plt.savefig('Images//abel//a2744_kappa_par.png')
 
     plt.show()
 
