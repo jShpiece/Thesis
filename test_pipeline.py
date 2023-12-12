@@ -347,7 +347,7 @@ def overlay_real_img(image_path:str, ax, conv:np.ndarray, nlevels:int=7) -> None
 
 
 if __name__ == '__main__':
-    fits_file_path = 'Data\color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
     csv_file_path = 'a2744_clu_lenser.csv'
 
     img_data, header = get_img_data(fits_file_path)
@@ -359,9 +359,18 @@ if __name__ == '__main__':
     x_pix = coords[:, 0]
     y_pix = coords[:, 1]
 
+    plt.figure()
+    norm = ImageNormalize(img_data1, vmin=0, vmax=1, stretch=LogStretch())
+    plt.imshow(img_data1, cmap='gray_r', origin='lower', norm=norm)
+    plt.imshow(img_data2, cmap='gray_r', origin='lower', norm=norm)
+    plt.scatter(x_pix + 115, y_pix + 55, s=2, c='r', label = 'Catalogue Objects', alpha=0.5)
+    plt.show()
+
+    raise SystemExit
+
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-    lenses, sources, xmax, chi2 = reconstruct_system('a2744_clu_lenser.csv', flags=True)
+    lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True)
 
     # Save the class objects so that we can replot without having to rerun the code
     # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
@@ -381,7 +390,7 @@ if __name__ == '__main__':
     X, Y = np.meshgrid(x, y)
     kappa = np.zeros_like(X)
     for k in range(len(lenses.x)):
-        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2)
+        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + (0.5)**2)
         kappa += lenses.te[k] / (2 * r)
 
 
@@ -391,7 +400,7 @@ if __name__ == '__main__':
     ax.set_title('A2744: Reconstructed Convergence Map')
     norm = ImageNormalize(img_data1, vmin=0, vmax=1, stretch=LogStretch())
     ax.imshow(img_data1, cmap='gray_r', origin='lower', norm=norm, extent=extent)
-    ax.imshow(img_data2, cmap='gray_r', origin='lower', norm=norm, extent=extent, alpha=0.5)
+    ax.imshow(img_data2, cmap='gray_r', origin='lower', norm=norm, extent=extent)
     # ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.5)
     levels = np.linspace(np.min(kappa), np.max(kappa), 20)
 
