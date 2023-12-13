@@ -428,8 +428,8 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
         file_name = 'a2744' 
         file_name += '_par' if field == 'parallel' else '_clu' 
         file_name += '_rand' if randomize else ''
-        lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses'))
-        sources = pipeline.Source(*np.load(dir + file_name + '_sources'))
+        lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses.npy'))
+        sources = pipeline.Source(*np.load(dir + file_name + '_sources.npy'))
 
     # Generate a convergence map of the lensing field, spanning the range of the sources
     x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
@@ -455,7 +455,7 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
 
     # Create labels for the plot
     dir = 'Images//abel//'
-    file_name = 'A2744_kappa'
+    file_name = 'A2744_kappa_'
     file_name += 'par' if field == 'parallel' else 'clu'
     file_name += '_rand' if randomize else ''
 
@@ -467,9 +467,9 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
     fig, ax = plt.subplots()
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, legend=False)
     ax.set_title(title)
-    plt.show()
     plt.savefig(dir + file_name + '.png')
+    plt.show()
 
 
 if __name__ == '__main__':
-    plot_a2774_field(field='cluster', randomize=False, full_reconstruction=True)
+    plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False)

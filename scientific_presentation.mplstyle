@@ -9,8 +9,8 @@ font.family : serif
 mathtext.fontset : stix
 
 #### Axes ####
-axes.labelsize : large
-axes.titlesize : x-large
+axes.labelsize : medium
+axes.titlesize : large
 axes.grid : True
 
 #### Colors ####
