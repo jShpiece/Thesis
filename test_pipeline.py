@@ -279,8 +279,10 @@ def reconstruct_system(file, flags=False, rand = False):
 
     x, y, e1, e2, f1, f2, a = x[valid_indices], y[valid_indices], e1[valid_indices], e2[valid_indices], f1[valid_indices], f2[valid_indices], a[valid_indices]
 
-    x += 115 # Offset between image and catalog
-    y += 55 # Offset between image and catalog
+    x += 115 # Offset between image and catalog - cluster field
+    y += 55 # Offset between image and catalog - cluster field
+    # x += 865 # Offset between image and catalog - parallel field
+    # y += 400 # Offset between image and catalog - parallel field
 
     # Compute noise parameters
     sigs_mag = np.mean([np.std(e1), np.std(e2)])
@@ -356,26 +358,23 @@ def plot_a2774_field():
     fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
     csv_file_path = 'a2744_clu_lenser.csv'
 
-    img_data, header = get_img_data(fits_file_path)
+    img_data, _ = get_img_data(fits_file_path)
     # This image data is 3D - choose the first layer
     img_data1 = img_data[0, :, :]
     img_data2 = img_data[1, :, :]
-    img_data3 = img_data[2, :, :]
     coords = get_coords(csv_file_path, coord_type='pixels')
-    x_pix = coords[:, 0]
-    y_pix = coords[:, 1]
 
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-    lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True, rand=True)
+    # lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True, rand=False)
 
     # Save the class objects so that we can replot without having to rerun the code
     # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
     # np.save('Data//a2744_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
 
     # Put code here for loading our saved class objects
-    # lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
-    #sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
+    lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
+    sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
     #chi2 = lenses.update_chi2_values(sources)
 
     # Generate a convergence map of the lensing field, spanning the range of the sources
@@ -389,7 +388,12 @@ def plot_a2774_field():
     for k in range(len(lenses.x)):
         r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + (0.5)**2)
         kappa += lenses.te[k] / (2 * r)
-
+    
+    # Now, perform a mass sheet transformation
+    def mass_sheet(kappa, k):
+        return k*kappa + (1 - k)
+    
+    kappa = mass_sheet(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.set_xlabel('x (arcsec)')
@@ -398,38 +402,43 @@ def plot_a2774_field():
     norm = ImageNormalize(img_data1, vmin=0, vmax=1, stretch=LogStretch())
     ax.imshow(img_data1, cmap='gray_r', origin='lower', norm=norm, extent=extent)
     ax.imshow(img_data2, cmap='gray_r', origin='lower', norm=norm, extent=extent)
-    # ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.5)
-    levels = np.linspace(np.min(kappa), np.max(kappa), 20)
+    #ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.25)
+    percentiles = np.percentile(kappa, np.linspace(0, 100, 10))
 
-    contours = ax.contour(X, Y, kappa, levels, cmap='plasma', linestyles='solid') # plot contours
-    ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
+    contours = ax.contour(X, Y, kappa, levels=percentiles, cmap='viridis', linestyles='solid') # plot contours
+    ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1f', colors='blue')
 
-    plt.savefig('Images//abel//a2744_kappa_clu_rand_2.png')
+    plt.savefig('Images//abel//a2744_kappa_clu.png')
 
     plt.show()
 
 
 if __name__ == '__main__':
-    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+    plot_a2774_field()
+    raise SystemExit
+
+    # Abell 2744 cluster
+    # fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+    # csv_file_path = 'a2744_clu_lenser.csv'
+
+    # Abell 2744 parallel
+    fits_file_path = 'Data\hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
     csv_file_path = 'a2744_par_lenser.csv'
 
     img_data, header = get_img_data(fits_file_path)
     # This image data is 3D - choose the first layer
-    img_data1 = img_data[0, :, :]
-    img_data2 = img_data[1, :, :]
-    img_data3 = img_data[2, :, :]
     coords = get_coords(csv_file_path, coord_type='pixels')
-    x_pix = coords[:, 0]
-    y_pix = coords[:, 1]
+    x_pix = coords[:, 0] + 865
+    y_pix = coords[:, 1] + 400
+
+
+    # raise SystemExit
 
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
     lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True, rand=False)
 
-    plt.figure()
-    plt.hist(lenses.te, bins='scott')
-    plt.show()
-
+    '''
     # Save the class objects so that we can replot without having to rerun the code
     # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
     # np.save('Data//a2744_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
@@ -438,6 +447,7 @@ if __name__ == '__main__':
     # lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
     #sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
     #chi2 = lenses.update_chi2_values(sources)
+    '''
 
     # Generate a convergence map of the lensing field, spanning the range of the sources
     x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
@@ -451,13 +461,13 @@ if __name__ == '__main__':
         r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + (0.5)**2)
         kappa += lenses.te[k] / (2 * r)
 
-
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.set_xlabel('x (arcsec)')
     ax.set_ylabel('y (arcsec)')
     ax.set_title('A2744 Parallel Field: Reconstructed Convergence Map')
     # ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.5)
     levels = np.linspace(np.min(kappa), np.max(kappa), 20)
+    ax.imshow(img_data, cmap='gray_r', origin='lower', extent=extent, norm=ImageNormalize(img_data, vmin=0, vmax=1, stretch=LogStretch()))
 
     contours = ax.contour(X, Y, kappa, levels, cmap='plasma', linestyles='solid') # plot contours
     ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
@@ -465,39 +475,3 @@ if __name__ == '__main__':
     plt.savefig('Images//abel//a2744_kappa_par.png')
 
     plt.show()
-
-    raise SystemExit
-    # ------------------------
-
-    Nsource = 100
-    xmax = 50
-    Nlens = 2
-
-    true_lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
-
-    while True:
-        sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
-        lenses, reducedchi2 = pipeline.fit_lensing_field(sources, sigf=sigf, sigs=sigs, xmax=xmax, lens_floor = Nlens, flags=False)
-
-        if len(lenses.x) > 10:
-            break
-    
-    _plot_results(xmax, lenses, sources, true_lenses.x, true_lenses.y, reducedchi2, 'Lensing Reconstruction: More than 10 Lenses Recovered')
-    plt.savefig('Images//tests//more_than_10_lenses.png')
-    plt.show()
-
-    raise SystemExit
-    # ------------------------
-
-    nlens = [1, 2]
-    Ntrials = 100
-    Nsource = 100
-    xmax = 50
-
-    for nl in nlens:
-        xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nl, Nsource=Nsource, xmax=xmax, sigf=0.01, sigs=0.1)
-        plot_random_realizations(xsol, ysol, er, true_lenses, nl, Nsource, Ntrials, xmax, distinguish_lenses=False)
-
-    raise SystemExit
-
-    # ------------------------
