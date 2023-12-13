@@ -90,8 +90,10 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, legend=True)
         ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=norm)
 
     if conv is not None:
+        # Plot the convergence contours
+        # Construct levels via percentiles
         percentiles = np.percentile(conv, np.linspace(0, 100, 7))
-        contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid') # plot contours
+        contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid', linewidths=1) 
         ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
 
     if lenses is not None:
@@ -472,4 +474,4 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
 
 
 if __name__ == '__main__':
-    plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False)
+    plot_a2774_field(field='cluster', randomize=True, full_reconstruction=True)
