@@ -75,8 +75,38 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
 
     fig.suptitle(f'Random Realization Test \n {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(f'Images//rand_real//rr_testIE_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
+    plt.savefig(f'Images//rand_real//rr_test_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
     plt.close()
+
+
+def plot_cluster(img_data, X, Y, conv, lenses, sources, extent, dir, file_name, title, legend=True):
+    # Plotting function to overlay lensing reconstruction - in the form of lenses or convergence contours, 
+    # ontop of an optical image of the cluster
+    fig, ax = plt.subplots()
+    ax.set_xlabel('x (arcsec)')
+    ax.set_ylabel('y (arcsec)')
+    ax.set_title(title)
+    for img in img_data:
+        # Allow for multiple images to be overlayed - allows for band or epoch stacking
+        norm = ImageNormalize(img, vmin=0, vmax=1, stretch=LogStretch())
+        ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=norm)
+
+    if conv is not None:
+        percentiles = np.percentile(conv, np.linspace(0, 100, 7))
+        contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid') # plot contours
+        ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
+
+    if lenses is not None:
+        ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
+        for i, eR in enumerate(lenses.te):
+            ax.annotate(np.round(eR, 2), (lenses.x[i], lenses.y[i]))
+    if sources is not None:
+        ax.scatter(sources.x, sources.y, marker='.', color='blue', alpha=0.5, label='Sources')
+
+    if legend:
+        ax.legend()
+    plt.savefig(dir + file_name + '.png')
+    plt.show()
 
 
 def get_img_data(fits_file_path) -> np.ndarray:
@@ -233,6 +263,11 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
 
 
 def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_random=False, source_random=True):
+    '''
+    This runs a simple test of the algorithm, and returns the number of lenses recovered.
+    Use this to determine whether the algorithm is able to recover the correct number of lenses when 
+    the number of lenses is not known a priori by the algorithm.
+    '''
     # Initialize true lens and source configurations
     lenses = pipeline.createLenses(nlens=Nlens, randompos=lens_random, xmax=xmax)
     sources = pipeline.createSources(lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=source_random, xmax=xmax)
@@ -247,7 +282,7 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
     return num_recovered
 
 
-def reconstruct_system(file, flags=False, rand = False):
+def reconstruct_system(file, flags=False, randomize = False):
     # Take in a file of sources and reconstruct the lensing system
 
     # Read in the data (csv)
@@ -293,7 +328,7 @@ def reconstruct_system(file, flags=False, rand = False):
     sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
     sigf = sigaf / a 
 
-    if rand:
+    if randomize:
         # randomize the e1, e2 and f1, f2 vectors by rotating them by a random angle
         rand_angle = np.random.uniform(0, 2*np.pi, len(e1))
         e1, e2 = e1 * np.cos(2*rand_angle) - e2 * np.sin(2*rand_angle), e1 * np.sin(2*rand_angle) + e2 * np.cos(2*rand_angle)
@@ -356,28 +391,38 @@ def overlay_real_img(image_path:str, ax, conv:np.ndarray, nlevels:int=7) -> None
     return None
 
 
-def plot_a2774_field():
-    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-    csv_file_path = 'a2744_clu_lenser.csv'
+def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False):
+    # Handler function that will run pipeline on A2744 cluster or parallel field data
+    # and plot the results
+    warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
+
+    if field == 'cluster':
+        fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+        csv_file_path = 'a2744_clu_lenser.csv'
+    elif field == 'parallel':
+        fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
+        csv_file_path = 'a2744_par_lenser.csv'
 
     img_data, _ = get_img_data(fits_file_path)
-    # This image data is 3D - choose the first layer
-    img_data1 = img_data[0, :, :]
-    img_data2 = img_data[1, :, :]
-    coords = get_coords(csv_file_path, coord_type='pixels')
+    if field == 'cluster':
+        img_data = [img_data[0], img_data[1]] # Stack the two epochs
+    elif field == 'parallel':
+        img_data = [img_data]
 
-    warnings.filterwarnings("ignore", category=RuntimeWarning)
+    if full_reconstruction:
+        lenses, sources, _, _ = reconstruct_system(csv_file_path, flags=True, randomize=randomize)
 
-    # lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True, rand=False)
-
-    # Save the class objects so that we can replot without having to rerun the code
-    # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
-    # np.save('Data//a2744_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
-
-    # Put code here for loading our saved class objects
-    lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
-    sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
-    #chi2 = lenses.update_chi2_values(sources)
+        # Save the class objects so that we can replot without having to rerun the code
+        dir = 'Data//'
+        file_name = 'a2744' + '_par' if field == 'parallel' else '_clu' + '_rand' if randomize else ''
+        np.save(dir + file_name + '_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
+        np.save(dir + file_name + '_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
+    else:
+        # Put code here for loading our saved class objects
+        dir = 'Data//'
+        file_name = 'a2744' + '_par' if field == 'parallel' else '_clu' + '_rand' if randomize else ''
+        lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses'))
+        sources = pipeline.Source(*np.load(dir + file_name + '_sources'))
 
     # Generate a convergence map of the lensing field, spanning the range of the sources
     x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
@@ -398,91 +443,14 @@ def plot_a2774_field():
     kappa = mass_sheet(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
 
     # Let's also smooth the convergence map - we don't expect to recover information on small scales
-    # Lets set a minimum length - equal to the average distance between sources
-    min_length = np.mean(np.sqrt((sources.x[1:] - sources.x[:-1])**2 + (sources.y[1:] - sources.y[:-1])**2))
-    # We'll use a gaussian kernel with a standard deviation of 1/10th of the minimum length
-    sigma = min_length / 10
     kernel = create_gaussian_kernel(100, 1) # For now, lets smooth on the scale of a single pixel
     kappa = convolve_image(kappa, kernel)
 
-
-    fig, ax = plt.subplots()
-    ax.set_xlabel('x (arcsec)')
-    ax.set_ylabel('y (arcsec)')
-    ax.set_title('A2744: Reconstructed Convergence Map')
-    norm = ImageNormalize(img_data1, vmin=0, vmax=1, stretch=LogStretch())
-    ax.imshow(img_data1, cmap='gray_r', origin='lower', norm=norm, extent=extent)
-    ax.imshow(img_data2, cmap='gray_r', origin='lower', norm=norm, extent=extent)
-    #ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.25)
-    percentiles = np.percentile(kappa, np.linspace(0, 100, 7))
-
-    contours = ax.contour(X, Y, kappa, levels=percentiles, cmap='viridis', linestyles='solid') # plot contours
-    ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
-
-    plt.savefig('Images//abel//a2744_kappa_clu.png')
-
-    plt.show()
+    # Plot the convergence map
+    dir = 'Images//abel//'
+    file_name = 'A2744_kappa' + '_par' if field == 'parallel' else 'A2744_kappa_clu' + '_rand' if randomize else ''
+    plot_cluster(img_data, X, Y, kappa, None, None, extent, dir, file_name, 'Abell 2744 Reconstruction - Cluster', legend=False)
 
 
 if __name__ == '__main__':
-    plot_a2774_field()
-    raise SystemExit
-
-    # Abell 2744 cluster
-    # fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-    # csv_file_path = 'a2744_clu_lenser.csv'
-
-    # Abell 2744 parallel
-    fits_file_path = 'Data\hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
-    csv_file_path = 'a2744_par_lenser.csv'
-
-    img_data, header = get_img_data(fits_file_path)
-    # This image data is 3D - choose the first layer
-    coords = get_coords(csv_file_path, coord_type='pixels')
-    x_pix = coords[:, 0] + 865
-    y_pix = coords[:, 1] + 400
-
-
-    # raise SystemExit
-
-    warnings.filterwarnings("ignore", category=RuntimeWarning)
-
-    lenses, sources, xmax, chi2 = reconstruct_system(csv_file_path, flags=True, rand=False)
-
-    '''
-    # Save the class objects so that we can replot without having to rerun the code
-    # np.save('Data//a2744_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
-    # np.save('Data//a2744_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
-
-    # Put code here for loading our saved class objects
-    # lenses = pipeline.Lens(*np.load('Data//a2744_lenses.npy'))
-    #sources = pipeline.Source(*np.load('Data//a2744_sources.npy'))
-    #chi2 = lenses.update_chi2_values(sources)
-    '''
-
-    # Generate a convergence map of the lensing field, spanning the range of the sources
-    x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
-    y = np.linspace(min(sources.y)-20, max(sources.y)+20, 100)
-
-    extent = [min(x), max(x), min(y), max(y)]
-
-    X, Y = np.meshgrid(x, y)
-    kappa = np.zeros_like(X)
-    for k in range(len(lenses.x)):
-        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + (0.5)**2)
-        kappa += lenses.te[k] / (2 * r)
-
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.set_xlabel('x (arcsec)')
-    ax.set_ylabel('y (arcsec)')
-    ax.set_title('A2744 Parallel Field: Reconstructed Convergence Map')
-    # ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.5)
-    levels = np.linspace(np.min(kappa), np.max(kappa), 20)
-    ax.imshow(img_data, cmap='gray_r', origin='lower', extent=extent, norm=ImageNormalize(img_data, vmin=0, vmax=1, stretch=LogStretch()))
-
-    contours = ax.contour(X, Y, kappa, levels, cmap='plasma', linestyles='solid') # plot contours
-    ax.clabel(contours, inline=False, colors='blue') # attaches label to each contour
-
-    plt.savefig('Images//abel//a2744_kappa_par.png')
-
-    plt.show()
+    plot_a2774_field(field='cluster', randomize=True, full_reconstruction=True)
