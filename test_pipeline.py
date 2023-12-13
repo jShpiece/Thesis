@@ -79,13 +79,11 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
     plt.close()
 
 
-def plot_cluster(img_data, X, Y, conv, lenses, sources, extent, dir, file_name, title, legend=True):
+def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, legend=True):
     # Plotting function to overlay lensing reconstruction - in the form of lenses or convergence contours, 
     # ontop of an optical image of the cluster
-    fig, ax = plt.subplots()
     ax.set_xlabel('x (arcsec)')
     ax.set_ylabel('y (arcsec)')
-    ax.set_title(title)
     for img in img_data:
         # Allow for multiple images to be overlayed - allows for band or epoch stacking
         norm = ImageNormalize(img, vmin=0, vmax=1, stretch=LogStretch())
@@ -105,8 +103,7 @@ def plot_cluster(img_data, X, Y, conv, lenses, sources, extent, dir, file_name, 
 
     if legend:
         ax.legend()
-    plt.savefig(dir + file_name + '.png')
-    plt.show()
+
 
 
 def get_img_data(fits_file_path) -> np.ndarray:
@@ -392,8 +389,14 @@ def overlay_real_img(image_path:str, ax, conv:np.ndarray, nlevels:int=7) -> None
 
 
 def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False):
-    # Handler function that will run pipeline on A2744 cluster or parallel field data
-    # and plot the results
+    '''
+    A handler function to plot the lensing field of Abell 2744 - either the cluster or parallel field.
+    --------------------
+    Parameters:
+        field: 'cluster' or 'parallel' - which field to plot
+        randomize: whether or not to randomize the source orientations, which helps test the algorithm's tendency to overfit
+        full_reconstruction: whether or not to perform a full reconstruction of the lensing field, or to load in a precomputed one
+    '''
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
 
     if field == 'cluster':
@@ -414,13 +417,17 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
 
         # Save the class objects so that we can replot without having to rerun the code
         dir = 'Data//'
-        file_name = 'a2744' + '_par' if field == 'parallel' else '_clu' + '_rand' if randomize else ''
+        file_name = 'a2744' 
+        file_name += '_par' if field == 'parallel' else '_clu' 
+        file_name += '_rand' if randomize else ''
         np.save(dir + file_name + '_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
         np.save(dir + file_name + '_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
     else:
         # Put code here for loading our saved class objects
         dir = 'Data//'
-        file_name = 'a2744' + '_par' if field == 'parallel' else '_clu' + '_rand' if randomize else ''
+        file_name = 'a2744' 
+        file_name += '_par' if field == 'parallel' else '_clu' 
+        file_name += '_rand' if randomize else ''
         lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses'))
         sources = pipeline.Source(*np.load(dir + file_name + '_sources'))
 
@@ -446,11 +453,23 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
     kernel = create_gaussian_kernel(100, 1) # For now, lets smooth on the scale of a single pixel
     kappa = convolve_image(kappa, kernel)
 
-    # Plot the convergence map
+    # Create labels for the plot
     dir = 'Images//abel//'
-    file_name = 'A2744_kappa' + '_par' if field == 'parallel' else 'A2744_kappa_clu' + '_rand' if randomize else ''
-    plot_cluster(img_data, X, Y, kappa, None, None, extent, dir, file_name, 'Abell 2744 Reconstruction - Cluster', legend=False)
+    file_name = 'A2744_kappa'
+    file_name += 'par' if field == 'parallel' else 'clu'
+    file_name += '_rand' if randomize else ''
+
+    title = 'Abell 2744 Convergence Map - '
+    title += 'Parallel Field' if field == 'parallel' else 'Cluster Field' 
+    title += ' - Randomized' if randomize else '' 
+
+    # Plot the convergence map
+    fig, ax = plt.subplots()
+    plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, legend=False)
+    ax.set_title(title)
+    plt.show()
+    plt.savefig(dir + file_name + '.png')
 
 
 if __name__ == '__main__':
-    plot_a2774_field(field='cluster', randomize=True, full_reconstruction=True)
+    plot_a2774_field(field='cluster', randomize=False, full_reconstruction=True)

@@ -262,7 +262,7 @@ def calc_degrees_of_freedom(sources, lenses):
     return dof
 
 
-def calc_raw_chi2(sources, lenses):
+def calc_raw_chi2(sources, lenses, use_shear=True, use_flexion=True):
     # Compute the raw chi^2 value for a given set of sources and lenses
 
     # The source clone object represents the sources after the lensing effects of our 'test' lenses
@@ -275,7 +275,10 @@ def calc_raw_chi2(sources, lenses):
     chi1f = ((source_clone.f1 - sources.f1) / sources.sigf) ** 2
     chi2f = ((source_clone.f2 - sources.f2) / sources.sigf) ** 2
 
-    chi2 = np.sum(chi1e + chi2e + chi1f + chi2f)
+    shear_chi2 = chi1e + chi2e
+    flexion_chi2 = chi1f + chi2f
+
+    chi2 = np.sum(shear_chi2 * use_shear + flexion_chi2 * use_flexion) #Allow for the use of only shear or flexion
 
     penalty = 0
     for eR in lenses.te:
@@ -297,13 +300,13 @@ def print_step_info(flags,message,lenses,reducedchi2):
             print('Chi^2: ', reducedchi2)
 
 
-def chi2wrapper(guess,params):
+def chi2wrapper(guess, params):
     # Wrapper function for chi2 to allow for minimization
     lenses = Lens(guess[0], guess[1], guess[2], [0])
     return calc_raw_chi2(params[0],lenses)
 
 
-def chi2wrapper2(guess,params):
+def chi2wrapper2(guess, params):
     # Wrapper function for chi2 to allow constrained minimization - only the einstein radii are allowed to vary
     lenses = Lens(params[0], params[1], guess, np.empty_like(params[0]))
     return calc_raw_chi2(params[2],lenses)
@@ -334,6 +337,10 @@ def fit_lensing_field(sources, xmax, lens_floor=1, flags = False):
         The minimum number of lenses to keep - a target number of lenses based on priors
     flags : bool
         Whether to print out step information
+    use_shear : bool
+        Whether to use shear in the chi^2 calculation - if False, only flexion is used
+    use_flexion : bool
+        Whether to use flexion in the chi^2 calculation - if False, only shear is used
     '''
 
     # Initialize candidate lenses from source guesses
