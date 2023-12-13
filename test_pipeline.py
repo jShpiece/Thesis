@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pipeline
-from utils import print_progress_bar
+from utils import print_progress_bar, create_gaussian_kernel, convolve_image
 import time
 from astropy.visualization import hist as fancyhist
 import warnings
@@ -9,6 +9,8 @@ from astropy.io import fits
 from astropy.visualization import ImageNormalize, LogStretch
 from matplotlib import cm
 from astropy import units as u
+
+plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
 # Define default noise parameters
 sigf = 0.01
@@ -395,7 +397,16 @@ def plot_a2774_field():
     
     kappa = mass_sheet(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
 
-    fig, ax = plt.subplots(figsize=(10, 10))
+    # Let's also smooth the convergence map - we don't expect to recover information on small scales
+    # Lets set a minimum length - equal to the average distance between sources
+    min_length = np.mean(np.sqrt((sources.x[1:] - sources.x[:-1])**2 + (sources.y[1:] - sources.y[:-1])**2))
+    # We'll use a gaussian kernel with a standard deviation of 1/10th of the minimum length
+    sigma = min_length / 10
+    kernel = create_gaussian_kernel(100, 1) # For now, lets smooth on the scale of a single pixel
+    kappa = convolve_image(kappa, kernel)
+
+
+    fig, ax = plt.subplots()
     ax.set_xlabel('x (arcsec)')
     ax.set_ylabel('y (arcsec)')
     ax.set_title('A2744: Reconstructed Convergence Map')
@@ -403,10 +414,10 @@ def plot_a2774_field():
     ax.imshow(img_data1, cmap='gray_r', origin='lower', norm=norm, extent=extent)
     ax.imshow(img_data2, cmap='gray_r', origin='lower', norm=norm, extent=extent)
     #ax.scatter(x_pix, y_pix, s=2, c='r', label = 'Catalogue Objects', alpha=0.25)
-    percentiles = np.percentile(kappa, np.linspace(0, 100, 10))
+    percentiles = np.percentile(kappa, np.linspace(0, 100, 7))
 
     contours = ax.contour(X, Y, kappa, levels=percentiles, cmap='viridis', linestyles='solid') # plot contours
-    ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1f', colors='blue')
+    ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
 
     plt.savefig('Images//abel//a2744_kappa_clu.png')
 

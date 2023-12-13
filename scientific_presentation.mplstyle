@@ -1,0 +1,50 @@
+#### Figure Size and DPI ####
+figure.figsize : 10, 6
+figure.dpi : 100
+savefig.dpi : 300
+
+#### Fonts ####
+font.size : 12
+font.family : serif
+mathtext.fontset : stix
+
+#### Axes ####
+axes.labelsize : large
+axes.titlesize : x-large
+axes.grid : True
+
+#### Colors ####
+axes.facecolor : white
+axes.edgecolor : black
+axes.linewidth : 1
+
+#### Ticks ####
+xtick.labelsize : medium
+ytick.labelsize : medium
+xtick.direction : in
+ytick.direction : in
+xtick.major.size : 6
+ytick.major.size : 6
+
+#### Lines ####
+lines.linewidth : 2
+lines.markersize : 6
+lines.markeredgewidth : 0.5
+
+#### Legend ####
+legend.frameon : True
+legend.framealpha : 1
+legend.facecolor : white
+legend.edgecolor : black
+legend.fancybox : False
+
+#### Grid ####
+grid.linestyle : --
+grid.alpha : 0.5
+
+#### Plot Title and Labels ####
+axes.labelpad : 10
+
+#### Savefig ####
+savefig.format : png
+savefig.bbox : tight
