@@ -403,10 +403,12 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
 
     if field == 'cluster':
         fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-        csv_file_path = 'a2744_clu_lenser.csv'
+        csv_file_path = 'Data/a2744_clu_lenser.csv'
     elif field == 'parallel':
         fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
-        csv_file_path = 'a2744_par_lenser.csv'
+        csv_file_path = 'Data/a2744_par_lenser.csv'
+    else:
+        raise ValueError('field must be "cluster" or "parallel"')
 
     img_data, _ = get_img_data(fits_file_path)
     if field == 'cluster':
@@ -474,4 +476,4 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
 
 
 if __name__ == '__main__':
-    plot_a2774_field(field='cluster', randomize=True, full_reconstruction=True)
+    plot_a2774_field(field='parallel', randomize=False, full_reconstruction=True)
