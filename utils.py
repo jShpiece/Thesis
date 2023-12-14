@@ -1,4 +1,7 @@
 import numpy as np
+from astropy.cosmology import Planck15 as cosmo
+from astropy.constants import c, G
+from astropy import units as u
 
 # ------------------------
 # Terminal Utility Functions
@@ -127,17 +130,9 @@ def compute_chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
     
     return chi2val
 
-'''
-def generate_combinations(n, m, start=0, curr=[]):
-    # Generate all combinations of m elements from a set of n elements
-    if m == 0:
-        yield curr
-        return
-    for i in range(start, n):
-        yield from generate_combinations(n, m-1, i+1, curr + [i])
-'''
 
 def generate_combinations(N, m):
+    """Generates all combinations of m elements from a set of N elements."""
     # Create an array of indices from 0 to N-1
     indices = np.arange(N)
 
@@ -166,3 +161,37 @@ def generate_combinations(N, m):
     generate_combinations_recursive([], indices, m)
 
     return combinations_list
+
+
+def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
+    """
+    Calculates the total mass within a convergence map.
+    ------------------------------------------
+    Parameters:
+        kappa_array (2D array): The convergence map.
+        z_l (float): The redshift of the lens.
+        z_s (float): The redshift of the source.
+        pixel_scale (float): The pixel scale of the convergence map in arcsec.
+    """
+    # Convert pixel_scale from arcsec to radians
+    pixel_scale_rad = (pixel_scale * u.arcsec).to(u.rad).value
+
+    # Calculate the angular diameter distances involved
+    D_l = cosmo.angular_diameter_distance(z_l).to(u.meter).value
+    D_s = cosmo.angular_diameter_distance(z_s).to(u.meter).value
+    D_ls = cosmo.angular_diameter_distance_z1z2(z_l, z_s).to(u.meter).value
+
+    # Calculate the critical surface mass density
+    Sigma_crit = (c**2 / (4 * np.pi * G)) * (D_s / (D_l * D_ls))
+    Sigma_crit = Sigma_crit.to(u.kg / u.m**2).value  # Convert to kg/m^2
+
+    # Calculate the area per pixel
+    area_per_pixel = (pixel_scale_rad * D_l)**2  # Area in m^2
+
+    # Calculate the total mass
+    total_mass = Sigma_crit * np.sum(kappa_array) * area_per_pixel
+
+    # Convert the mass to solar masses for easier interpretation
+    total_mass_solar = (total_mass * u.kg).to(u.M_sun).value
+
+    return total_mass_solar

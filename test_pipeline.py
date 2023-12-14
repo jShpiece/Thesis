@@ -7,8 +7,8 @@ from astropy.visualization import hist as fancyhist
 import warnings
 from astropy.io import fits
 from astropy.visualization import ImageNormalize, LogStretch
-from matplotlib import cm
 from astropy import units as u
+import os
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -105,7 +105,6 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, legend=True)
 
     if legend:
         ax.legend()
-
 
 
 def get_img_data(fits_file_path) -> np.ndarray:
@@ -420,24 +419,28 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
         lenses, sources, _, _ = reconstruct_system(csv_file_path, flags=True, randomize=randomize)
 
         # Save the class objects so that we can replot without having to rerun the code
-        dir = 'Data//'
-        file_name = 'a2744' 
-        file_name += '_par' if field == 'parallel' else '_clu' 
-        file_name += '_rand' if randomize else ''
-        np.save(dir + file_name + '_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
-        np.save(dir + file_name + '_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
+        if randomize:
+            # If we're randomizing, I don't need to save the data
+            pass
+        else:
+            dir = 'Data//'
+            file_name = 'a2744' 
+            file_name += '_par' if field == 'parallel' else '_clu' 
+            np.save(dir + file_name + '_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
+            np.save(dir + file_name + '_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
     else:
-        # Put code here for loading our saved class objects
+        # If we're not doing a full reconstruction, we need to load in the data
         dir = 'Data//'
         file_name = 'a2744' 
         file_name += '_par' if field == 'parallel' else '_clu' 
-        file_name += '_rand' if randomize else ''
         lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses.npy'))
         sources = pipeline.Source(*np.load(dir + file_name + '_sources.npy'))
 
     # Generate a convergence map of the lensing field, spanning the range of the sources
     x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
     y = np.linspace(min(sources.y)-20, max(sources.y)+20, 100)
+
+    kappa_scale = (max(sources.x) - min(sources.x) + 40) / 100 # Ratio of kappa pixel to source pixel
 
     extent = [min(x), max(x), min(y), max(y)]
 
@@ -451,11 +454,11 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
     def mass_sheet(kappa, k):
         return k*kappa + (1 - k)
     
-    kappa = mass_sheet(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
+    # kappa = mass_sheet(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
 
     # Let's also smooth the convergence map - we don't expect to recover information on small scales
-    kernel = create_gaussian_kernel(100, 1) # For now, lets smooth on the scale of a single pixel
-    kappa = convolve_image(kappa, kernel)
+    # kernel = create_gaussian_kernel(100, 1/kappa_scale) # For now, lets smooth on the scale of a single pixel
+    # kappa = convolve_image(kappa, kernel)
 
     # Create labels for the plot
     dir = 'Images//abel//'
@@ -471,9 +474,20 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
     fig, ax = plt.subplots()
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, legend=False)
     ax.set_title(title)
+    if randomize:
+        # If there's already a randomized plot, I don't want to overwrite it
+        # Can we add a number to the end of the file name?
+        # First, check if the file exists
+        i = 1
+        while True:
+            if os.path.isfile(dir + file_name + f'_{i}.png'):
+                i += 1
+            else:
+                break
+        file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
     plt.show()
 
 
 if __name__ == '__main__':
-    plot_a2774_field(field='parallel', randomize=False, full_reconstruction=True)
+    plot_a2774_field(field='parallel', randomize=False, full_reconstruction=False)
