@@ -177,21 +177,21 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
     pixel_scale_rad = (pixel_scale * u.arcsec).to(u.rad).value
 
     # Calculate the angular diameter distances involved
-    D_l = cosmo.angular_diameter_distance(z_l).to(u.meter).value
-    D_s = cosmo.angular_diameter_distance(z_s).to(u.meter).value
-    D_ls = cosmo.angular_diameter_distance_z1z2(z_l, z_s).to(u.meter).value
+    D_l = cosmo.angular_diameter_distance(z_l).to(u.meter)
+    D_s = cosmo.angular_diameter_distance(z_s).to(u.meter)
+    D_ls = cosmo.angular_diameter_distance_z1z2(z_l, z_s).to(u.meter)
 
     # Calculate the critical surface mass density
     Sigma_crit = (c**2 / (4 * np.pi * G)) * (D_s / (D_l * D_ls))
-    Sigma_crit = Sigma_crit.to(u.kg / u.m**2).value  # Convert to kg/m^2
 
     # Calculate the area per pixel
     area_per_pixel = (pixel_scale_rad * D_l)**2  # Area in m^2
+    print(area_per_pixel)
 
     # Calculate the total mass
     total_mass = Sigma_crit * np.sum(kappa_array) * area_per_pixel
 
     # Convert the mass to solar masses for easier interpretation
-    total_mass_solar = (total_mass * u.kg).to(u.M_sun).value
+    total_mass_solar = (total_mass).to(u.M_sun).value
 
     return total_mass_solar

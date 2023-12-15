@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pipeline
-from utils import print_progress_bar, create_gaussian_kernel, convolve_image
+from utils import print_progress_bar, create_gaussian_kernel, convolve_image, calculate_mass
 import time
 from astropy.visualization import hist as fancyhist
 import warnings
@@ -398,6 +398,10 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
         randomize: whether or not to randomize the source orientations, which helps test the algorithm's tendency to overfit
         full_reconstruction: whether or not to perform a full reconstruction of the lensing field, or to load in a precomputed one
     '''
+
+    z_cluster = 0.308 # Redshift of the cluster
+    z_source = 0.52 # Mean redshift of the sources
+
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
 
     if field == 'cluster':
@@ -441,6 +445,8 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
     y = np.linspace(min(sources.y)-20, max(sources.y)+20, 100)
 
     kappa_scale = (max(sources.x) - min(sources.x) + 40) / 100 # Ratio of kappa pixel to source pixel
+    arcsec_pixel = 0.05 # arcsec / pixel
+    kappa_arcsec_pixel = kappa_scale * arcsec_pixel # arcsec / pixel
 
     extent = [min(x), max(x), min(y), max(y)]
 
@@ -450,6 +456,9 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
         r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + (0.5)**2)
         kappa += lenses.te[k] / (2 * r)
     
+    mass = calculate_mass(kappa, z_cluster, z_source, kappa_arcsec_pixel) # Calculate the mass within the convergence map
+    print(f'Mass within the convergence map: {mass:.2e} M_sun')
+
     # Now, perform a mass sheet transformation
     def mass_sheet(kappa, k):
         return k*kappa + (1 - k)
@@ -490,4 +499,4 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
 
 
 if __name__ == '__main__':
-    plot_a2774_field(field='parallel', randomize=False, full_reconstruction=False)
+    plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False)
