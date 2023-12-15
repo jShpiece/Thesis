@@ -186,7 +186,6 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
 
     # Calculate the area per pixel
     area_per_pixel = (pixel_scale_rad * D_l)**2  # Area in m^2
-    print(area_per_pixel)
 
     # Calculate the total mass
     total_mass = Sigma_crit * np.sum(kappa_array) * area_per_pixel

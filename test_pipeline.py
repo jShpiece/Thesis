@@ -86,13 +86,13 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, legend=True)
     ax.set_ylabel('y (arcsec)')
     for img in img_data:
         # Allow for multiple images to be overlayed - allows for band or epoch stacking
-        norm = ImageNormalize(img, vmin=0, vmax=1, stretch=LogStretch())
+        norm = ImageNormalize(img, vmin=0, vmax=0.1, stretch=LogStretch())
         ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=norm)
 
     if conv is not None:
         # Plot the convergence contours
         # Construct levels via percentiles
-        percentiles = np.percentile(conv, np.linspace(0, 100, 7))
+        percentiles = np.percentile(conv, np.linspace(60, 100, 7)) # Set the levels to grab the interesting features
         contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid', linewidths=1) 
         ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
 
@@ -398,7 +398,6 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
         randomize: whether or not to randomize the source orientations, which helps test the algorithm's tendency to overfit
         full_reconstruction: whether or not to perform a full reconstruction of the lensing field, or to load in a precomputed one
     '''
-
     z_cluster = 0.308 # Redshift of the cluster
     z_source = 0.52 # Mean redshift of the sources
 
@@ -440,33 +439,32 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
         lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses.npy'))
         sources = pipeline.Source(*np.load(dir + file_name + '_sources.npy'))
 
-    # Generate a convergence map of the lensing field, spanning the range of the sources
-    x = np.linspace(min(sources.x)-20, max(sources.x)+20, 100)
-    y = np.linspace(min(sources.y)-20, max(sources.y)+20, 100)
+    # Generate a convergence map that spans the same area as the image
+    arcsec_per_pixel = 0.05 # From the intrumentation documentation
+    # I'd like the kappa scale to be 1 arcsecond per pixel. This means each kappa pixel is 20 image pixels
+    extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
 
-    kappa_scale = (max(sources.x) - min(sources.x) + 40) / 100 # Ratio of kappa pixel to source pixel
-    arcsec_pixel = 0.05 # arcsec / pixel
-    kappa_arcsec_pixel = kappa_scale * arcsec_pixel # arcsec / pixel
-
-    extent = [min(x), max(x), min(y), max(y)]
-
-    X, Y = np.meshgrid(x, y)
+    X = np.linspace(0, extent[1], int(extent[1]))
+    Y = np.linspace(0, extent[3], int(extent[3]))
+    X, Y = np.meshgrid(X, Y)
     kappa = np.zeros_like(X)
+
     for k in range(len(lenses.x)):
-        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + (0.5)**2)
+        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
         kappa += lenses.te[k] / (2 * r)
     
-    mass = calculate_mass(kappa, z_cluster, z_source, kappa_arcsec_pixel) # Calculate the mass within the convergence map
-    print(f'Mass within the convergence map: {mass:.2e} M_sun')
+    # Calculate the mass within the convergence map
+    # Kappa has the same extent as the image, which means that the scale of the convergence map is the same as the scale of the image
+    mass = calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
 
     # Now, perform a mass sheet transformation
     def mass_sheet(kappa, k):
         return k*kappa + (1 - k)
     
-    # kappa = mass_sheet(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
+    kappa = mass_sheet(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
 
     # Let's also smooth the convergence map - we don't expect to recover information on small scales
-    # kernel = create_gaussian_kernel(100, 1/kappa_scale) # For now, lets smooth on the scale of a single pixel
+    # kernel = create_gaussian_kernel(100, 1) # For now, lets smooth on the scale of one arcsecond
     # kappa = convolve_image(kappa, kernel)
 
     # Create labels for the plot
@@ -478,6 +476,8 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
     title = 'Abell 2744 Convergence Map - '
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field' 
     title += ' - Randomized' if randomize else '' 
+    if field == 'cluster':
+        title += '\n Reconstructed Mass:' + r' $M = {:.2e} M_\odot$'.format(mass)
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -495,8 +495,13 @@ def plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False
                 break
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
-    plt.show()
+    # plt.show()
 
 
 if __name__ == '__main__':
-    plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False)
+    # plot_a2774_field(field='cluster', randomize=False, full_reconstruction=False)
+    # plot_a2774_field(field='parallel', randomize=False, full_reconstruction=False)
+
+    for i in range(5):
+        # plot_a2774_field(field='cluster', randomize=True, full_reconstruction=True)
+        plot_a2774_field(field='parallel', randomize=True, full_reconstruction=True)
