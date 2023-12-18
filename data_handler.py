@@ -6,6 +6,7 @@ import warnings
 import os
 import pipeline
 from utils import calculate_mass
+from astropy.visualization import hist as fancyhist
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -46,25 +47,7 @@ def get_img_data(fits_file_path) -> np.ndarray:
     return img_data, header
 
 
-def get_coords(csv_file_path, coord_type='pixels') -> np.ndarray:
-    # coord_type can be 'pixels' or 'degrees'
-    # Read in the data (csv)
-    data = np.genfromtxt(csv_file_path, delimiter=',')
-    # Read the header to get the column names
-    with open(csv_file_path, 'r') as f:
-        header = f.readline().strip().split(',')
-    # Get the column indices
-    if coord_type == 'pixels':
-        xcol, ycol = header.index('X_IMAGE'), header.index('Y_IMAGE')
-    elif coord_type == 'degrees':
-        xcol, ycol = header.index('X_WORLD'), header.index('Y_WORLD')
-    else:
-        raise ValueError('coord_type must be "pixels" or "degrees"')
-    xcol, ycol = data[1:, xcol], data[1:, ycol]
-    return np.array([xcol, ycol]).T
-
-
-def reconstruct_system(file, flags=False, randomize = False):
+def reconstruct_system(file, dx, dy, flags=False, randomize = False):
     # Take in a file of sources and reconstruct the lensing system
 
     # Read in the data (csv)
@@ -79,6 +62,10 @@ def reconstruct_system(file, flags=False, randomize = False):
     # Set these to be arrays 
     x, y, q, phi, f1, f2 = np.array(x), np.array(y), np.array(q), np.array(phi), np.array(f1), np.array(f2)
 
+    # Apply offsets to the x and y coordinates - this corrects for miscommunication between the pipeline and the lenser
+    x += dx 
+    y += dy 
+
     # Calculate the shear from q and phi
     shear_mag = (q-1)/(q+1)
     e1 = shear_mag * np.cos(2*phi)
@@ -87,7 +74,6 @@ def reconstruct_system(file, flags=False, randomize = False):
     # Set xmax to be the largest distance from the center
     centroid = np.mean(x), np.mean(y)
     xmax = np.max(np.sqrt((x - centroid[0])**2 + (y - centroid[1])**2))
-
     # Create a source object
     acol = header.index('a')
     a = np.array(data[1:, acol])
@@ -97,11 +83,6 @@ def reconstruct_system(file, flags=False, randomize = False):
     valid_indices = test_source_object.filter_sources(a)
 
     x, y, e1, e2, f1, f2, a = x[valid_indices], y[valid_indices], e1[valid_indices], e2[valid_indices], f1[valid_indices], f2[valid_indices], a[valid_indices]
-
-    x += 115 # Offset between image and catalog - cluster field
-    y += 55 # Offset between image and catalog - cluster field
-    # x += 865 # Offset between image and catalog - parallel field
-    # y += 400 # Offset between image and catalog - parallel field
 
     # Compute noise parameters
     sigs_mag = np.mean([np.std(e1), np.std(e2)])
@@ -113,7 +94,7 @@ def reconstruct_system(file, flags=False, randomize = False):
     if randomize:
         # randomize the e1, e2 and f1, f2 vectors by rotating them by a random angle
         rand_angle = np.random.uniform(0, 2*np.pi, len(e1))
-        e1, e2 = e1 * np.cos(2*rand_angle) - e2 * np.sin(2*rand_angle), e1 * np.sin(2*rand_angle) + e2 * np.cos(2*rand_angle)
+        e1, e2 = e1 * np.cos(rand_angle) - e2 * np.sin(rand_angle), e1 * np.sin(rand_angle) + e2 * np.cos(rand_angle)
         f1, f2 = f1 * np.cos(rand_angle) - f2 * np.sin(rand_angle), f1 * np.sin(rand_angle) + f2 * np.cos(rand_angle)
 
     # Set the centroid to be the origin
@@ -144,8 +125,10 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         randomize: whether or not to randomize the source orientations, which helps test the algorithm's tendency to overfit
         full_reconstruction: whether or not to perform a full reconstruction of the lensing field, or to load in a precomputed one
     '''
+    # Define some constants
     z_cluster = 0.308 # Redshift of the cluster
     z_source = 0.52 # Mean redshift of the sources
+    arcsec_per_pixel = 0.03 # From the intrumentation documentation
 
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
 
@@ -153,10 +136,14 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
         csv_file_path = 'Data/a2744_clu_lenser.csv'
         vmax = 1 # Set the maximum value for the image normalization
+        dx = 115
+        dy = 55
     elif field == 'parallel':
         fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
         csv_file_path = 'Data/a2744_par_lenser.csv'
         vmax = 0.1 # Set the maximum value for the image normalization
+        dx = 865
+        dy = 400
     else:
         raise ValueError('field must be "cluster" or "parallel"')
 
@@ -167,7 +154,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         img_data = [img_data]
 
     if full_reconstruction:
-        lenses, sources, _, _ = reconstruct_system(csv_file_path, flags=True, randomize=randomize)
+        lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, randomize=randomize)
 
         # Save the class objects so that we can replot without having to rerun the code
         if randomize:
@@ -188,7 +175,6 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         sources = pipeline.Source(*np.load(dir + file_name + '_sources.npy'))
 
     # Generate a convergence map that spans the same area as the image
-    arcsec_per_pixel = 0.05 # From the intrumentation documentation
     # I'd like the kappa scale to be 1 arcsecond per pixel. This means each kappa pixel is 20 image pixels
     extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
 
@@ -243,8 +229,8 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
                 break
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
-    # plt.show()
+    plt.show()
 
 
 if __name__ == '__main__':
-    reconstruct_a2774(field='cluster', randomize=False, full_reconstruction=False)
+    reconstruct_a2744(field='parallel', randomize=True, full_reconstruction=True)
