@@ -5,8 +5,7 @@ from astropy.visualization import ImageNormalize, LogStretch
 import warnings
 import os
 import pipeline
-from utils import calculate_mass
-from astropy.visualization import hist as fancyhist
+from utils import calculate_mass, mass_sheet_transformation
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -24,9 +23,9 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
     if conv is not None:
         # Plot the convergence contours
         # Construct levels via percentiles
-        percentiles = np.percentile(conv, np.linspace(60, 100, 7)) # Set the levels to grab the interesting features
+        percentiles = np.percentile(conv, np.linspace(0, 100, 7)) # Set the levels to grab the interesting features
         contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid', linewidths=1) 
-        ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
+        # ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
 
     if lenses is not None:
         ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
@@ -186,20 +185,9 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     for k in range(len(lenses.x)):
         r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
         kappa += lenses.te[k] / (2 * r)
-    
-    # Calculate the mass within the convergence map
-    # Kappa has the same extent as the image, which means that the scale of the convergence map is the same as the scale of the image
-    mass = calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
 
-    # Now, perform a mass sheet transformation
-    def mass_sheet(kappa, k):
-        return k*kappa + (1 - k)
-    
-    kappa = mass_sheet(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
-
-    # Let's also smooth the convergence map - we don't expect to recover information on small scales
-    # kernel = create_gaussian_kernel(100, 1) # For now, lets smooth on the scale of one arcsecond
-    # kappa = convolve_image(kappa, kernel)
+    # kappa = mass_sheet_transformation(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
+    mass, mass_200 = calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
 
     # Create labels for the plot
     dir = 'Images//abel//'
@@ -211,7 +199,8 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field' 
     title += ' - Randomized' if randomize else '' 
     if field == 'cluster':
-        title += '\n Reconstructed Mass:' + r' $M = {:.2e} M_\odot$'.format(mass)
+        title += '\n M(200 kpc) = ' + f'{mass_200:.3e} M_sun'
+    title += '\n Flexion Only'
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -228,9 +217,15 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
             else:
                 break
         file_name += f'_{i}'
-    plt.savefig(dir + file_name + '.png')
+    # plt.savefig(dir + file_name + '.png')
+    plt.savefig('Images//abel//A2744_clu_flexion.png')
     plt.show()
 
 
 if __name__ == '__main__':
-    reconstruct_a2744(field='parallel', randomize=True, full_reconstruction=True)
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True)
+    raise ValueError('stop here')
+    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True)
+    for i in range(3):
+        reconstruct_a2744(field='cluster', randomize=True, full_reconstruction=True)
+        reconstruct_a2744(field='parallel', randomize=True, full_reconstruction=True)

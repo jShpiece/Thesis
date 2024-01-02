@@ -33,14 +33,19 @@ class Source:
         self.x, self.y, self.e1, self.e2, self.f1, self.f2 = self.x[valid_indices], self.y[valid_indices], self.e1[valid_indices], self.e2[valid_indices], self.f1[valid_indices], self.f2[valid_indices]
         
         return valid_indices
+  
     
     def generate_initial_guess(self):
         # Generate initial guesses for possible lens positions based on the source ellipticity and flexion
         phi = np.arctan2(self.f2, self.f1)
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
-        r = gamma / flexion
-        return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(2 * gamma * np.abs(r)), np.empty_like(self.x))
+        r = gamma / flexion # A characteristic distance from the source
+
+        x_guess = self.x - r * np.cos(phi)
+        y_guess = self.y - r * np.sin(phi)
+        te_guess = 2 * gamma * r # Allow for negative Einstein radii
+        return Lens(x_guess, y_guess, te_guess, np.empty_like(x_guess))
     
 
     def apply_lensing_effects(self, lenses):
@@ -105,9 +110,10 @@ class Lens:
         distances_to_sources = np.sqrt((self.x[:, None] - sources.x)**2 + (self.y[:, None] - sources.y)**2)
         too_close_to_sources = (distances_to_sources < threshold_distance).any(axis=1)
         too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 2 * xmax
-        zero_te_indices = (self.te < 10**-3)
+        # zero_te_indices = (self.te < 10**-3)
 
-        valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
+        # valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
+        valid_indices = ~(too_close_to_sources | too_far_from_center)
         self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
     
 
