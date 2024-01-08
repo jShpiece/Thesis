@@ -5,7 +5,7 @@ from astropy.visualization import ImageNormalize, LogStretch
 import warnings
 import os
 import pipeline
-from utils import calculate_mass, mass_sheet_transformation
+from utils import calculate_mass, mass_sheet_transformation, print_progress_bar
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -25,7 +25,7 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
         # Construct levels via percentiles
         percentiles = np.percentile(conv, np.linspace(0, 100, 7)) # Set the levels to grab the interesting features
         contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid', linewidths=1) 
-        # ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
+        ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
 
     if lenses is not None:
         ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
@@ -46,7 +46,7 @@ def get_img_data(fits_file_path) -> np.ndarray:
     return img_data, header
 
 
-def reconstruct_system(file, dx, dy, flags=False, randomize = False):
+def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=True, use_flexion=True):
     # Take in a file of sources and reconstruct the lensing system
 
     # Read in the data (csv)
@@ -104,7 +104,7 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False):
     sources = pipeline.Source(x, y, e1, e2, f1, f2, sigs, sigf)
 
     # Perform lens position optimization
-    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, lens_floor = 1, flags=flags)
+    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, lens_floor = 1, flags=flags, use_shear=use_shear, use_flexion=use_flexion)
 
     # Move our sourecs and lenses back to the original centroid
     sources.x += centroid[0]
@@ -115,7 +115,7 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False):
     return recovered_lenses, sources, xmax, reducedchi2
 
 
-def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False):
+def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True):
     '''
     A handler function to plot the lensing field of Abell 2744 - either the cluster or parallel field.
     --------------------
@@ -153,7 +153,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         img_data = [img_data]
 
     if full_reconstruction:
-        lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, randomize=randomize)
+        lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, randomize=randomize, use_shear=use_shear, use_flexion=use_flexion)
 
         # Save the class objects so that we can replot without having to rerun the code
         if randomize:
@@ -185,6 +185,10 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     for k in range(len(lenses.x)):
         r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
         kappa += lenses.te[k] / (2 * r)
+    
+    # Subtract out an average kappa field to remove features that are due to 'overfitting'
+    avg_kappa_field = np.load('Data//a2744' + ('_par' if field == 'parallel' else '_clu') + '_avg_kappa_field.npy')
+    kappa -= avg_kappa_field[2]
 
     # kappa = mass_sheet_transformation(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
     mass, mass_200 = calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
@@ -199,8 +203,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field' 
     title += ' - Randomized' if randomize else '' 
     if field == 'cluster':
-        title += '\n M(200 kpc) = ' + f'{mass_200:.3e} M_sun'
-    title += '\n Flexion Only'
+        title += '\n M(200 kpc) = ' + f'{mass:.3e} M_sun'
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -217,13 +220,68 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
             else:
                 break
         file_name += f'_{i}'
-    # plt.savefig(dir + file_name + '.png')
-    plt.savefig('Images//abel//A2744_clu_flexion.png')
+    plt.savefig(dir + file_name + '.png')
     plt.show()
 
 
+def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flexion=True):
+    # Build an average kappa field by randomizing the source orientations multiple times and averaging the resulting kappa fields
+    # This can be used to subtract out features that are due to 'overfitting' 
+    arcsec_per_pixel = 0.03 # From the intrumentation documentation
+
+    warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
+
+    if field == 'cluster':
+        fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+        csv_file_path = 'Data/a2744_clu_lenser.csv'
+        dx = 115
+        dy = 55
+    elif field == 'parallel':
+        fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
+        csv_file_path = 'Data/a2744_par_lenser.csv'
+        dx = 865
+        dy = 400
+    else:
+        raise ValueError('field must be "cluster" or "parallel"')
+
+    img_data, _ = get_img_data(fits_file_path)
+    if field == 'cluster':
+        img_data = [img_data[0], img_data[1]] # Stack the two epochs
+    elif field == 'parallel':
+        img_data = [img_data]
+
+    # Generate a convergence map that spans the same area as the image
+    # I'd like the kappa scale to be 1 arcsecond per pixel. This means each kappa pixel is 20 image pixels
+    extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
+
+    X = np.linspace(0, extent[1], int(extent[1]))
+    Y = np.linspace(0, extent[3], int(extent[3]))
+    X, Y = np.meshgrid(X, Y)
+
+    avg_kappa_field = np.zeros_like(X)
+
+    # Initialize progress bar
+    print_progress_bar(0, Ntrial, prefix='Building Kappa:', suffix='Complete', length=50)
+
+    for n in range(Ntrial):
+        lenses, *_ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=False, randomize=True, use_shear=use_shear, use_flexion=use_flexion)
+        kappa = np.zeros_like(X)
+        for k in range(len(lenses.x)):
+            r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
+            kappa += lenses.te[k] / (2 * r)
+        avg_kappa_field += kappa 
+        print_progress_bar(n+1, Ntrial, prefix='Building Kappa:', suffix='Complete', length=50)
+    avg_kappa_field /= Ntrial
+    # Save the average kappa field
+    dir = 'Data//'
+    file_name = 'a2744'
+    file_name += '_par' if field == 'parallel' else '_clu'
+    np.save(dir + file_name + '_avg_kappa_field', np.array([X, Y, avg_kappa_field]))
+
+
 if __name__ == '__main__':
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True)
+    # build_avg_kappa_field(Ntrial=10, field='cluster', use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='cluster', randomize=True, full_reconstruction=True, use_shear=True, use_flexion=True)
     raise ValueError('stop here')
     reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True)
     for i in range(3):

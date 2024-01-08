@@ -88,20 +88,20 @@ def run_simple_test(Nlens, Nsource, xmax, flags=False, lens_random=False, source
     start_time = time.time()
 
     # Initialize true lens and source configurations
-    lenses = pipeline.createLenses(nlens=Nlens, randompos=lens_random, xmax=xmax)
-    sources = pipeline.createSources(lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=source_random, xmax=xmax)
+    lenses = pipeline.createLenses(nlens=Nlens, randompos=lens_random, xmax=xmax, strength_choice='cluster')
+    sources = pipeline.createSources(lenses, ns=Nsource, randompos=source_random, xmax=xmax)
 
     # Perform lens position optimization
-    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, sigf=sigf, sigs=sigs, xmax=xmax, lens_floor = Nlens, flags=flags)
+    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, lens_floor = Nlens, flags=flags)
     
     print('Time elapsed:', time.time() - start_time)
     
-    _plot_results(xmax, recovered_lenses, sources, lenses.x, lenses.y, reducedchi2, 'Lensing Reconstruction')
+    _plot_results(xmax, recovered_lenses, sources, lenses, reducedchi2, 'Lensing Reconstruction')
     plt.savefig('Images//tests//simple_test_{}_lens_{}_source.png'.format(Nlens, Nsource))
     plt.show()
 
 
-def visualize_pipeline_steps(Nlens, Nsource, xmax):
+def visualize_pipeline_steps(Nlens, Nsource, xmax, use_shear=True, use_flexion=True):
     """Visualizes each step of the lensing reconstruction pipeline.
     params:
         nlens: number of lenses
@@ -111,7 +111,6 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
     # Setup lensing and source configurations
     true_lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
     sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
-    xl, yl, _ = true_lenses.x, true_lenses.y, true_lenses.te
 
     # Arrange a plot with 5 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
@@ -119,25 +118,23 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
 
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess()
-    reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Initial Lens Positions', ax=axarr[0,0])
-
+    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Initial Lens Positions', ax=axarr[0,0])
 
     # Step 2: Optimize guesses with local minimization
-    lenses.optimize_lens_positions(sources, sigf, sigs)
-    reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Optimized Lens Positions', ax=axarr[0,1])
-
+    lenses.optimize_lens_positions(sources)
+    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Optimized Lens Positions', ax=axarr[0,1])
 
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax)
-    reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Filtered Lens Positions', ax=axarr[0,2])
+    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Filtered Lens Positions', ax=axarr[0,2])
 
     # Step 4: Merge lenses that are too close to each other
     lenses.merge_close_lenses()
-    reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Merged Lens Positions', ax=axarr[1,0])
+    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Merged Lens Positions', ax=axarr[1,0])
 
     # Step 5: Iterative elimination
     lens_floors = np.arange(1, len(lenses.x) + 1)
@@ -146,19 +143,19 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax):
         # Clone the lenses object
         test_lenses = pipeline.Lens(lenses.x, lenses.y, lenses.te, lenses.chi2)
         test_lenses.iterative_elimination(lens_floor=lens_floor)
-        reducedchi2 = test_lenses.update_chi2_values(sources, sigf, sigs)
+        reducedchi2 = test_lenses.update_chi2_values(sources, use_shear, use_flexion)
         new_dist = np.abs(reducedchi2 - 1)
         if new_dist < best_dist:
             best_dist = new_dist
             best_lenses = test_lenses
         lenses = best_lenses
-    reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Iterative Elimination', ax=axarr[1,1])
+    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Iterative Elimination', ax=axarr[1,1])
 
     # Step 6: Final minimization
     lenses.full_minimization(sources, sigf, sigs)
-    reducedchi2 = lenses.update_chi2_values(sources, sigf, sigs)
-    _plot_results(xmax, lenses, sources, xl, yl, reducedchi2, 'Final Minimization', ax=axarr[1,2])
+    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Final Minimization', ax=axarr[1,2])
 
     # Save and show the plot
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
@@ -223,4 +220,5 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
 
 
 if __name__ == '__main__':
-    pass
+    # run_simple_test(Nlens=1, Nsource=10, xmax=10, flags=True, lens_random=False, source_random=True)
+    visualize_pipeline_steps(Nlens=1, Nsource=10, xmax=5)
