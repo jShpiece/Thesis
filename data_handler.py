@@ -6,6 +6,7 @@ import warnings
 import os
 import pipeline
 from utils import calculate_mass, mass_sheet_transformation, print_progress_bar
+import scipy.ndimage
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -23,7 +24,7 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
     if conv is not None:
         # Plot the convergence contours
         # Construct levels via percentiles
-        percentiles = np.percentile(conv, np.linspace(0, 100, 7)) # Set the levels to grab the interesting features
+        percentiles = np.percentile(conv, np.linspace(50, 100, 10)) # Set the levels to grab the interesting features
         contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid', linewidths=1) 
         ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
 
@@ -79,9 +80,9 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
 
     test_source_object = pipeline.Source(x, y, e1, e2, f1, f2, 0, 0)
 
-    valid_indices = test_source_object.filter_sources(a)
+    # valid_indices = test_source_object.filter_sources(a)
 
-    x, y, e1, e2, f1, f2, a = x[valid_indices], y[valid_indices], e1[valid_indices], e2[valid_indices], f1[valid_indices], f2[valid_indices], a[valid_indices]
+    # x, y, e1, e2, f1, f2, a = x[valid_indices], y[valid_indices], e1[valid_indices], e2[valid_indices], f1[valid_indices], f2[valid_indices], a[valid_indices]
 
     # Compute noise parameters
     sigs_mag = np.mean([np.std(e1), np.std(e2)])
@@ -186,9 +187,12 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
         kappa += lenses.te[k] / (2 * r)
     
+    # Smooth the convergence map with a gaussian kernel (use an external function)
+    kappa = scipy.ndimage.gaussian_filter(kappa, sigma=5)
+    
     # Subtract out an average kappa field to remove features that are due to 'overfitting'
-    avg_kappa_field = np.load('Data//a2744' + ('_par' if field == 'parallel' else '_clu') + '_avg_kappa_field.npy')
-    kappa -= avg_kappa_field[2]
+    # avg_kappa_field = np.load('Data//a2744' + ('_par' if field == 'parallel' else '_clu') + '_avg_kappa_field.npy')
+    # kappa -= avg_kappa_field[2]
 
     # kappa = mass_sheet_transformation(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
     mass, mass_200 = calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
@@ -200,8 +204,8 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     file_name += '_rand' if randomize else ''
 
     title = 'Abell 2744 Convergence Map - '
-    title += 'Parallel Field' if field == 'parallel' else 'Cluster Field' 
-    title += ' - Randomized' if randomize else '' 
+    title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
+    title += ' - Randomized' if randomize else ''
     if field == 'cluster':
         title += '\n M(200 kpc) = ' + f'{mass:.3e} M_sun'
 
@@ -221,12 +225,12 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
                 break
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
-    # plt.show()
+    plt.show()
 
 
 def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flexion=True):
     # Build an average kappa field by randomizing the source orientations multiple times and averaging the resulting kappa fields
-    # This can be used to subtract out features that are due to 'overfitting' 
+    # This can be used to subtract out features that are due to 'overfitting'
     arcsec_per_pixel = 0.03 # From the intrumentation documentation
 
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
@@ -267,9 +271,9 @@ def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flex
         lenses, *_ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=False, randomize=True, use_shear=use_shear, use_flexion=use_flexion)
         kappa = np.zeros_like(X)
         for k in range(len(lenses.x)):
-            r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
+            r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0
             kappa += lenses.te[k] / (2 * r)
-        avg_kappa_field += kappa 
+        avg_kappa_field += kappa
         print_progress_bar(n+1, Ntrial, prefix='Building Kappa:', suffix='Complete', length=50)
     avg_kappa_field /= Ntrial
     # Save the average kappa field
@@ -280,10 +284,5 @@ def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flex
 
 
 if __name__ == '__main__':
-    build_avg_kappa_field(Ntrial=10, field='cluster', use_shear=True, use_flexion=True)
-    reconstruct_a2744(field='cluster', randomize=True, full_reconstruction=True, use_shear=True, use_flexion=True)
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
-
-    build_avg_kappa_field(Ntrial=10, field='parallel', use_shear=True, use_flexion=True)
-    reconstruct_a2744(field='parallel', randomize=True, full_reconstruction=True, use_shear=True, use_flexion=True)
-    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    # reconstruct_a2744(field='cluster', randomize=True, full_reconstruction=True, use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True)

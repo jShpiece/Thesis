@@ -9,7 +9,7 @@ plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentat
 
 # Define default noise parameters
 sigf = 0.01
-sigs = 0.1 
+sigs = 0.1
 
 # ------------------------
 # Testing Plotting Functions

@@ -96,7 +96,7 @@ def compute_chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
     x, y, e1data, e2data, f1data, f2data = sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2
     # Initialize chi^2 value
     chi2val = 0.0
-    
+
     # Loop through the data points to compute the chi^2 terms
     # What if we only get one data point?
     # Turn it into an array of length 1
@@ -202,7 +202,7 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
     for i in range(kappa_array.shape[0]):
         for j in range(kappa_array.shape[1]):
             radius_array[i, j] = np.sqrt((i - center_pixel)**2 + (j - center_pixel)**2)
-    # Get 500 kpc in pixels
+    # Get 200 kpc in pixels
     D = (200 * u.kpc).to(u.meter).value / D_l.value
     radius_200kpc = D / pixel_scale_rad
     # Calculate the total mass within 200 kpc
@@ -212,6 +212,6 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
 
     return total_mass_solar, total_mass_200kpc_solar
 
+
 def mass_sheet_transformation(kappa, k):
     return k*kappa + (1 - k)
-    
