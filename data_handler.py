@@ -221,7 +221,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
                 break
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
-    plt.show()
+    # plt.show()
 
 
 def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flexion=True):
@@ -280,10 +280,10 @@ def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flex
 
 
 if __name__ == '__main__':
-    # build_avg_kappa_field(Ntrial=10, field='cluster', use_shear=True, use_flexion=True)
+    build_avg_kappa_field(Ntrial=10, field='cluster', use_shear=True, use_flexion=True)
     reconstruct_a2744(field='cluster', randomize=True, full_reconstruction=True, use_shear=True, use_flexion=True)
-    raise ValueError('stop here')
-    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True)
-    for i in range(3):
-        reconstruct_a2744(field='cluster', randomize=True, full_reconstruction=True)
-        reconstruct_a2744(field='parallel', randomize=True, full_reconstruction=True)
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+
+    build_avg_kappa_field(Ntrial=10, field='parallel', use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='parallel', randomize=True, full_reconstruction=True, use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)

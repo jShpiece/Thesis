@@ -98,7 +98,7 @@ def run_simple_test(Nlens, Nsource, xmax, flags=False, lens_random=False, source
     
     _plot_results(xmax, recovered_lenses, sources, lenses, reducedchi2, 'Lensing Reconstruction')
     plt.savefig('Images//tests//simple_test_{}_lens_{}_source.png'.format(Nlens, Nsource))
-    plt.show()
+    # plt.show()
 
 
 def visualize_pipeline_steps(Nlens, Nsource, xmax, use_shear=True, use_flexion=True):
@@ -160,7 +160,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_shear=True, use_flexion=T
     # Save and show the plot
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
     plt.savefig('Images//tests//breakdown_{}_lens_{}_source.png'.format(Nlens, Nsource))
-    plt.show()
+    # plt.show()
 
 
 def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1):
@@ -178,7 +178,7 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
     
     for trial in range(Ntrials):
         sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
-        lenses, _ = pipeline.fit_lensing_field(sources, sigs=sigs, sigf=sigf, xmax=xmax, lens_floor=Nlens, flags=False)
+        lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, lens_floor=Nlens, flags=False)
         
         num_lenses_recovered = len(lenses.x)
         # Take the minimum of the recovered lenses and the specified number of lenses
@@ -218,7 +218,25 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
     return num_recovered
 
 
-
 if __name__ == '__main__':
-    # run_simple_test(Nlens=1, Nsource=10, xmax=10, flags=True, lens_random=False, source_random=True)
-    visualize_pipeline_steps(Nlens=1, Nsource=10, xmax=5)
+    # Small field
+    run_simple_test(Nlens=1, Nsource=10, xmax=10)
+    run_simple_test(Nlens=2, Nsource=10, xmax=10)
+    visualize_pipeline_steps(Nlens=1, Nsource=10, xmax=10)
+    visualize_pipeline_steps(Nlens=2, Nsource=10, xmax=10)
+
+    # Large field
+    run_simple_test(Nlens=1, Nsource=100, xmax=50, flags=False, lens_random=False, source_random=True)
+    run_simple_test(Nlens=2, Nsource=100, xmax=50, flags=False, lens_random=False, source_random=True)
+    visualize_pipeline_steps(Nlens=1, Nsource=100, xmax=50)
+    visualize_pipeline_steps(Nlens=2, Nsource=100, xmax=50)
+
+    # Generate random realizations
+    Ntrials = 1000
+    Nlens = [1, 2]
+    Nsource = 100
+    xmax = 50
+
+    for nlens in Nlens:
+        xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, sigf=sigf, sigs=sigs)
+        plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, distinguish_lenses=True)
