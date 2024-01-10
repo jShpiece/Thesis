@@ -107,10 +107,10 @@ class Lens:
         distances_to_sources = np.sqrt((self.x[:, None] - sources.x)**2 + (self.y[:, None] - sources.y)**2)
         too_close_to_sources = (distances_to_sources < threshold_distance).any(axis=1)
         too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 2 * xmax
-        # zero_te_indices = (self.te < 10**-3)
+        zero_te_indices = (self.te < 10**-3)
 
-        # valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
-        valid_indices = ~(too_close_to_sources | too_far_from_center)
+        valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
+        # valid_indices = ~(too_close_to_sources | too_far_from_center)
         self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
     
 

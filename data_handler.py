@@ -26,7 +26,7 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
         # Construct levels via percentiles
         percentiles = np.percentile(conv, np.linspace(50, 100, 10)) # Set the levels to grab the interesting features
         contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid', linewidths=1) 
-        ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
+        # ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
 
     if lenses is not None:
         ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
@@ -207,7 +207,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
     title += ' - Randomized' if randomize else ''
     if field == 'cluster':
-        title += '\n M(200 kpc) = ' + f'{mass:.3e} M_sun'
+        title += '\n M(200 kpc) = ' + f'{mass:.3e}' + r' $M_\odot$'
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -284,5 +284,5 @@ def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flex
 
 
 if __name__ == '__main__':
-    # reconstruct_a2744(field='cluster', randomize=True, full_reconstruction=True, use_shear=True, use_flexion=True)
     reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
