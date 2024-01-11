@@ -236,7 +236,7 @@ if __name__ == '__main__':
 
     # Generate random realizations
     Ntrials = 1000
-    Nlens = [1, 2]
+    Nlens = [2]
     Nsource = 100
     xmax = 50
 
@@ -245,9 +245,6 @@ if __name__ == '__main__':
         plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, distinguish_lenses=True)
     
     Nlens = [1, 2]
-    Nsource = 100
-    Ntrials = 100
-    xmax = 50
     # Assess number of lenses recovered
     # Use the same constants as above
     for nlens in Nlens:
