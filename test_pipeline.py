@@ -232,7 +232,7 @@ if __name__ == '__main__':
     run_simple_test(Nlens=2, Nsource=100, xmax=50, flags=False, lens_random=False, source_random=True)
     visualize_pipeline_steps(Nlens=1, Nsource=100, xmax=50)
     visualize_pipeline_steps(Nlens=2, Nsource=100, xmax=50)
-    '''
+    
 
     # Generate random realizations
     Ntrials = 1000
@@ -243,7 +243,10 @@ if __name__ == '__main__':
     for nlens in Nlens:
         xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, sigf=sigf, sigs=sigs)
         plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, distinguish_lenses=True)
-    
+    '''
+    Ntrials = 1000
+    Nsource = 100
+    xmax = 50
     Nlens = [1, 2]
     # Assess number of lenses recovered
     # Use the same constants as above
@@ -261,4 +264,3 @@ if __name__ == '__main__':
         plt.tight_layout()
         plt.savefig(f'Images//tests//num_recovered_{nlens}_lens_{Nsource}_source_{Ntrials}.png')
         plt.close()
-    
