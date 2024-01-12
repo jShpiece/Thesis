@@ -7,6 +7,8 @@ import os
 import pipeline
 from utils import calculate_mass, mass_sheet_transformation, print_progress_bar
 import scipy.ndimage
+from astropy.visualization import hist as fancyhist
+
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -22,11 +24,47 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
         ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=norm)
 
     if conv is not None:
-        # Plot the convergence contours
-        # Construct levels via percentiles
-        percentiles = np.percentile(conv, np.linspace(50, 100, 10)) # Set the levels to grab the interesting features
-        contours = ax.contour(X, Y, conv, levels=percentiles, cmap='viridis', linestyles='solid', linewidths=1) 
-        # ax.clabel(contours, inline=True, fontsize=10, fmt='%2.1e', colors='blue')
+        # Plot convergence contours on top of the optical image.
+        # Levels are set based on percentiles to highlight key features in the convergence map.
+
+        # Determine levels for contour lines using percentiles.
+        contour_levels = np.percentile(conv, np.linspace(70, 100, 7))
+
+        # Create contour lines for the convergence map.
+        contours = ax.contour(
+            X, Y, conv, 
+            levels=contour_levels, 
+            cmap='plasma', 
+            linestyles='-', 
+            linewidths=1.5
+        )
+
+        # Overlay the convergence map with semi-transparency.
+        color_map_overlay = ax.imshow(
+            conv, 
+            cmap='viridis', 
+            origin='lower', 
+            extent=extent, 
+            alpha=0.6, 
+            vmin=0, 
+            vmax=np.max(contour_levels)
+        )
+
+        # Add a color bar to the plot for reference.
+        color_bar = plt.colorbar(color_map_overlay, ax=ax, pad=0.01)
+        color_bar.set_label(r'$\kappa$', rotation=270, labelpad=15)
+
+        # Label the contour lines with their respective values.
+        '''
+        ax.clabel(
+            contours, 
+            inline=True, 
+            fontsize=8, 
+            fmt='%2.2e', 
+            colors='black'
+        )
+        '''
+
 
     if lenses is not None:
         ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
@@ -188,7 +226,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         kappa += lenses.te[k] / (2 * r)
     
     # Smooth the convergence map with a gaussian kernel (use an external function)
-    kappa = scipy.ndimage.gaussian_filter(kappa, sigma=5)
+    kappa = scipy.ndimage.gaussian_filter(kappa, sigma=2)
     
     # Subtract out an average kappa field to remove features that are due to 'overfitting'
     # avg_kappa_field = np.load('Data//a2744' + ('_par' if field == 'parallel' else '_clu') + '_avg_kappa_field.npy')
@@ -283,6 +321,43 @@ def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flex
     np.save(dir + file_name + '_avg_kappa_field', np.array([X, Y, avg_kappa_field]))
 
 
+def plot_lenses():
+    dir = 'Data//'
+    file_name = 'a2744' 
+    file_name += '_clu'
+    lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses.npy'))
+
+    # Sort and print the lenses by their einstein radius
+    sorted_indices = np.argsort(lenses.te)
+    sorted_indices = sorted_indices[::-1]
+
+    fig, ax = plt.subplots()
+    fancyhist(lenses.te, bins='freedman', ax=ax, histtype='step', color='black')
+    # Place a vertical line at the mean einstein radius
+    ax.axvline(np.mean(lenses.te), color='red', label='Mean Einstein Radius')
+    ax.axvline(np.median(lenses.te), color='blue', label='Median Einstein Radius')
+    ax.legend()
+    ax.set_xlabel(r'$\theta_E$ (arcsec)')
+    ax.set_ylabel('Number of Lenses')
+    ax.set_title('Abell 2744 Recovered Lenses')
+    ax.set_aspect('auto')
+    plt.savefig('Images//abel//A2744_lenses_hist.png')
+
+    fig, ax = plt.subplots()
+    cmap = ax.scatter(lenses.x, lenses.y, c=lenses.te, cmap='plasma', s = lenses.te*100)
+    color_bar = plt.colorbar(cmap, ax=ax)
+    ax.set_xlabel('x (arcsec)')
+    ax.set_ylabel('y (arcsec)')
+    ax.set_title('Abell 2744 Recovered Lenses')
+    ax.set_aspect('equal')
+    color_bar.set_label(r'$\theta_E$ (arcsec)', rotation=270, labelpad=15)
+    plt.savefig('Images//abel//A2744_lenses.png')
+
+    plt.show()
+
+
+
 if __name__ == '__main__':
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True)
-    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    # reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    

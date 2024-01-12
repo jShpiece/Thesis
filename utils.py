@@ -204,7 +204,7 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
             radius_array[i, j] = np.sqrt((i - center_pixel)**2 + (j - center_pixel)**2)
     # Get 200 kpc in pixels
     D = (200 * u.kpc).to(u.meter).value / D_l.value
-    radius_200kpc = D / pixel_scale_rad
+    radius_200kpc = D / pixel_scale_rad # In pixels
     # Calculate the total mass within 200 kpc
     total_mass_200kpc = np.sum(kappa_array[radius_array <= radius_200kpc]) * Sigma_crit * area_per_pixel
     # Convert to solar masses
