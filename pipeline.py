@@ -18,6 +18,7 @@ class Source:
         self.sigs = sigs
         self.sigf = sigf
 
+
     def filter_sources(self, a, max_flexion=0.5):
         # Select indices where both f1 and f2 are under 1 (absolute value)
         valid_indices = (np.abs(self.f1) <= max_flexion) & (np.abs(self.f2) <= max_flexion)
@@ -33,8 +34,8 @@ class Source:
         self.x, self.y, self.e1, self.e2, self.f1, self.f2 = self.x[valid_indices], self.y[valid_indices], self.e1[valid_indices], self.e2[valid_indices], self.f1[valid_indices], self.f2[valid_indices]
         
         return valid_indices
-  
-    
+
+
     def generate_initial_guess(self):
         # Generate initial guesses for possible lens positions based on the source ellipticity and flexion
         phi = np.arctan2(self.f2, self.f1)
@@ -44,7 +45,6 @@ class Source:
 
         return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(2 * gamma * np.abs(r)), np.empty_like(self.x))
 
-    
 
     def apply_lensing_effects(self, lenses):
         # Apply the lensing effects of a set of lenses to the sources
@@ -107,14 +107,14 @@ class Lens:
         distances_to_sources = np.sqrt((self.x[:, None] - sources.x)**2 + (self.y[:, None] - sources.y)**2)
         too_close_to_sources = (distances_to_sources < threshold_distance).any(axis=1)
         too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 2 * xmax
-        zero_te_indices = (self.te < 10**-3)
+        zero_te_indices = (np.abs(self.te) < 10**-3)
 
         valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
         # valid_indices = ~(too_close_to_sources | too_far_from_center)
         self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
     
 
-    def merge_close_lenses(self, merger_threshold=1):
+    def merge_close_lenses(self, merger_threshold=5):
         #Merge lenses that are too close to each other
         i = 0
         while i < len(self.x):
@@ -124,14 +124,14 @@ class Lens:
                     weight_i, weight_j = self.te[i], self.te[j]
                     self.x[i] = (self.x[i]*weight_i + self.x[j]*weight_j) / (weight_i + weight_j)
                     self.y[i] = (self.y[i]*weight_i + self.y[j]*weight_j) / (weight_i + weight_j)
-                    self.te[i] = (weight_i + weight_j) / 2
+                    self.te[i] = (weight_i + weight_j) 
                     self.x, self.y, self.te, self.chi2 = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j), np.delete(self.chi2, j)
                     break
             else:
                 i += 1
     
 
-    def iterative_elimination(self, lens_floor=1):
+    def select_lowest_chi2(self, lens_floor=1):
         # Simply choose the 'lens_floor' lenses with the lowest chi^2 values
         # and eliminate the rest
         
@@ -142,6 +142,24 @@ class Lens:
         # Select the 'lens_floor' lenses with the lowest chi^2 values
         if len(self.x) > lens_floor:
             self.x, self.y, self.te, self.chi2 = self.x[:lens_floor], self.y[:lens_floor], self.te[:lens_floor], self.chi2[:lens_floor]
+
+
+    def iterative_elimination(self, sources, reducedchi2, use_shear=True, use_flexion=True):
+        # Iteratively eliminate lenses that do not improve the chi^2 value
+        lens_floors = np.arange(1, len(self.x) + 1)
+        best_dist = np.abs(reducedchi2 - 1)
+        best_lenses = self
+        for lens_floor in lens_floors:
+            # Clone the lenses object
+            test_lenses = Lens(self.x, self.y, self.te, self.chi2)
+            test_lenses.select_lowest_chi2(lens_floor=lens_floor)
+            reducedchi2 = test_lenses.update_chi2_values(sources, use_shear, use_flexion)
+            new_dist = np.abs(reducedchi2 - 1)
+            if new_dist < best_dist:
+                best_dist = new_dist
+                best_lenses = test_lenses
+        # Update the lenses object with the best set of lenses
+        self.x, self.y, self.te, self.chi2 = best_lenses.x, best_lenses.y, best_lenses.te, best_lenses.chi2
     
 
     def full_minimization(self, sources, use_shear=True, use_flexion=True):
@@ -210,8 +228,6 @@ def createSources(lenses,ns=1,randompos=True,sigf=0.01,sigs=0.1,xmax=5):
     sources = Source(x, y, e1data, e2data, f1data, f2data, sigs*np.ones(ns), sigf*np.ones(ns))
     # Apply the lensing effects of the lenses
     sources.apply_lensing_effects(lenses)
-    # Remove sources that we suspect are strongly lensed
-    # sources.filter_sources()
 
     return sources
 
@@ -319,7 +335,7 @@ def chi2wrapper2(guess, params):
 # Main function
 # ------------------------------
 
-def fit_lensing_field(sources, xmax, lens_floor=1, flags = False, use_shear=True, use_flexion=True):
+def fit_lensing_field(sources, xmax, flags = False, use_shear=True, use_flexion=True):
     '''
     This function takes in a set of sources - with positions, ellipticity, and flexion 
     signals, and attempts to reconstruct the lensing field that produced them. 
@@ -346,17 +362,18 @@ def fit_lensing_field(sources, xmax, lens_floor=1, flags = False, use_shear=True
         Whether to use flexion in the chi^2 calculation - if False, only shear is used
     '''
 
+
     # Initialize candidate lenses from source guesses
     lenses = sources.generate_initial_guess()
     reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
     print_step_info(flags, "Initial Guesses:", lenses, reducedchi2)
 
-    
+
     # Optimize lens positions via local minimization
     lenses.optimize_lens_positions(sources, use_shear, use_flexion)
     reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
     print_step_info(flags, "Local Minimization:", lenses, reducedchi2)
-    
+
 
     # Filter out lenses that are too close to sources or too far from the center
     lenses.filter_lens_positions(sources, xmax)
@@ -365,36 +382,31 @@ def fit_lensing_field(sources, xmax, lens_floor=1, flags = False, use_shear=True
 
 
     # Merge lenses that are too close to each other
-    lenses.merge_close_lenses()
+    # Try a merger threshold based on the source density
+    ns = len(sources.x) / (2 * xmax)**2
+    merger_threshold = 1 / np.sqrt(ns)
+    print("Merger threshold:", merger_threshold)
+    # If the merger threshold is too small, set it to 1
+    if merger_threshold < 1:
+        merger_threshold = 1
+    lenses.merge_close_lenses(merger_threshold=10)
     reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
     print_step_info(flags, "After Merging:", lenses, reducedchi2)
-    
 
-    # Iteratively eliminate lenses that do not improve the chi^2 value
-    lens_floors = np.arange(1, len(lenses.x) + 1)
-    best_dist = np.abs(reducedchi2 - 1)
-    best_lenses = lenses
-    for lens_floor in lens_floors:
-        # Clone the lenses object
-        test_lenses = Lens(lenses.x, lenses.y, lenses.te, lenses.chi2)
-        test_lenses.iterative_elimination(lens_floor=lens_floor)
-        reducedchi2 = test_lenses.update_chi2_values(sources, use_shear, use_flexion)
-        new_dist = np.abs(reducedchi2 - 1)
-        if new_dist < best_dist:
-            best_dist = new_dist
-            best_lenses = test_lenses
-    lenses = best_lenses
+
+    # Choose the 'lens_floor' lenses which gives the lowest reduced chi^2 value
+    lenses.iterative_elimination(sources, reducedchi2, use_shear, use_flexion)
     reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
     print_step_info(flags, "After Iterative Elimination:", lenses, reducedchi2)
-    
+
 
     # Perform a final local minimization on the remaining lenses
     # NOTE - if the number of lenses is too large, this step can take a long time
-    # Right now, skip this step if there are more than 100 lenses
-    if len(lenses.x) < 100:
+    # Right now, skip this step if there are more than 150 lenses
+    if len(lenses.x) < 150:
         lenses.full_minimization(sources, use_shear, use_flexion)
         reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
         print_step_info(flags, "After Final Minimization:", lenses, reducedchi2)
-    
-    
+
+
     return lenses, reducedchi2
