@@ -6,9 +6,10 @@ import warnings
 import os
 import pipeline
 from utils import calculate_mass, mass_sheet_transformation, print_progress_bar
+from astropy.visualization import hist as fancy_hist
 import scipy.ndimage
-from astropy.visualization import hist as fancyhist
-
+from matplotlib.path import Path
+from scipy import ndimage
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -24,13 +25,10 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
         ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=norm)
 
     if conv is not None:
-        # Plot convergence contours on top of the optical image.
-        # Levels are set based on percentiles to highlight key features in the convergence map.
+        # Adjusted contour levels for better feature representation.
+        contour_levels = np.percentile(conv, np.linspace(60, 100, 5))
 
-        # Determine levels for contour lines using percentiles.
-        contour_levels = np.percentile(conv, np.linspace(70, 100, 7))
-
-        # Create contour lines for the convergence map.
+        # Contour lines with enhanced visibility.
         contours = ax.contour(
             X, Y, conv, 
             levels=contour_levels, 
@@ -39,31 +37,20 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
             linewidths=1.5
         )
 
-        # Overlay the convergence map with semi-transparency.
+        # Fine-tuned alpha value for better overlay visibility.
         color_map_overlay = ax.imshow(
             conv, 
             cmap='viridis', 
             origin='lower', 
             extent=extent, 
-            alpha=0.6, 
+            alpha=0.4, 
             vmin=0, 
             vmax=np.max(contour_levels)
         )
 
-        # Add a color bar to the plot for reference.
-        color_bar = plt.colorbar(color_map_overlay, ax=ax, pad=0.01)
-        color_bar.set_label(r'$\kappa$', rotation=270, labelpad=15)
-
-        # Label the contour lines with their respective values.
-        '''
-        ax.clabel(
-            contours, 
-            inline=True, 
-            fontsize=8, 
-            fmt='%2.2e', 
-            colors='black'
-        )
-        '''
+        # Customized color bar for clarity.
+        color_bar = plt.colorbar(color_map_overlay, ax=ax)
+        color_bar.set_label(r'$\kappa$', rotation=0, labelpad=10)
 
 
     if lenses is not None:
@@ -108,19 +95,13 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
     shear_mag = (q-1)/(q+1)
     e1 = shear_mag * np.cos(2*phi)
     e2 = shear_mag * np.sin(2*phi)
-  
+
     # Set xmax to be the largest distance from the center
     centroid = np.mean(x), np.mean(y)
     xmax = np.max(np.sqrt((x - centroid[0])**2 + (y - centroid[1])**2))
     # Create a source object
     acol = header.index('a')
     a = np.array(data[1:, acol])
-
-    test_source_object = pipeline.Source(x, y, e1, e2, f1, f2, 0, 0)
-
-    # valid_indices = test_source_object.filter_sources(a)
-
-    # x, y, e1, e2, f1, f2, a = x[valid_indices], y[valid_indices], e1[valid_indices], e2[valid_indices], f1[valid_indices], f2[valid_indices], a[valid_indices]
 
     # Compute noise parameters
     sigs_mag = np.mean([np.std(e1), np.std(e2)])
@@ -143,7 +124,7 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
     sources = pipeline.Source(x, y, e1, e2, f1, f2, sigs, sigf)
 
     # Perform lens position optimization
-    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, lens_floor = 1, flags=flags, use_shear=use_shear, use_flexion=use_flexion)
+    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=flags, use_shear=use_shear, use_flexion=use_flexion)
 
     # Move our sourecs and lenses back to the original centroid
     sources.x += centroid[0]
@@ -226,12 +207,8 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         kappa += lenses.te[k] / (2 * r)
     
     # Smooth the convergence map with a gaussian kernel (use an external function)
-    kappa = scipy.ndimage.gaussian_filter(kappa, sigma=2)
+    kappa = scipy.ndimage.gaussian_filter(kappa, sigma=4)
     
-    # Subtract out an average kappa field to remove features that are due to 'overfitting'
-    # avg_kappa_field = np.load('Data//a2744' + ('_par' if field == 'parallel' else '_clu') + '_avg_kappa_field.npy')
-    # kappa -= avg_kappa_field[2]
-
     # kappa = mass_sheet_transformation(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
     mass, mass_200 = calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
 
@@ -245,7 +222,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
     title += ' - Randomized' if randomize else ''
     if field == 'cluster':
-        title += '\n M(200 kpc) = ' + f'{mass:.3e}' + r' $M_\odot$'
+        title += '\n M = ' + f'{mass:.3e}' + r' $M_\odot$'
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -321,43 +298,140 @@ def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flex
     np.save(dir + file_name + '_avg_kappa_field', np.array([X, Y, avg_kappa_field]))
 
 
-def plot_lenses():
-    dir = 'Data//'
-    file_name = 'a2744' 
-    file_name += '_clu'
-    lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses.npy'))
-
-    # Sort and print the lenses by their einstein radius
-    sorted_indices = np.argsort(lenses.te)
-    sorted_indices = sorted_indices[::-1]
-
-    fig, ax = plt.subplots()
-    fancyhist(lenses.te, bins='freedman', ax=ax, histtype='step', color='black')
-    # Place a vertical line at the mean einstein radius
-    ax.axvline(np.mean(lenses.te), color='red', label='Mean Einstein Radius')
-    ax.axvline(np.median(lenses.te), color='blue', label='Median Einstein Radius')
-    ax.legend()
-    ax.set_xlabel(r'$\theta_E$ (arcsec)')
-    ax.set_ylabel('Number of Lenses')
-    ax.set_title('Abell 2744 Recovered Lenses')
-    ax.set_aspect('auto')
-    plt.savefig('Images//abel//A2744_lenses_hist.png')
+def plot_er_dist(merge_radius=1):
+    lenses = pipeline.Lens(*np.load('Data//a2744_clu_lenses.npy'))
+    # Remove lenses with negative Einstein radii
+    lenses = pipeline.Lens(lenses.x[lenses.te > 0], lenses.y[lenses.te > 0], lenses.te[lenses.te > 0], lenses.chi2[lenses.te > 0])
+    lenses.merge_close_lenses(merge_radius)
+    # Create a plot of the lensing field 
+    
+    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+    img_data = get_img_data(fits_file_path)[0]
+    img_data = [img_data[0], img_data[1]] # Stack the two epochs
+    arcsec_per_pixel = 0.03 # From the intrumentation documentation
+    extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
 
     fig, ax = plt.subplots()
-    cmap = ax.scatter(lenses.x, lenses.y, c=lenses.te, cmap='plasma', s = lenses.te*100)
+    for img in img_data:
+        # Allow for multiple images to be overlayed - allows for band or epoch stacking
+        norm = ImageNormalize(img, vmin=0, vmax=1, stretch=LogStretch())
+        ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=norm)
+    cmap = ax.scatter(lenses.x, lenses.y, c = lenses.te, cmap='plasma', s = lenses.te * 100, alpha=0.5)
     color_bar = plt.colorbar(cmap, ax=ax)
+    color_bar.set_label(r'$\theta_E$', rotation=270, labelpad=10)
     ax.set_xlabel('x (arcsec)')
     ax.set_ylabel('y (arcsec)')
-    ax.set_title('Abell 2744 Recovered Lenses')
+    ax.set_title('Abell 2744 - Recovered Lenses \n Merge Radius = {} arcsec'.format(merge_radius))
     ax.set_aspect('equal')
-    color_bar.set_label(r'$\theta_E$ (arcsec)', rotation=270, labelpad=15)
-    plt.savefig('Images//abel//A2744_lenses.png')
+    plt.savefig('Images//abel//mergers//field_{}.png'.format(merge_radius))
 
-    plt.show()
+    fig, ax = plt.subplots()
+    fancy_hist(lenses.te, bins='freedman', histtype='step', ax=ax)
+    ax.set_xlabel(r'$\theta_E$ (arcsec)')
+    ax.set_ylabel('Count')
+    ax.set_title('Abell 2744 - Einstein Radii Distribution \n Merge Radius = {} arcsec'.format(merge_radius))
+    plt.savefig('Images//abel//mergers//hist_{}.png'.format(merge_radius))
 
+
+def process_kappa_contours():
+    # Goal here is to identify the masses of individual regions of the cluster
+    # Work in progress
+
+    # Load the lens object
+    dir = 'Data//'
+    file_name = 'a2744' 
+    file_name += '_clu' 
+    lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses.npy'))
+    sources = pipeline.Source(*np.load(dir + file_name + '_sources.npy'))
+
+    # Load the image data
+    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+    img_data = get_img_data(fits_file_path)[0]
+    img_data = img_data[1]
+
+    # Build kappa
+    arcsec_per_pixel = 0.03 # From the intrumentation documentation
+    extent = [0, img_data.shape[1] * arcsec_per_pixel, 0, img_data.shape[0] * arcsec_per_pixel]
+
+    X = np.linspace(0, extent[1], int(extent[1]))
+    Y = np.linspace(0, extent[3], int(extent[3]))
+    X, Y = np.meshgrid(X, Y)
+    conv = np.zeros_like(X)
+
+    for k in range(len(lenses.x)):
+        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
+        conv += lenses.te[k] / (2 * r)
+
+
+    # Plotting the convergence map and contours
+    fig, ax = plt.subplots()
+    contour_levels = np.percentile(conv, np.linspace(50, 100, 10))  # Adjust the range and number of levels
+    contours = ax.contour(X, Y, conv, levels=contour_levels, cmap='plasma', linestyles='-', linewidths=1.5)
+    color_map_overlay = ax.imshow(conv, cmap='viridis', origin='lower', alpha=0.4, vmin=0, vmax=np.max(contour_levels))
+    color_bar = plt.colorbar(color_map_overlay, ax=ax)
+    color_bar.set_label(r'$\kappa$', rotation=0, labelpad=10)
+
+    # Check each contour collection, starting from the highest
+    for contour_collection in reversed(contours.collections):
+        paths = contour_collection.get_paths()
+        if paths:  # Check if there are any paths in this collection
+            masks = []
+            for contour_path in paths:
+                # Create a mask for each contour
+                mask = np.zeros(conv.shape, dtype=bool)
+                for polygon in contour_path.to_polygons():
+                    x, y = polygon[:, 0], polygon[:, 1]
+                    nx, ny = mask.shape[1], mask.shape[0]
+                    x, y = np.clip(x, 0, nx - 1), np.clip(y, 0, ny - 1)
+                    rr, cc = polygon[:, 1].astype(int), polygon[:, 0].astype(int)
+                    mask[rr, cc] = True
+                masks.append(mask)
+            break  # Exit the loop if we found a collection with paths
+
+    # Calculate mass for each region
+    masses = []
+    for mask in masks:
+        masked_kappa = np.where(mask, conv, 0)
+        mass = calculate_mass(masked_kappa, 0.308, 0.58, 1)  # replace z and kwargs with actual values
+        masses.append(mass[0] / 10**14)
+
+    # Output the masses
+    for i, mass in enumerate(masses):
+        print(f"Mass of Region {i+1}: {mass}")
+    
+    print(f"Total Mass: {np.sum(masses)}")
 
 
 if __name__ == '__main__':
+    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
     reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
-    # reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
-    
+
+    process_kappa_contours()
+
+    raise ValueError('Stop here')
+    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+
+    # Assuming get_img_data is a function that returns the image data
+    img_data = get_img_data(fits_file_path)[0]
+    combined_img_data = (img_data[1]) 
+    # Lets smooth the image a bit
+    combined_img_data = scipy.ndimage.gaussian_filter(combined_img_data, sigma=5)
+
+    arcsec_per_pixel = 0.03  # From the instrumentation documentation
+    extent = [0, combined_img_data.shape[1] * arcsec_per_pixel, 0, combined_img_data.shape[0] * arcsec_per_pixel]
+
+    norm = ImageNormalize(combined_img_data, vmin=0, vmax=1, stretch=LogStretch())
+
+    # Adjust the contour levels 
+    # Account for nan values
+    mean = np.mean(combined_img_data[np.isfinite(combined_img_data)])
+    std = np.std(combined_img_data[np.isfinite(combined_img_data)])
+    contour_levels = mean + std * np.array([-1, -0.5, 0, 0.5, 1])  # Fewer levels, focusing on significant deviations
+
+    plt.figure()
+    plt.imshow(combined_img_data, cmap='gray_r', origin='lower', extent=extent, norm=norm)
+    plt.contour(combined_img_data, levels=contour_levels, extent=extent, cmap='plasma', linestyles='-', linewidths=0.5)
+    plt.xlabel('x (arcsec)')
+    plt.ylabel('y (arcsec)')
+    plt.title('Abell 2744 - Brightness Contours')
+    plt.savefig('Images//abel//brightness_contours.png')
