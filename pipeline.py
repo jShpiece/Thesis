@@ -146,7 +146,7 @@ class Lens:
 
     def iterative_elimination(self, sources, reducedchi2, use_shear=True, use_flexion=True):
         # Iteratively eliminate lenses that do not improve the chi^2 value
-        lens_floors = np.arange(1, len(self.x) + 1)
+        lens_floors = np.arange(0, len(self.x) + 1)
         best_dist = np.abs(reducedchi2 - 1)
         best_lenses = self
         for lens_floor in lens_floors:

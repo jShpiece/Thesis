@@ -403,9 +403,8 @@ def process_kappa_contours():
 
 
 if __name__ == '__main__':
-    # reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
-    # reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=False)
-    # reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
 
     process_kappa_contours()
 
