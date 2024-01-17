@@ -149,7 +149,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_shear=True, use_flexion=T
     # Save and show the plot
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
     plt.savefig('Images//tests//breakdown_{}_lens_{}_source.png'.format(Nlens, Nsource))
-    # plt.show()
+    plt.show()
 
 
 def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1):
@@ -208,13 +208,7 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
 
 
 if __name__ == '__main__':
-    
-    # Small field
-    run_simple_test(Nlens=2, Nsource=20, xmax=10, flags=True, lens_random=False, source_random=True)
-
-    # Large field
-    run_simple_test(Nlens=1, Nsource=100, xmax=50, flags=True, lens_random=False, source_random=True)
-
+    visualize_pipeline_steps(1, 100, 50, use_shear=True, use_flexion=True)
     raise ValueError('Stop here')
 
     # Generate random realizations

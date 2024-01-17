@@ -2,6 +2,7 @@ import numpy as np
 from astropy.cosmology import Planck15 as cosmo
 from astropy.constants import c, G
 from astropy import units as u
+import scipy.ndimage
 
 # ------------------------
 # Terminal Utility Functions
@@ -163,6 +164,29 @@ def generate_combinations(N, m):
     return combinations_list
 
 
+def calculate_kappa(lenses, extent, smoothing_scale) -> tuple:
+    '''
+    Calculates the convergence map for a given set of lenses.
+    Parameters:
+        lenses (Lenses): The lenses.
+        extent (tuple): The extent of the convergence map in arcsec.
+        smoothing_scale (float): The smoothing scale in arcsec.
+    '''
+    X = np.linspace(0, extent[1], int(extent[1]))
+    Y = np.linspace(0, extent[3], int(extent[3]))
+    X, Y = np.meshgrid(X, Y)
+    kappa = np.zeros_like(X)
+
+    # Calculate the convergence map
+    for k in range(len(lenses.x)):
+        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
+        kappa += lenses.te[k] / (2 * r)
+    
+    # Smooth the convergence map with a gaussian kernel (use an external function)
+    kappa = scipy.ndimage.gaussian_filter(kappa, sigma=smoothing_scale)
+    return X, Y, kappa
+
+
 def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
     """
     Calculates the total mass within a convergence map.
@@ -209,6 +233,11 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
     total_mass_200kpc = np.sum(kappa_array[radius_array <= radius_200kpc]) * Sigma_crit * area_per_pixel
     # Convert to solar masses
     total_mass_200kpc_solar = (total_mass_200kpc).to(u.M_sun).value
+
+    # Write mass in terms of h (Hubble constant)
+    h = cosmo.H0.value / 100
+    total_mass_solar *= h
+    total_mass_200kpc_solar *= h
 
     return total_mass_solar, total_mass_200kpc_solar
 
