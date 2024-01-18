@@ -334,10 +334,8 @@ def plot_er_dist(merge_radius=1):
 
 
 if __name__ == '__main__':
-    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    # reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
     reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
-
-    process_kappa_contours()
 
     raise ValueError('Stop here')
     fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
