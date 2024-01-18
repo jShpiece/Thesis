@@ -403,7 +403,7 @@ def fit_lensing_field(sources, xmax, flags = False, use_shear=True, use_flexion=
     # Perform a final local minimization on the remaining lenses
     # NOTE - if the number of lenses is too large, this step can take a long time
     # Right now, skip this step if there are more than 150 lenses
-    if len(lenses.x) < 150:
+    if len(lenses.x) < 100:
         lenses.full_minimization(sources, use_shear, use_flexion)
         reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
         print_step_info(flags, "After Final Minimization:", lenses, reducedchi2)

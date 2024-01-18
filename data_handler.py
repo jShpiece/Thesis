@@ -333,80 +333,9 @@ def plot_er_dist(merge_radius=1):
     plt.savefig('Images//abel//mergers//hist_{}.png'.format(merge_radius))
 
 
-def process_kappa_contours():
-    # Goal here is to identify the masses of individual regions of the cluster
-    # Work in progress
-
-    # Load the lens object
-    dir = 'Data//'
-    file_name = 'a2744' 
-    file_name += '_clu' 
-    lenses = pipeline.Lens(*np.load(dir + file_name + '_lenses.npy'))
-    sources = pipeline.Source(*np.load(dir + file_name + '_sources.npy'))
-
-    # Load the image data
-    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-    img_data = get_img_data(fits_file_path)[0]
-    img_data = img_data[1]
-
-    # Build kappa
-    arcsec_per_pixel = 0.03 # From the intrumentation documentation
-    extent = [0, img_data.shape[1] * arcsec_per_pixel, 0, img_data.shape[0] * arcsec_per_pixel]
-
-    X = np.linspace(0, extent[1], int(extent[1]))
-    Y = np.linspace(0, extent[3], int(extent[3]))
-    X, Y = np.meshgrid(X, Y)
-    conv = np.zeros_like(X)
-
-    for k in range(len(lenses.x)):
-        r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0 
-        conv += lenses.te[k] / (2 * r)
-
-
-    # Plotting the convergence map and contours
-    fig, ax = plt.subplots()
-    contour_levels = np.percentile(conv, np.linspace(50, 100, 10))  # Adjust the range and number of levels
-    contours = ax.contour(X, Y, conv, levels=contour_levels, cmap='plasma', linestyles='-', linewidths=1.5)
-    color_map_overlay = ax.imshow(conv, cmap='viridis', origin='lower', alpha=0.4, vmin=0, vmax=np.max(contour_levels))
-    color_bar = plt.colorbar(color_map_overlay, ax=ax)
-    color_bar.set_label(r'$\kappa$', rotation=0, labelpad=10)
-
-    # Check each contour collection, starting from the highest
-    for contour_collection in reversed(contours.collections):
-        paths = contour_collection.get_paths()
-        if paths:  # Check if there are any paths in this collection
-            masks = []
-            for contour_path in paths:
-                # Create a mask for each contour
-                mask = np.zeros(conv.shape, dtype=bool)
-                for polygon in contour_path.to_polygons():
-                    x, y = polygon[:, 0], polygon[:, 1]
-                    nx, ny = mask.shape[1], mask.shape[0]
-                    x, y = np.clip(x, 0, nx - 1), np.clip(y, 0, ny - 1)
-                    rr, cc = polygon[:, 1].astype(int), polygon[:, 0].astype(int)
-                    mask[rr, cc] = True
-                masks.append(mask)
-            break  # Exit the loop if we found a collection with paths
-
-    # Calculate mass for each region
-    masses = []
-    for mask in masks:
-        masked_kappa = np.where(mask, conv, 0)
-        mass = calculate_mass(masked_kappa, 0.308, 0.58, 1)  # replace z and kwargs with actual values
-        masses.append(mass[0] / 10**14)
-
-    # Output the masses
-    for i, mass in enumerate(masses):
-        print(f"Mass of Region {i+1}: {mass}")
-    
-    print(f"Total Mass: {np.sum(masses)}")
-
-
 if __name__ == '__main__':
-    reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    # reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
     reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
-
-    process_kappa_contours()
 
     raise ValueError('Stop here')
     fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
