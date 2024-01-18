@@ -197,49 +197,38 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
         z_s (float): The redshift of the source.
         pixel_scale (float): The pixel scale of the convergence map in arcsec.
     """
-    # Convert pixel_scale from arcsec to radians
+    # Define some constants
+    h = cosmo.H0.value / 100
     pixel_scale_rad = (pixel_scale * u.arcsec).to(u.rad).value
-
-    # Calculate the angular diameter distances involved
+    central_pixel = kappa_array.shape[0] // 2
+    # Including our angular diameter distances for this redshift
     D_l = cosmo.angular_diameter_distance(z_l).to(u.meter)
     D_s = cosmo.angular_diameter_distance(z_s).to(u.meter)
     D_ls = cosmo.angular_diameter_distance_z1z2(z_l, z_s).to(u.meter)
-
-    # Calculate the critical surface mass density
+    # Now compute the critical surface mass density in units of kg/m^2
     Sigma_crit = (c**2 / (4 * np.pi * G)) * (D_s / (D_l * D_ls))
-
-    # Calculate the area per pixel
+    # Compute the area per pixel in square meters
     area_per_pixel = (pixel_scale_rad * D_l)**2  # Area in m^2
 
-    # Calculate the total mass
-    # Only consider the pixels with positive convergence
-    total_mass = np.sum(kappa_array[kappa_array > 0]) * Sigma_crit * area_per_pixel
-
-    # Convert the mass to solar masses for easier interpretation
-    total_mass_solar = (total_mass).to(u.M_sun).value
-
-    # Let's also calculate M(R<200kpc) for comparison with the literature
-    # First, choose a center pixel
-    center_pixel = kappa_array.shape[0] // 2
-    # Next, calculate the radius of each pixel from the center pixel
-    radius_array = np.zeros(kappa_array.shape)
+    # Build distance map from the center - this is an array identical to kappa, with each pixel containing the distance from the center
+    # This is useful for calculating the mass within a given radius
+    distance_map = np.zeros_like(kappa_array)
     for i in range(kappa_array.shape[0]):
         for j in range(kappa_array.shape[1]):
-            radius_array[i, j] = np.sqrt((i - center_pixel)**2 + (j - center_pixel)**2)
-    # Get 200 kpc in pixels
-    D = (200 * u.kpc).to(u.meter).value / D_l.value
-    radius_200kpc = D / pixel_scale_rad # In pixels
-    # Calculate the total mass within 200 kpc
-    total_mass_200kpc = np.sum(kappa_array[radius_array <= radius_200kpc]) * Sigma_crit * area_per_pixel
-    # Convert to solar masses
-    total_mass_200kpc_solar = (total_mass_200kpc).to(u.M_sun).value
+            distance_map[i, j] = np.sqrt((i - central_pixel)**2 + (j - central_pixel)**2)
+    
+    # Find the mass which lies within 1 Mpc of the center of the map
+    # Convert 1 Mpc to radians, at the relevant distance
+    one_mpc_rad = (200 * u.kpc).to(u.m).value / D_l.value
+    # Converge the radius to pixels
+    one_mpc_rad /= pixel_scale_rad
+    # Find the pixels that lie inside this radius (measured from the center of the map)
+    pixels_within_radius = distance_map <= one_mpc_rad
+    # Calculate the mass within this radius
+    total_mass = np.sum(kappa_array[pixels_within_radius]) * Sigma_crit * area_per_pixel
+    total_mass_solar = (total_mass).to(u.M_sun).value * h # Give all masses in units of h^-1 M_sun
 
-    # Write mass in terms of h (Hubble constant)
-    h = cosmo.H0.value / 100
-    total_mass_solar *= h
-    total_mass_200kpc_solar *= h
-
-    return total_mass_solar, total_mass_200kpc_solar
+    return total_mass_solar
 
 
 def mass_sheet_transformation(kappa, k):

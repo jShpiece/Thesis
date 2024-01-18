@@ -210,7 +210,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     kappa = scipy.ndimage.gaussian_filter(kappa, sigma=4)
     
     # kappa = mass_sheet_transformation(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
-    mass, mass_200 = calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
+    mass = calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
 
     # Create labels for the plot
     dir = 'Images//abel//'
@@ -222,7 +222,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
     title += ' - Randomized' if randomize else ''
     if field == 'cluster':
-        title += '\n M = ' + f'{mass:.3e}' + r' $M_\odot$'
+        title += '\n M = ' + f'{mass:.3e}' + r' $h^{-1} M_\odot$'
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -334,33 +334,4 @@ def plot_er_dist(merge_radius=1):
 
 
 if __name__ == '__main__':
-    # reconstruct_a2744(field='parallel', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
-
-    raise ValueError('Stop here')
-    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-
-    # Assuming get_img_data is a function that returns the image data
-    img_data = get_img_data(fits_file_path)[0]
-    combined_img_data = (img_data[1]) 
-    # Lets smooth the image a bit
-    combined_img_data = scipy.ndimage.gaussian_filter(combined_img_data, sigma=5)
-
-    arcsec_per_pixel = 0.03  # From the instrumentation documentation
-    extent = [0, combined_img_data.shape[1] * arcsec_per_pixel, 0, combined_img_data.shape[0] * arcsec_per_pixel]
-
-    norm = ImageNormalize(combined_img_data, vmin=0, vmax=1, stretch=LogStretch())
-
-    # Adjust the contour levels 
-    # Account for nan values
-    mean = np.mean(combined_img_data[np.isfinite(combined_img_data)])
-    std = np.std(combined_img_data[np.isfinite(combined_img_data)])
-    contour_levels = mean + std * np.array([-1, -0.5, 0, 0.5, 1])  # Fewer levels, focusing on significant deviations
-
-    plt.figure()
-    plt.imshow(combined_img_data, cmap='gray_r', origin='lower', extent=extent, norm=norm)
-    plt.contour(combined_img_data, levels=contour_levels, extent=extent, cmap='plasma', linestyles='-', linewidths=0.5)
-    plt.xlabel('x (arcsec)')
-    plt.ylabel('y (arcsec)')
-    plt.title('Abell 2744 - Brightness Contours')
-    plt.savefig('Images//abel//brightness_contours.png')
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True)
