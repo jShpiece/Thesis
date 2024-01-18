@@ -94,6 +94,7 @@ def eR_penalty_function(eR, lower_limit=0.0, upper_limit=20.0, lambda_penalty_up
 
 
 def compute_chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
+    # Extract the data from the sources
     x, y, e1data, e2data, f1data, f2data = sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2
     # Initialize chi^2 value
     chi2val = 0.0
@@ -130,38 +131,6 @@ def compute_chi2(sources, lenses, sigf, sigs, fwgt=1.0, swgt=1.0):
     chi2val += total_penalty
     
     return chi2val
-
-
-def generate_combinations(N, m):
-    """Generates all combinations of m elements from a set of N elements."""
-    # Create an array of indices from 0 to N-1
-    indices = np.arange(N)
-
-    # Initialize an empty list to store the combinations
-    combinations_list = []
-
-    # Generate combinations using recursion
-    def generate_combinations_recursive(current_combination, remaining_indices, m):
-        if m == 0:
-            combinations_list.append(current_combination)
-            return
-
-        if len(remaining_indices) < m:
-            return
-
-        first_element = remaining_indices[0]
-        new_combination = current_combination + [first_element]
-        new_remaining_indices = remaining_indices[1:]
-
-        # Include the first element in the combination
-        generate_combinations_recursive(new_combination, new_remaining_indices, m - 1)
-
-        # Exclude the first element from the combination
-        generate_combinations_recursive(current_combination, new_remaining_indices, m)
-
-    generate_combinations_recursive([], indices, m)
-
-    return combinations_list
 
 
 def calculate_kappa(lenses, extent, smoothing_scale) -> tuple:
@@ -211,7 +180,6 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
     area_per_pixel = (pixel_scale_rad * D_l)**2  # Area in m^2
 
     # Build distance map from the center - this is an array identical to kappa, with each pixel containing the distance from the center
-    # This is useful for calculating the mass within a given radius
     distance_map = np.zeros_like(kappa_array)
     for i in range(kappa_array.shape[0]):
         for j in range(kappa_array.shape[1]):
@@ -219,7 +187,7 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
     
     # Find the mass which lies within 1 Mpc of the center of the map
     # Convert 1 Mpc to radians, at the relevant distance
-    one_mpc_rad = (200 * u.kpc).to(u.m).value / D_l.value
+    one_mpc_rad = (1 * u.Mpc).to(u.meter) / D_l
     # Converge the radius to pixels
     one_mpc_rad /= pixel_scale_rad
     # Find the pixels that lie inside this radius (measured from the center of the map)

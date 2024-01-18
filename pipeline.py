@@ -398,8 +398,7 @@ def fit_lensing_field(sources, xmax, flags = False, use_shear=True, use_flexion=
     # Merge lenses that are too close to each other
     # Try a merger threshold based on the source density
     ns = len(sources.x) / (2 * xmax)**2
-    merger_threshold = 1 / np.sqrt(ns)
-    print("Merger threshold:", merger_threshold)
+    merger_threshold = int(1 / np.sqrt(ns))
     # If the merger threshold is too small, set it to 1
     if merger_threshold < 1:
         merger_threshold = 1

@@ -72,6 +72,24 @@ def get_img_data(fits_file_path) -> np.ndarray:
     return img_data, header
 
 
+def get_file_paths(cluster='a2744', field='cluster'):
+    if cluster == 'a2744':
+        if field == 'cluster':
+            fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+            csv_file_path = 'Data/a2744_clu_lenser.csv'
+            vmax = 1 # Set the maximum value for the image normalization
+            dx = 115
+            dy = 55
+        elif field == 'parallel':
+            fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
+            csv_file_path = 'Data/a2744_par_lenser.csv'
+            vmax = 0.1 # Set the maximum value for the image normalization
+            dx = 865
+            dy = 400
+    
+    return fits_file_path, csv_file_path, vmax, dx, dy
+
+
 def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=True, use_flexion=True):
     # Take in a file of sources and reconstruct the lensing system
 
@@ -81,27 +99,25 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
     with open(file, 'r') as f:
         header = f.readline().strip().split(',')
     # Get the column indices
-    xcol, ycol, qcol, phicol, f1col, f2col = header.index('xs'), header.index('ys'), header.index('q'), header.index('phi'), header.index('f1'), header.index('f2')
+    xcol, ycol, acol = header.index('xs'), header.index('ys'), header.index('a') # Position terms
+    qcol, phicol = header.index('q'), header.index('phi') # Shape terms
+    f1col, f2col = header.index('f1'), header.index('f2') # Flexion terms
     # Extract the data - omit the header
-    x, y, q, phi, f1, f2 = data[1:, xcol], data[1:, ycol], data[1:, qcol], data[1:, phicol], data[1:, f1col], data[1:, f2col]
-    # Set these to be arrays 
-    x, y, q, phi, f1, f2 = np.array(x), np.array(y), np.array(q), np.array(phi), np.array(f1), np.array(f2)
+    x, y, a = data[1:, xcol], data[1:, ycol], data[1:, acol]
+    q, phi = data[1:, qcol], data[1:, phicol]
+    f1, f2 = data[1:, f1col], data[1:, f2col]
 
-    # Apply offsets to the x and y coordinates - this corrects for miscommunication between the pipeline and the lenser
+    # Apply offsets to the x and y coordinates - this corrects for miscommunication between the pipeline and image
     x += dx 
     y += dy 
-
-    # Calculate the shear from q and phi
-    shear_mag = (q-1)/(q+1)
-    e1 = shear_mag * np.cos(2*phi)
-    e2 = shear_mag * np.sin(2*phi)
 
     # Set xmax to be the largest distance from the center
     centroid = np.mean(x), np.mean(y)
     xmax = np.max(np.sqrt((x - centroid[0])**2 + (y - centroid[1])**2))
-    # Create a source object
-    acol = header.index('a')
-    a = np.array(data[1:, acol])
+
+    # Calculate the shear from the shape parameters
+    shear_mag = (q-1)/(q+1)
+    e1, e2 = shear_mag * np.cos(2*phi), shear_mag * np.sin(2*phi)
 
     # Compute noise parameters
     sigs_mag = np.mean([np.std(e1), np.std(e2)])
@@ -120,10 +136,8 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
     x -= centroid[0]
     y -= centroid[1]
 
-    # Create source object
+    # Create source object and perform the lensing fit
     sources = pipeline.Source(x, y, e1, e2, f1, f2, sigs, sigf)
-
-    # Perform lens position optimization
     recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=flags, use_shear=use_shear, use_flexion=use_flexion)
 
     # Move our sourecs and lenses back to the original centroid
@@ -151,6 +165,9 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
 
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
 
+
+    fits_file_path, csv_file_path, vmax, dx, dy = get_file_paths(field=field)
+    '''
     if field == 'cluster':
         fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
         csv_file_path = 'Data/a2744_clu_lenser.csv'
@@ -165,6 +182,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         dy = 400
     else:
         raise ValueError('field must be "cluster" or "parallel"')
+    '''
 
     img_data, _ = get_img_data(fits_file_path)
     if field == 'cluster':
