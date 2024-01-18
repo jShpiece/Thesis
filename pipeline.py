@@ -20,19 +20,9 @@ class Source:
 
 
     def filter_sources(self, a, max_flexion=0.5):
-        # Select indices where both f1 and f2 are under 1 (absolute value)
+        # Make cuts in the source data based on size and flexion
         valid_indices = (np.abs(self.f1) <= max_flexion) & (np.abs(self.f2) <= max_flexion)
-
-        '''     
-        F = np.sqrt(self.f1**2 + self.f2**2)
-        aF = a * F
-
-        # Filter out anything where aF > 1
-        valid_indices = (np.abs(aF) <= 1)
-        '''
-
         self.x, self.y, self.e1, self.e2, self.f1, self.f2 = self.x[valid_indices], self.y[valid_indices], self.e1[valid_indices], self.e2[valid_indices], self.f1[valid_indices], self.f2[valid_indices]
-        
         return valid_indices
 
 
@@ -42,8 +32,32 @@ class Source:
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
         r = gamma / flexion # A characteristic distance from the source
+        te = 2 * gamma * np.abs(r) # The Einstein radius of the lens
+        
+        '''
+        # Let's try something - also include the negative lenses - this will double the number of lenses
+        r2 = -gamma / flexion
+        te2 = -2 * gamma * np.abs(r)
 
-        return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(2 * gamma * np.abs(r)), np.empty_like(self.x))
+        # These are the positive predictions
+        xl = np.array(self.x + r * np.cos(phi))
+        yl = np.array(self.y + r * np.sin(phi))
+        te = np.array(te)
+
+        # These are the negative predictions
+        xl2 = np.array(self.x + r2 * np.cos(phi))
+        yl2 = np.array(self.y + r2 * np.sin(phi))
+        te2 = np.array(te2)
+
+        # Combine the positive and negative predictions
+        xl = np.concatenate((xl, xl2))
+        yl = np.concatenate((yl, yl2))
+        te = np.concatenate((te, te2))
+        
+        return Lens(xl, yl, te, np.empty_like(xl))
+        '''
+
+        return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
 
 
     def apply_lensing_effects(self, lenses):
