@@ -331,6 +331,7 @@ def print_step_info(flags,message,lenses,reducedchi2):
         print('Number of lenses: ', len(lenses.x))
         if reducedchi2 is not None:
             print('Chi^2: ', reducedchi2)
+            print('All chi2 values are nan: ', np.all(np.isnan(lenses.chi2)))
 
 
 def chi2wrapper(guess, params):
@@ -382,6 +383,9 @@ def fit_lensing_field(sources, xmax, flags = False, use_shear=True, use_flexion=
     reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
     print_step_info(flags, "Initial Guesses:", lenses, reducedchi2)
 
+    # Remove any candidates with an undefined te
+    valid_indices = np.isfinite(lenses.te)
+    lenses.x, lenses.y, lenses.te, lenses.chi2 = lenses.x[valid_indices], lenses.y[valid_indices], lenses.te[valid_indices], lenses.chi2[valid_indices]
 
     # Optimize lens positions via local minimization
     lenses.optimize_lens_positions(sources, use_shear, use_flexion)

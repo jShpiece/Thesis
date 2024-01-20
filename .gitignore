@@ -2,9 +2,8 @@
 /__pycache__
 /JWST
 /MDARK
-/collatz.py
-/portfolio.py
-/Machine Learning Toy.py
 /Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits
 /Data/jw02756-o003_t001_nircam_clear-f444w_i2d.fits
 /Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits
+/Data/JWST/Cluster Field/Image Data/
+/Data/JWST/Cluster Field/Segmentation Maps/
