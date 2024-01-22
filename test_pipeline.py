@@ -121,12 +121,12 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_shear=True, use_flexion=T
     reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Initial Lens Positions', ax=axarr[0,0])
 
-    '''
+    
     # Step 2: Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources)
     reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Optimized Lens Positions', ax=axarr[0,1], legend=False)
-    '''
+    
     
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax)
@@ -210,7 +210,7 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
 
 
 if __name__ == '__main__':
-    visualize_pipeline_steps(1, 100, 50, use_shear=True, use_flexion=True)
+    visualize_pipeline_steps(2, 100, 50, use_shear=True, use_flexion=True)
     raise ValueError('Stop here')
 
     # Generate random realizations

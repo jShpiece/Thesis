@@ -102,10 +102,12 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
     xcol, ycol, acol = header.index('xs'), header.index('ys'), header.index('a') # Position terms
     qcol, phicol = header.index('q'), header.index('phi') # Shape terms
     f1col, f2col = header.index('f1'), header.index('f2') # Flexion terms
+    g1col, g2col = header.index('g1'), header.index('g2') # Shear terms
     # Extract the data - omit the header
     x, y, a = data[1:, xcol], data[1:, ycol], data[1:, acol]
     q, phi = data[1:, qcol], data[1:, phicol]
     f1, f2 = data[1:, f1col], data[1:, f2col]
+    g1, g2 = data[1:, g1col], data[1:, g2col]
 
     # Apply offsets to the x and y coordinates - this corrects for miscommunication between the pipeline and image
     x += dx 
@@ -126,6 +128,9 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
     sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
     sigf = sigaf / a 
 
+    sigg = np.mean([np.std(g1), np.std(g2)])
+    sigg = np.ones_like(x) * sigg
+
     if randomize:
         # randomize the e1, e2 and f1, f2 vectors by rotating them by a random angle
         rand_angle = np.random.uniform(0, 2*np.pi, len(e1))
@@ -137,7 +142,7 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
     y -= centroid[1]
 
     # Create source object and perform the lensing fit
-    sources = pipeline.Source(x, y, e1, e2, f1, f2, sigs, sigf)
+    sources = pipeline.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg)
     recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=flags, use_shear=use_shear, use_flexion=use_flexion)
 
     # Move our sourecs and lenses back to the original centroid
@@ -219,12 +224,16 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     file_name = 'A2744_kappa_'
     file_name += 'par' if field == 'parallel' else 'clu'
     file_name += '_rand' if randomize else ''
+    file_name += '_shear' if use_shear and not use_flexion else ''
+    file_name += '_flexion' if use_flexion and not use_shear else ''
 
     title = 'Abell 2744 Convergence Map - '
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
     title += ' - Randomized' if randomize else ''
     if field == 'cluster':
         title += '\n M = ' + f'{mass:.3e}' + r' $h^{-1} M_\odot$'
+    title += '\n Shear only' if use_shear and not use_flexion else ''
+    title += '\n Flexion only' if not use_shear and use_flexion else ''
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -336,4 +345,4 @@ def plot_er_dist(merge_radius=1):
 
 
 if __name__ == '__main__':
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
