@@ -187,7 +187,7 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
     
     # Find the mass which lies within 1 Mpc of the center of the map
     # Convert 1 Mpc to radians, at the relevant distance
-    one_mpc_rad = (1 * u.Mpc).to(u.meter) / D_l
+    one_mpc_rad = (500 * u.kpc).to(u.meter) / D_l
     # Converge the radius to pixels
     one_mpc_rad /= pixel_scale_rad
     # Find the pixels that lie inside this radius (measured from the center of the map)

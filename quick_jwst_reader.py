@@ -105,13 +105,16 @@ def reconstructor():
     lenser_path = 'Data/JWST/Cluster Field/Catalogs/F115W_flexion.pkl'
     img_path = 'Data\JWST\Cluster Field\Image Data\jw02756-o003_t001_nircam_clear-f115w_i2d.fits'
     cat_path = 'Data\JWST\Cluster Field\Catalogs\stacked_cat.ecsv'
+
+    z_lens = 0.308
+    z_source = 0.5
     
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
     # naive_run(lenser_path, cat_path, img_path)
 
     # Load in the data
     lenses = pipeline.Lens(*np.load('Data/JWST/lenses.npy', allow_pickle=True))
-    sources = pipeline.Source(*np.load('Data/JWST/sources.npy', allow_pickle=True))
+    # sources = pipeline.Source(*np.load('Data/JWST/sources.npy', allow_pickle=True))
     img, header = get_img_data(img_path)
     cdelt = header['CDELT2'] * u.deg 
     cdelt = cdelt.to(u.arcsec).value
@@ -149,11 +152,11 @@ def reconstructor():
     color_bar = plt.colorbar(color_map_overlay, ax=ax)
     color_bar.set_label(r'$\kappa$', rotation=0, labelpad=10)
 
-    ax.scatter(lenses.x, lenses.y, marker='x', color='red', s=100, label='Lenses')
-
     ax.set_xlabel('RA (arcsec)')
     ax.set_ylabel('Dec (arcsec)')
-    ax.set_title('Abell 2744 Convergence Map - JWST Data')
+    mass = utils.calculate_mass(kappa, z_lens, z_source, 1)
+
+    ax.set_title('Abell 2744 Convergence Map - JWST Data \n' + f'{mass:.3e}' + r' $h^{-1} M_\odot$')
     plt.savefig('Images/JWST_flexion_lens_map.png', dpi=300)
     plt.show()
 
@@ -180,6 +183,7 @@ if __name__ == '__main__':
     f1_jwst = f1_jwst / cdelt
     f2_jwst = f2_jwst / cdelt
     a_jwst = a_jwst * cdelt
+
 
     ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst = filter_data(ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst)
 
@@ -277,10 +281,10 @@ if __name__ == '__main__':
     ax.scatter(f2_hst*a_hst, f2_jwst*a_jwst, s=10, label='a*F2: correlation = {}'.format(np.round(np.corrcoef(f2_hst*a_hst, f2_jwst*a_jwst)[0,1], 2)))
     # Create an agreement line
     x = np.linspace(-0.5, 0.5, 100)
+    print(np.corrcoef(x, x)[0,1])
     ax.plot(x, x, color='black', linestyle='--', label='Agreement')
     ax.set_xlabel('HST')
     ax.set_ylabel('JWST')
     ax.set_title('aF Comparison')
     ax.legend()
     plt.savefig('Images/af.png', dpi=300)
-

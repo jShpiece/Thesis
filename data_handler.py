@@ -167,22 +167,6 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
 
 
     fits_file_path, csv_file_path, vmax, dx, dy = get_file_paths(field=field)
-    '''
-    if field == 'cluster':
-        fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-        csv_file_path = 'Data/a2744_clu_lenser.csv'
-        vmax = 1 # Set the maximum value for the image normalization
-        dx = 115
-        dy = 55
-    elif field == 'parallel':
-        fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
-        csv_file_path = 'Data/a2744_par_lenser.csv'
-        vmax = 0.1 # Set the maximum value for the image normalization
-        dx = 865
-        dy = 400
-    else:
-        raise ValueError('field must be "cluster" or "parallel"')
-    '''
 
     img_data, _ = get_img_data(fits_file_path)
     if field == 'cluster':
@@ -352,4 +336,4 @@ def plot_er_dist(merge_radius=1):
 
 
 if __name__ == '__main__':
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True)
