@@ -92,7 +92,7 @@ def run_simple_test(Nlens, Nsource, xmax, flags=False, lens_random=False, source
     sources = pipeline.createSources(lenses, ns=Nsource, randompos=source_random, xmax=xmax)
 
     # Perform lens position optimization
-    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=flags, use_shear=True, use_flexion=True)
+    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=flags, use_flags=[True, True, True])
     
     print('Time elapsed:', time.time() - start_time)
     
@@ -101,7 +101,7 @@ def run_simple_test(Nlens, Nsource, xmax, flags=False, lens_random=False, source
     plt.show()
 
 
-def visualize_pipeline_steps(Nlens, Nsource, xmax, use_shear=True, use_flexion=True):
+def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     """Visualizes each step of the lensing reconstruction pipeline.
     params:
         nlens: number of lenses
@@ -112,40 +112,42 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_shear=True, use_flexion=T
     true_lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
     sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
 
-    # Arrange a plot with 5 subplots in 2 rows
+
+    # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
     fig.suptitle('Lensing Reconstruction Pipeline', fontsize=16)
 
+
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess()
-    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Initial Lens Positions', ax=axarr[0,0])
 
     
     # Step 2: Optimize guesses with local minimization
-    lenses.optimize_lens_positions(sources)
-    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    lenses.optimize_lens_positions(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Optimized Lens Positions', ax=axarr[0,1], legend=False)
     
     
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax)
-    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Filtered Lens Positions', ax=axarr[0,2], legend=False)
 
     # Step 4: Merge lenses that are too close to each other
     lenses.merge_close_lenses(merger_threshold=1)
-    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Merged Lens Positions', ax=axarr[1,0], legend=False)
 
     # Step 5: Iterative elimination
-    lenses.iterative_elimination(sources, reducedchi2, use_shear, use_flexion)
-    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    lenses.iterative_elimination(sources, reducedchi2, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Iterative Elimination', ax=axarr[1,1], legend=False)
 
     # Step 6: Final minimization
-    lenses.full_minimization(sources, sigf, sigs)
-    reducedchi2 = lenses.update_chi2_values(sources, use_shear, use_flexion)
+    lenses.full_minimization(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
 
     # Save and show the plot
@@ -168,7 +170,7 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
     print_progress_bar(0, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
     
     for trial in range(Ntrials):
-        sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
+        sources = pipeline.createSources(true_lenses, ns=Nsource, sigs=sigs, sigf=sigf, sig_g = 2*sigf, randompos=True, xmax=xmax)
         lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False)
         
         num_lenses_recovered = len(lenses.x)
@@ -189,7 +191,7 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
     return xsol, ysol, er, true_lenses
 
 
-def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_random=False, source_random=True):
+def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_random=False, source_random=True, use_flags=[True, True, True]):
     '''
     This runs a simple test of the algorithm, and returns the number of lenses recovered.
     Use this to determine whether the algorithm is able to recover the correct number of lenses when 
@@ -197,10 +199,10 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
     '''
     # Initialize true lens and source configurations
     lenses = pipeline.createLenses(nlens=Nlens, randompos=lens_random, xmax=xmax)
-    sources = pipeline.createSources(lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=source_random, xmax=xmax)
+    sources = pipeline.createSources(lenses, ns=Nsource, sigs=sigs, sigf=sigf, sig_g = 2*sigf, randompos=source_random, xmax=xmax)
 
     # Perform lens position optimization
-    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False)
+    recovered_lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False, use_flags=use_flags)
     # Don't count any lenses with an einstein radius of 0
     num_recovered = 0
     for eR in recovered_lenses.te:
@@ -209,27 +211,49 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
     return num_recovered
 
 
-if __name__ == '__main__':
-    visualize_pipeline_steps(2, 100, 50, use_shear=True, use_flexion=True)
-    raise ValueError('Stop here')
+# ------------------------
+# Helper Functions
+# ------------------------
 
-    # Generate random realizations
+
+def visualize_examples(use_shear, use_flexion, use_g_flexion):
+    # Generate a set of simple examples
+    use_flags = [use_shear, use_flexion, use_g_flexion]
+
+    # Example 1: 1 lens, 1 source
+    visualize_pipeline_steps(1, 1, 10, use_flags)
+
+    # Example 2: 1 lens, 2 sources
+    visualize_pipeline_steps(1, 2, 10, use_flags)
+
+    # Example 3: 2 lenses, 1 source
+    visualize_pipeline_steps(2, 1, 10, use_flags)
+
+    # Example 4: 1 lens, 10 sources
+    visualize_pipeline_steps(1, 10, 10, use_flags)
+
+    # Example 5: 2 lenses, 10 sources
+    visualize_pipeline_steps(2, 10, 10, use_flags)
+
+    # Example 6: 1 lens, 100 sources
+    visualize_pipeline_steps(1, 100, 50, use_flags)
+
+    # Example 7: 2 lenses, 100 sources
+    visualize_pipeline_steps(2, 100, 50, use_flags)
+
+
+def accuracy_tests(use_shear, use_flexion, use_g_flexion):
+# Generate random realizations
     Ntrials = 1000
-    Nlens = [2]
+    Nlens = [1, 2]
     Nsource = 100
     xmax = 50
 
     for nlens in Nlens:
-        xsol, ysol, er = np.load(f'Data//xsol_{nlens}_lens_{Nsource}_source.npy'), np.load(f'Data//ysol_{nlens}_lens_{Nsource}_source.npy'), np.load(f'Data//er_{nlens}_lens_{Nsource}_source.npy')
-        true_lenses = pipeline.createLenses(nlens=nlens, randompos=False, xmax=xmax)
+        xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, sigf=sigf, sigs=sigs)
         plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, distinguish_lenses=False)
     
-    raise ValueError('Stop here')
-
-    Ntrials = 1000
-    Nsource = 100
-    xmax = 50
-    Nlens = [1, 2]
+    raise SystemExit
     # Assess number of lenses recovered
     # Use the same constants as above
     for nlens in Nlens:
@@ -252,3 +276,7 @@ if __name__ == '__main__':
         plt.tight_layout()
         plt.savefig(f'Images//tests//num_recovered_{nlens}_lens_{Nsource}_source_{Ntrials}.png')
         plt.close()
+
+
+if __name__ == '__main__':
+    visualize_pipeline_steps(1, 10, 10, [True, True, True])

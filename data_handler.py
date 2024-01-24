@@ -90,7 +90,7 @@ def get_file_paths(cluster='a2744', field='cluster'):
     return fits_file_path, csv_file_path, vmax, dx, dy
 
 
-def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=True, use_flexion=True):
+def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_flags=[True, True, True]):
     # Take in a file of sources and reconstruct the lensing system
 
     # Read in the data (csv)
@@ -143,7 +143,7 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
 
     # Create source object and perform the lensing fit
     sources = pipeline.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg)
-    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=flags, use_shear=use_shear, use_flexion=use_flexion)
+    recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=flags, use_flags=use_flags)
 
     # Move our sourecs and lenses back to the original centroid
     sources.x += centroid[0]
@@ -154,7 +154,7 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_shear=T
     return recovered_lenses, sources, xmax, reducedchi2
 
 
-def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_shear=True, use_flexion=True):
+def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_flags=[True, True, True]):
     '''
     A handler function to plot the lensing field of Abell 2744 - either the cluster or parallel field.
     --------------------
@@ -180,7 +180,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         img_data = [img_data]
 
     if full_reconstruction:
-        lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, randomize=randomize, use_shear=use_shear, use_flexion=use_flexion)
+        lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, randomize=randomize, use_flags=use_flags)
 
         # Save the class objects so that we can replot without having to rerun the code
         if randomize:
@@ -224,16 +224,23 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     file_name = 'A2744_kappa_'
     file_name += 'par' if field == 'parallel' else 'clu'
     file_name += '_rand' if randomize else ''
-    file_name += '_shear' if use_shear and not use_flexion else ''
-    file_name += '_flexion' if use_flexion and not use_shear else ''
+    if use_flags == [True, True, True]:
+        file_name += '_all'
+    else:
+        file_name += '_gamma' if use_flags[0] else ''
+        file_name += '_F' if use_flags[1] else ''
+        file_name += '_G' if use_flags[2] else ''
 
     title = 'Abell 2744 Convergence Map - '
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
     title += ' - Randomized' if randomize else ''
     if field == 'cluster':
         title += '\n M = ' + f'{mass:.3e}' + r' $h^{-1} M_\odot$'
-    title += '\n Shear only' if use_shear and not use_flexion else ''
-    title += '\n Flexion only' if not use_shear and use_flexion else ''
+    if use_flags != [True, True, True]:
+        title += '\n Signals Used: '
+        title += r'$\gamma$' if use_flags[0] else ''    
+        title += ' F' if use_flags[1] else ''
+        title += ' G' if use_flags[2] else ''
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -252,61 +259,6 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
     plt.show()
-
-
-def build_avg_kappa_field(Ntrial = 10, field='cluster', use_shear=True, use_flexion=True):
-    # Build an average kappa field by randomizing the source orientations multiple times and averaging the resulting kappa fields
-    # This can be used to subtract out features that are due to 'overfitting'
-    arcsec_per_pixel = 0.03 # From the intrumentation documentation
-
-    warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
-
-    if field == 'cluster':
-        fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-        csv_file_path = 'Data/a2744_clu_lenser.csv'
-        dx = 115
-        dy = 55
-    elif field == 'parallel':
-        fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
-        csv_file_path = 'Data/a2744_par_lenser.csv'
-        dx = 865
-        dy = 400
-    else:
-        raise ValueError('field must be "cluster" or "parallel"')
-
-    img_data, _ = get_img_data(fits_file_path)
-    if field == 'cluster':
-        img_data = [img_data[0], img_data[1]] # Stack the two epochs
-    elif field == 'parallel':
-        img_data = [img_data]
-
-    # Generate a convergence map that spans the same area as the image
-    # I'd like the kappa scale to be 1 arcsecond per pixel. This means each kappa pixel is 20 image pixels
-    extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
-
-    X = np.linspace(0, extent[1], int(extent[1]))
-    Y = np.linspace(0, extent[3], int(extent[3]))
-    X, Y = np.meshgrid(X, Y)
-
-    avg_kappa_field = np.zeros_like(X)
-
-    # Initialize progress bar
-    print_progress_bar(0, Ntrial, prefix='Building Kappa:', suffix='Complete', length=50)
-
-    for n in range(Ntrial):
-        lenses, *_ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=False, randomize=True, use_shear=use_shear, use_flexion=use_flexion)
-        kappa = np.zeros_like(X)
-        for k in range(len(lenses.x)):
-            r = np.sqrt((X - lenses.x[k])**2 + (Y - lenses.y[k])**2 + 0.5**2) # Add 0.5 to avoid division by 0
-            kappa += lenses.te[k] / (2 * r)
-        avg_kappa_field += kappa
-        print_progress_bar(n+1, Ntrial, prefix='Building Kappa:', suffix='Complete', length=50)
-    avg_kappa_field /= Ntrial
-    # Save the average kappa field
-    dir = 'Data//'
-    file_name = 'a2744'
-    file_name += '_par' if field == 'parallel' else '_clu'
-    np.save(dir + file_name + '_avg_kappa_field', np.array([X, Y, avg_kappa_field]))
 
 
 def plot_er_dist(merge_radius=1):
@@ -345,4 +297,9 @@ def plot_er_dist(merge_radius=1):
 
 
 if __name__ == '__main__':
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_shear=True, use_flexion=True)
+    use_all_signals = [True, True, True] # Use all signals
+    shear_flex = [True, True, False] # Use shear and flexion
+    all_flex = [False, True, True] # Use flexion and g-flexion
+    global_signals = [True, False, True] # Use shear and g-flexion (global signals)
+
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_flags=global_signals)

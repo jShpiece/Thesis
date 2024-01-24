@@ -26,7 +26,24 @@ def read_file(path):
     F2_fit = df['F2_fit']
     a = df['a']
 
-    return np.array(ID), np.array(q), np.array(phi), np.array(F1_fit), np.array(F2_fit), np.array(a)
+    # Convert to numpy arrays, remove nans
+    ID = np.array(ID)
+    q = np.array(q)
+    phi = np.array(phi)
+    F1_fit = np.array(F1_fit)
+    F2_fit = np.array(F2_fit)
+    a = np.array(a)
+
+    # Remove nans
+    cuts = np.where((np.isfinite(q)) & (np.isfinite(phi)) & (np.isfinite(F1_fit)) & (np.isfinite(F2_fit)) & (np.isfinite(a)))[0]
+    ID = ID[cuts]
+    q = q[cuts]
+    phi = phi[cuts]
+    F1_fit = F1_fit[cuts]
+    F2_fit = F2_fit[cuts]
+    a = a[cuts]
+
+    return ID, q, phi, F1_fit, F2_fit, a
 
 
 def get_img_data(fits_file_path) -> np.ndarray:
@@ -39,7 +56,7 @@ def get_img_data(fits_file_path) -> np.ndarray:
 
 def filter_data(ID, xc, yc, q, phi, f1, f2, a):
     # Remove flexions that are too large and q values that are not finite
-    cuts = np.where((np.abs(f1) < 1) & (np.abs(f2) < 1) & (np.abs(a) < 2) & (np.isfinite(q)))[0]
+    cuts = np.where((np.abs(f1) < 10) & (np.abs(f2) < 10) & ((a) < 5) & (np.isfinite(q)) & (a > 0.1))[0]
     ID = ID[cuts]
     xc = xc[cuts]
     yc = yc[cuts]
@@ -161,7 +178,7 @@ def reconstructor():
     plt.show()
 
 
-if __name__ == '__main__':
+def match_sources_and_correlate():
     lenser_path = 'Data/JWST/Cluster Field/Catalogs/F115W_flexion.pkl'
     img_path = 'Data\JWST\Cluster Field\Image Data\jw02756-o003_t001_nircam_clear-f115w_i2d.fits'
     cat_path = 'Data\JWST\Cluster Field\Catalogs\stacked_cat.ecsv'
@@ -288,3 +305,130 @@ if __name__ == '__main__':
     ax.set_title('aF Comparison')
     ax.legend()
     plt.savefig('Images/af.png', dpi=300)
+ 
+if __name__ == '__main__':
+    lenser_path = 'Data/JWST/Cluster Field/Catalogs/F115W_flexion.pkl'
+    img_path = 'Data\JWST\Cluster Field\Image Data\jw02756-o003_t001_nircam_clear-f115w_i2d.fits'
+    cat_path = 'Data\JWST\Cluster Field\Catalogs\stacked_cat.ecsv'
+   
+    match_sources_and_correlate()
+    raise SystemExit
+
+    # Lets look at the distribution of the different terms in the JWST data
+    ''' READ IN JWST DATA '''
+    t = Table.read(cat_path)
+    # Sky Centroid gives the centroid of the source in the sky
+    # in units of RA and Dec
+    ra_jwst = t['sky_centroid'].ra
+    dec_jwst = t['sky_centroid'].dec
+    # Turn these into numpy arrays
+    ra_jwst = np.array(ra_jwst)
+    dec_jwst = np.array(dec_jwst)
+
+    # Also get the lensing data
+    ID_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst = read_file(lenser_path)
+    # Convert to arcsec
+    cdelt = 0.031 # arcsec/pixel
+    f1_jwst = f1_jwst / cdelt
+    f2_jwst = f2_jwst / cdelt
+    a_jwst = a_jwst * cdelt
+
+    # I'm interested in the distribution of shear, flexion and a right now. 
+    # First, lets check out the major outliers
+    # Lets define an outlier as anything where a > 5, or |f1| > 10, or |f2| > 10
+    outliers_loc = np.where((np.abs(f1_jwst) > 10) | (np.abs(f2_jwst) > 10) | (np.abs(a_jwst) > 5) | (a_jwst < 0.1))[0]
+    print('Number of outliers: ', len(outliers_loc))
+
+    # Remove these outliers
+    ID_jwst = np.delete(ID_jwst, outliers_loc)
+    ra_jwst = np.delete(ra_jwst, outliers_loc)
+    dec_jwst = np.delete(dec_jwst, outliers_loc)
+    q_jwst = np.delete(q_jwst, outliers_loc)
+    phi_jwst = np.delete(phi_jwst, outliers_loc)
+    f1_jwst = np.delete(f1_jwst, outliers_loc)
+    f2_jwst = np.delete(f2_jwst, outliers_loc)
+    a_jwst = np.delete(a_jwst, outliers_loc)
+
+    # Shear
+    shear_mag_jwst = (q_jwst-1)/(q_jwst+1)
+    e1_jwst, e2_jwst = shear_mag_jwst * np.cos(2*phi_jwst), shear_mag_jwst * np.sin(2*phi_jwst)
+
+    print('Number of sources: ', len(e1_jwst))
+
+    # Shear
+    print('Mean shear: ', np.mean(e1_jwst), np.mean(e2_jwst))
+    print('Std shear: ', np.std(e1_jwst), np.std(e2_jwst))
+    print('Range of shear: ', np.min(e1_jwst), np.max(e1_jwst), np.min(e2_jwst), np.max(e2_jwst))
+
+    # Flexion
+    print('Mean flexion: ', np.mean(f1_jwst), np.mean(f2_jwst))
+    print('Std flexion: ', np.std(f1_jwst), np.std(f2_jwst))
+    print('Range of flexion: ', np.min(f1_jwst), np.max(f1_jwst), np.min(f2_jwst), np.max(f2_jwst))
+    
+    # a
+    print('Mean a: ', np.mean(a_jwst))
+    print('Std a: ', np.std(a_jwst))
+    print('Range of a: ', np.min(a_jwst), np.max(a_jwst))
+
+    # Lets plot these
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(e1_jwst, e2_jwst, s=10)
+    ax.set_xlabel(r'$\gamma_1$')
+    ax.set_ylabel(r'$\gamma_2$')
+    ax.set_title('Shear Distribution')
+    plt.savefig('Images/JWST/shear_dist.png', dpi=300)
+
+    # Flexion
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(f1_jwst, f2_jwst, s=10)
+    ax.set_xlabel('F1')
+    ax.set_ylabel('F2')
+    ax.set_title('Flexion Distribution')
+    plt.savefig('Images/JWST/flexion_dist.png', dpi=300)
+
+    # af
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(f1_jwst*a_jwst, f2_jwst*a_jwst, s=10)    
+    ax.set_xlabel('aF1')
+    ax.set_ylabel('aF2')
+    ax.set_title('aF Distribution')
+    plt.savefig('Images/JWST/af_dist.png', dpi=300)
+
+    # Lets also make histograms of these
+    fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
+    fig.suptitle('JWST Shear Distribution')
+    ax[0].hist(e1_jwst, bins=50)
+    ax[0].set_xlabel(r'$\gamma_1$')
+    ax[0].set_ylabel('Count')
+    ax[1].hist(e2_jwst, bins=50)
+    ax[1].set_xlabel(r'$\gamma_2$')
+    ax[1].set_ylabel('Count')
+    plt.savefig('Images/JWST/shear_dist_hist.png', dpi=300)
+
+    fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
+    fig.suptitle('JWST Flexion Distribution')
+    ax[0].hist(f1_jwst, bins=100)
+    ax[0].set_xlabel('F1')
+    ax[0].set_ylabel('Count')
+    ax[1].hist(f2_jwst, bins=100)
+    ax[1].set_xlabel('F2')
+    ax[1].set_ylabel('Count')
+    plt.savefig('Images/JWST/flexion_dist_hist.png', dpi=300)
+
+    fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
+    fig.suptitle('JWST aF Distribution')
+    ax[0].hist(f1_jwst*a_jwst, bins=50)
+    ax[0].set_xlabel('aF1')
+    ax[0].set_ylabel('Count')
+    ax[1].hist(f2_jwst*a_jwst, bins=50)
+    ax[1].set_xlabel('aF2')
+    ax[1].set_ylabel('Count')
+    plt.savefig('Images/JWST/af_dist_hist.png', dpi=300)
+
+    # Lets also look at the distribution of a
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.hist(a_jwst, bins=50)
+    ax.set_xlabel('a')
+    ax.set_ylabel('Count')
+    ax.set_title('a Distribution')
+    plt.savefig('Images/JWST/a_dist_hist.png', dpi=300)
