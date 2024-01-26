@@ -8,8 +8,21 @@ from astropy.table import Table
 import pipeline
 import utils
 import warnings
+from pathlib import Path
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
+
+# File paths that we will need
+jwst_cat_dir = Path('Data/JWST/Cluster Field/Catalogs/')
+img_dir = Path('Data/JWST/Cluster Field/Image Data/')
+lenser_path = jwst_cat_dir / 'F115W_flexion.pkl'
+img_path = img_dir / 'jw02756-o003_t001_nircam_clear-f115w_i2d.fits' 
+cat_path = jwst_cat_dir / 'stacked_cat.ecsv'
+
+# Couple of other global parameters worth declaring, with JWST data
+cdelt = 8.54006306703281e-6 # degrees/pixel
+cdelt = cdelt * 3600 # arcsec/pixel
+
 
 def read_file(path):
     """
@@ -25,14 +38,16 @@ def read_file(path):
     F1_fit = df['F1_fit']
     F2_fit = df['F2_fit']
     a = df['a']
+    chi2 = df['rchi2']
 
     # Convert to numpy arrays, remove nans
     ID = np.array(ID)
     q = np.array(q)
     phi = np.array(phi)
-    F1_fit = np.array(F1_fit)
-    F2_fit = np.array(F2_fit)
-    a = np.array(a)
+    F1_fit = np.array(F1_fit) / cdelt # Convert to arcsec
+    F2_fit = np.array(F2_fit) / cdelt # Convert to arcsec
+    a = np.array(a) * cdelt # Convert to arcsec
+    chi2 = np.array(chi2)
 
     # Remove nans
     cuts = np.where((np.isfinite(q)) & (np.isfinite(phi)) & (np.isfinite(F1_fit)) & (np.isfinite(F2_fit)) & (np.isfinite(a)))[0]
@@ -42,8 +57,9 @@ def read_file(path):
     F1_fit = F1_fit[cuts]
     F2_fit = F2_fit[cuts]
     a = a[cuts]
+    chi2 = chi2[cuts]
 
-    return ID, q, phi, F1_fit, F2_fit, a
+    return ID, q, phi, F1_fit, F2_fit, a, chi2
 
 
 def get_img_data(fits_file_path) -> np.ndarray:
@@ -54,9 +70,15 @@ def get_img_data(fits_file_path) -> np.ndarray:
     return img_data, header
 
 
-def filter_data(ID, xc, yc, q, phi, f1, f2, a):
+def filter_data(ID, xc, yc, q, phi, f1, f2, a, chi2):
     # Remove flexions that are too large and q values that are not finite
-    cuts = np.where((np.abs(f1) < 10) & (np.abs(f2) < 10) & ((a) < 5) & (np.isfinite(q)) & (a > 0.1))[0]
+    cuts = np.where(
+        (a > 0.1) &
+        (a < 5) &
+        (np.abs(f1) < 2) &
+        (np.abs(f2) < 2) &
+        (np.isfinite(q)) & 
+        (chi2 < 5))[0]
     ID = ID[cuts]
     xc = xc[cuts]
     yc = yc[cuts]
@@ -66,7 +88,7 @@ def filter_data(ID, xc, yc, q, phi, f1, f2, a):
     f2 = f2[cuts]
     a = a[cuts]
 
-    return ID, xc, yc, q, phi, f1, f2, a
+    return ID, xc, yc, q, phi, f1, f2, a, chi2
 
 
 def naive_run(lenser_path, cat_path, img_path):
@@ -179,10 +201,6 @@ def reconstructor():
 
 
 def match_sources_and_correlate():
-    lenser_path = 'Data/JWST/Cluster Field/Catalogs/F115W_flexion.pkl'
-    img_path = 'Data\JWST\Cluster Field\Image Data\jw02756-o003_t001_nircam_clear-f115w_i2d.fits'
-    cat_path = 'Data\JWST\Cluster Field\Catalogs\stacked_cat.ecsv'
-    
     ''' READ IN JWST DATA '''
     t = Table.read(cat_path)
     # Sky Centroid gives the centroid of the source in the sky
@@ -190,19 +208,13 @@ def match_sources_and_correlate():
     ra_jwst = t['sky_centroid'].ra
     dec_jwst = t['sky_centroid'].dec
     # Turn these into numpy arrays
-    ra_jwst = np.array(ra_jwst)
+    ra_jwst = np.array(ra_jwst) 
     dec_jwst = np.array(dec_jwst)
 
     # Also get the lensing data
-    ID_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst = read_file(lenser_path)
-    # Convert to arcsec
-    cdelt = 0.031 # arcsec/pixel
-    f1_jwst = f1_jwst / cdelt
-    f2_jwst = f2_jwst / cdelt
-    a_jwst = a_jwst * cdelt
+    ID_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2 = read_file(lenser_path)
 
-
-    ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst = filter_data(ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst)
+    ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2 = filter_data(ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2)
 
     ''' READ IN HST DATA '''
     hubble_path = 'Data/a2744_clu_lenser.csv'
@@ -225,6 +237,39 @@ def match_sources_and_correlate():
     ra_hst = data[1:, ra_hst_col]
     dec_hst = data[1:, dec_hst_col]
 
+    plt.figure()
+    plt.scatter(ra_hst, dec_hst, s=1, label='HST')
+    plt.scatter(ra_jwst, dec_jwst, s=1, label='JWST')
+    plt.legend()
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+
+    '''EXTRA STEP - LOOK AT HALF OF THE SOURCES BASED ON SIZE'''
+    a_jwst_median = np.median(a_jwst)
+    a_hst_median = np.median(a_hst)
+
+    '''
+    # Only take sources that are ABOVE the median size
+    jwst_cuts = np.where(a_jwst > a_jwst_median)[0]
+    hst_cuts = np.where(a_hst > a_hst_median)[0]
+
+    ra_jwst = ra_jwst[jwst_cuts]
+    dec_jwst = dec_jwst[jwst_cuts]
+    a_jwst = a_jwst[jwst_cuts]
+    q_jwst = q_jwst[jwst_cuts]
+    phi_jwst = phi_jwst[jwst_cuts]
+    f1_jwst = f1_jwst[jwst_cuts]
+    f2_jwst = f2_jwst[jwst_cuts]
+
+    ra_hst = ra_hst[hst_cuts]
+    dec_hst = dec_hst[hst_cuts]
+    a_hst = a_hst[hst_cuts]
+    q_hst = q_hst[hst_cuts]
+    phi_hst = phi_hst[hst_cuts]
+    f1_hst = f1_hst[hst_cuts]
+    f2_hst = f2_hst[hst_cuts]
+    '''
+    
     ''' FIND MATCHES '''
     match_count = 0
     JWST_IDs = []
@@ -255,6 +300,12 @@ def match_sources_and_correlate():
     f1_jwst = f1_jwst[JWST_IDs]
     f2_jwst = f2_jwst[JWST_IDs]
 
+
+    # Draw an arrow pointed from the HST source to the JWST source on the plot
+    for i in range(len(ra_hst)):
+        plt.arrow(ra_hst[i], dec_hst[i], ra_jwst[i] - ra_hst[i], dec_jwst[i] - dec_hst[i], width=0.000001, head_width=0.000005, head_length=0.000005, color='black')
+    plt.savefig('Images/JWST/matched_sources.png', dpi=300)
+
     # Also remember to compute shear
     shear_mag_hst = (q_hst-1)/(q_hst+1)
     e1_hst, e2_hst = shear_mag_hst * np.cos(2*phi_hst), shear_mag_hst * np.sin(2*phi_hst)
@@ -278,7 +329,7 @@ def match_sources_and_correlate():
     ax.legend()
     plt.xlim(-1,1)
     plt.ylim(-1,1)
-    plt.savefig('Images/flexion_flexion.png', dpi=300)
+    plt.savefig('Images/JWST/flexion_flexion.png', dpi=300)
 
     # Shear shear
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -291,28 +342,36 @@ def match_sources_and_correlate():
     ax.set_ylabel('JWST')
     ax.set_title('Shear Shear Comparison')
     ax.legend()
-    plt.savefig('Images/shear_shear.png', dpi=300)
+    plt.savefig('Images/JWST/shear_shear.png', dpi=300)
 
+    # aF
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.scatter(f1_hst*a_hst, f1_jwst*a_jwst, s=10, label='a*F1: correlation = {}'.format(np.round(np.corrcoef(f1_hst*a_hst, f1_jwst*a_jwst)[0,1], 2)))
     ax.scatter(f2_hst*a_hst, f2_jwst*a_jwst, s=10, label='a*F2: correlation = {}'.format(np.round(np.corrcoef(f2_hst*a_hst, f2_jwst*a_jwst)[0,1], 2)))
     # Create an agreement line
     x = np.linspace(-0.5, 0.5, 100)
-    print(np.corrcoef(x, x)[0,1])
     ax.plot(x, x, color='black', linestyle='--', label='Agreement')
     ax.set_xlabel('HST')
     ax.set_ylabel('JWST')
     ax.set_title('aF Comparison')
     ax.legend()
-    plt.savefig('Images/af.png', dpi=300)
- 
+    plt.savefig('Images/JWST/af.png', dpi=300)
+
+    # q
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.scatter(q_hst, q_jwst, s=10, label='q: correlation = {}'.format(np.round(np.corrcoef(q_hst, q_jwst)[0,1], 2)))
+    # Create an agreement line
+    x = np.linspace(0, 10, 100)
+    ax.plot(x, x, color='black', linestyle='--', label='Agreement')
+    ax.set_xlabel('HST')
+    ax.set_ylabel('JWST')
+    ax.set_title('q Comparison')
+    ax.legend()
+    plt.savefig('Images/JWST/q.png', dpi=300)
+
+
 if __name__ == '__main__':
-    lenser_path = 'Data/JWST/Cluster Field/Catalogs/F115W_flexion.pkl'
-    img_path = 'Data\JWST\Cluster Field\Image Data\jw02756-o003_t001_nircam_clear-f115w_i2d.fits'
-    cat_path = 'Data\JWST\Cluster Field\Catalogs\stacked_cat.ecsv'
-   
     match_sources_and_correlate()
-    raise SystemExit
 
     # Lets look at the distribution of the different terms in the JWST data
     ''' READ IN JWST DATA '''
@@ -326,30 +385,13 @@ if __name__ == '__main__':
     dec_jwst = np.array(dec_jwst)
 
     # Also get the lensing data
-    ID_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst = read_file(lenser_path)
+    ID_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2 = read_file(lenser_path)
     # Convert to arcsec
-    cdelt = 0.031 # arcsec/pixel
-    f1_jwst = f1_jwst / cdelt
-    f2_jwst = f2_jwst / cdelt
-    a_jwst = a_jwst * cdelt
 
     # I'm interested in the distribution of shear, flexion and a right now. 
-    # First, lets check out the major outliers
-    # Lets define an outlier as anything where a > 5, or |f1| > 10, or |f2| > 10
-    outliers_loc = np.where((np.abs(f1_jwst) > 10) | (np.abs(f2_jwst) > 10) | (np.abs(a_jwst) > 5) | (a_jwst < 0.1))[0]
-    print('Number of outliers: ', len(outliers_loc))
-
-    # Remove these outliers
-    ID_jwst = np.delete(ID_jwst, outliers_loc)
-    ra_jwst = np.delete(ra_jwst, outliers_loc)
-    dec_jwst = np.delete(dec_jwst, outliers_loc)
-    q_jwst = np.delete(q_jwst, outliers_loc)
-    phi_jwst = np.delete(phi_jwst, outliers_loc)
-    f1_jwst = np.delete(f1_jwst, outliers_loc)
-    f2_jwst = np.delete(f2_jwst, outliers_loc)
-    a_jwst = np.delete(a_jwst, outliers_loc)
-
-    # Shear
+    # Lets stick with testing our filter criteria
+    ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2 = filter_data(ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2)
+    
     shear_mag_jwst = (q_jwst-1)/(q_jwst+1)
     e1_jwst, e2_jwst = shear_mag_jwst * np.cos(2*phi_jwst), shear_mag_jwst * np.sin(2*phi_jwst)
 
