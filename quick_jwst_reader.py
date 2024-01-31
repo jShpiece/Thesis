@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.visualization import ImageNormalize, LogStretch
+from astropy.visualization import hist as fancy_hist
 from astropy import units as u
 from astropy.table import Table
 import pipeline
@@ -72,11 +73,11 @@ def get_img_data(fits_file_path) -> np.ndarray:
 
 def filter_data(ID, xc, yc, q, phi, f1, f2, a, chi2):
     # Remove flexions that are too large and q values that are not finite
+    F = np.sqrt(f1**2 + f2**2)
     cuts = np.where(
-        (a > 0.1) &
-        (a < 5) &
-        (np.abs(f1) < 2) &
-        (np.abs(f2) < 2) &
+        (a*F < 0.5) & # This is the cut that we want to make
+        (np.abs(f1) < 1) &
+        (np.abs(f2) < 1) &
         (np.isfinite(q)) & 
         (chi2 < 5))[0]
     ID = ID[cuts]
@@ -91,39 +92,47 @@ def filter_data(ID, xc, yc, q, phi, f1, f2, a, chi2):
     return ID, xc, yc, q, phi, f1, f2, a, chi2
 
 
-def naive_run(lenser_path, cat_path, img_path):
+def naive_run():
     # Ignore warnings
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
-    ID, q, phi, f1, f2, a = read_file(lenser_path)
-    img, header = get_img_data(img_path)
+    ID, q, phi, f1, f2, a, chi2 = read_file(lenser_path)
     t = Table.read(cat_path)
     # print(t.colnames)
 
     xc = t['xcentroid']
     yc = t['ycentroid']
+    label = t['label']
 
     xc = np.array(xc)
     yc = np.array(yc)
+    label = np.array(label)
 
-    # Convert to arcsec
-    cdelt = header['CDELT2'] * u.deg
-    cdelt = cdelt.to(u.arcsec).value
+    # Match coordinates to lensing data - this is label to ID
+    new_xc = []
+    new_yc = []
+    for i in range(len(ID)):
+        new_xc.append(xc[label == ID[i]][0])
+        new_yc.append(yc[label == ID[i]][0])
+    
+    xc = np.array(new_xc)
+    yc = np.array(new_yc)
+
+    # Convert coords to arcsec (has already been done for a and flexion)
     xc = xc * cdelt
     yc = yc * cdelt
-    a = a * cdelt
-    f1 = f1 / cdelt 
-    f2 = f2 / cdelt
 
-    ID, xc, yc, q, phi, f1, f2, a = filter_data(ID, xc, yc, q, phi, f1, f2, a)
-
+    ID, xc, yc, q, phi, f1, f2, a, chi2 = filter_data(ID, xc, yc, q, phi, f1, f2, a, chi2)
 
     shear_mag = (q-1)/(q+1)
     e1, e2 = shear_mag * np.cos(2*phi), shear_mag * np.sin(2*phi)
 
-    # Okay...lets try the pipeline
     # Set xmax to be the largest distance from the center
     centroid = np.mean(xc), np.mean(yc)
     xmax = np.max(np.sqrt((xc - centroid[0])**2 + (yc - centroid[1])**2))
+
+    # Move the centroid to the center of the image
+    xc = xc - centroid[0]
+    yc = yc - centroid[1]
 
     # Get the noise
     sigs_mag = np.mean([np.std(e1), np.std(e2)])
@@ -132,8 +141,12 @@ def naive_run(lenser_path, cat_path, img_path):
     sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
     sigf = sigaf / a 
 
-    sources = pipeline.Source(xc, yc, e1, e2, f1, f2, sigs, sigf)
-    lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags = True)
+    sources = pipeline.Source(xc, yc, e1, e2, f1, f2, f1, f2, sigs, sigf, sigf)
+    lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags = True, use_flags=[True,True,False])
+
+    # Move the centroid back to the original position
+    lenses.x = lenses.x + centroid[0]
+    lenses.y = lenses.y + centroid[1]
 
     # Save these
     np.save('Data/JWST/lenses.npy', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
@@ -141,22 +154,16 @@ def naive_run(lenser_path, cat_path, img_path):
 
 
 def reconstructor():
-    lenser_path = 'Data/JWST/Cluster Field/Catalogs/F115W_flexion.pkl'
-    img_path = 'Data\JWST\Cluster Field\Image Data\jw02756-o003_t001_nircam_clear-f115w_i2d.fits'
-    cat_path = 'Data\JWST\Cluster Field\Catalogs\stacked_cat.ecsv'
-
     z_lens = 0.308
     z_source = 0.5
     
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
-    # naive_run(lenser_path, cat_path, img_path)
+    naive_run()
 
     # Load in the data
     lenses = pipeline.Lens(*np.load('Data/JWST/lenses.npy', allow_pickle=True))
     # sources = pipeline.Source(*np.load('Data/JWST/sources.npy', allow_pickle=True))
-    img, header = get_img_data(img_path)
-    cdelt = header['CDELT2'] * u.deg 
-    cdelt = cdelt.to(u.arcsec).value
+    img, _ = get_img_data(img_path)
 
     # Plot the results
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -196,11 +203,11 @@ def reconstructor():
     mass = utils.calculate_mass(kappa, z_lens, z_source, 1)
 
     ax.set_title('Abell 2744 Convergence Map - JWST Data \n' + f'{mass:.3e}' + r' $h^{-1} M_\odot$')
-    plt.savefig('Images/JWST_flexion_lens_map.png', dpi=300)
+    plt.savefig('Images/JWST/map.png', dpi=300)
     plt.show()
 
 
-def match_sources_and_correlate():
+def match_sources_and_correlate(rot_angle):
     ''' READ IN JWST DATA '''
     t = Table.read(cat_path)
     # Sky Centroid gives the centroid of the source in the sky
@@ -248,37 +255,6 @@ def match_sources_and_correlate():
     ra_hst = data[1:, ra_hst_col]
     dec_hst = data[1:, dec_hst_col]
 
-    plt.figure()
-    plt.scatter(ra_hst, dec_hst, s=1, label='HST')
-    plt.scatter(ra_jwst, dec_jwst, s=1, label='JWST')
-    plt.legend()
-    plt.xlabel('RA')
-    plt.ylabel('Dec')
-
-    '''EXTRA STEP - LOOK AT HALF OF THE SOURCES BASED ON SIZE'''
-    a_jwst_median = np.median(a_jwst)
-    a_hst_median = np.median(a_hst)
-    '''
-    # Only take sources that are ABOVE the median size
-    jwst_cuts = np.where(a_jwst > a_jwst_median)[0]
-    hst_cuts = np.where(a_hst > a_hst_median)[0]
-
-    ra_jwst = ra_jwst[jwst_cuts]
-    dec_jwst = dec_jwst[jwst_cuts]
-    a_jwst = a_jwst[jwst_cuts]
-    q_jwst = q_jwst[jwst_cuts]
-    phi_jwst = phi_jwst[jwst_cuts]
-    f1_jwst = f1_jwst[jwst_cuts]
-    f2_jwst = f2_jwst[jwst_cuts]
-
-    ra_hst = ra_hst[hst_cuts]
-    dec_hst = dec_hst[hst_cuts]
-    a_hst = a_hst[hst_cuts]
-    q_hst = q_hst[hst_cuts]
-    phi_hst = phi_hst[hst_cuts]
-    f1_hst = f1_hst[hst_cuts]
-    f2_hst = f2_hst[hst_cuts]
-    '''
 
     ''' FIND MATCHES '''
     match_count = 0
@@ -312,10 +288,6 @@ def match_sources_and_correlate():
     f1_jwst = f1_jwst[JWST_IDs]
     f2_jwst = f2_jwst[JWST_IDs]
 
-    # Draw an arrow pointed from the HST source to the JWST source on the plot
-    for i in range(len(ra_hst)):
-        plt.arrow(ra_hst[i], dec_hst[i], ra_jwst[i] - ra_hst[i], dec_jwst[i] - dec_hst[i], width=0.000001, head_width=0.000005, head_length=0.000005, color='black')
-    plt.savefig('Images/JWST/matched_sources.png', dpi=300)
 
     # Also remember to compute shear
     shear_mag_hst = (q_hst-1)/(q_hst+1)
@@ -326,9 +298,9 @@ def match_sources_and_correlate():
 
     # See if we can correct for the rotation
     # Rotate the JWST shear and flexion by -30 degrees
-    theta = 30 * np.pi / 180
-    e1_jwst_rot = e1_jwst * np.cos(theta) - e2_jwst * np.sin(theta)
-    e2_jwst_rot = e1_jwst * np.sin(theta) + e2_jwst * np.cos(theta)
+    theta = rot_angle * np.pi / 180
+    e1_jwst_rot = e1_jwst * np.cos(2*theta) - e2_jwst * np.sin(2*theta)
+    e2_jwst_rot = e1_jwst * np.sin(2*theta) + e2_jwst * np.cos(2*theta)
     f1_jwst_rot = f1_jwst * np.cos(theta) - f2_jwst * np.sin(theta)
     f2_jwst_rot = f1_jwst * np.sin(theta) + f2_jwst * np.cos(theta)
 
@@ -336,8 +308,10 @@ def match_sources_and_correlate():
     # Want flexion flexion and shear shear plots between hst and jwst
     # Flexion flexion
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(f1_hst, f1_jwst, s=10, label='F1: correlation = {}'.format(np.round(np.corrcoef(f1_hst, f1_jwst)[0,1], 2)))
-    ax.scatter(f2_hst, f2_jwst, s=10, label='F2: correlation = {}'.format(np.round(np.corrcoef(f2_hst, f2_jwst)[0,1], 2)))
+    # ax.scatter(f1_hst, f1_jwst, s=10, label='F1: correlation = {}'.format(np.round(np.corrcoef(f1_hst, f1_jwst)[0,1], 2)))
+    # ax.scatter(f2_hst, f2_jwst, s=10, label='F2: correlation = {}'.format(np.round(np.corrcoef(f2_hst, f2_jwst)[0,1], 2)))
+    ax.scatter(f1_hst, f1_jwst_rot, s=10, label='F1 (rotated): correlation = {}'.format(np.round(np.corrcoef(f1_hst, f1_jwst_rot)[0,1], 2)))
+    ax.scatter(f2_hst, f2_jwst_rot, s=10, label='F2 (rotated): correlation = {}'.format(np.round(np.corrcoef(f2_hst, f2_jwst_rot)[0,1], 2)))
     # Create an agreement line
     x = np.linspace(-1, 1, 100)
     ax.plot(x, x, color='black', linestyle='--', label='Agreement')
@@ -347,7 +321,7 @@ def match_sources_and_correlate():
     ax.legend()
     plt.xlim(-1,1)
     plt.ylim(-1,1)
-    plt.savefig('Images/JWST/flexion_flexion.png', dpi=300)
+    plt.savefig('Images/JWST/Correlated_Signals/flexion_flexion.png', dpi=300)
 
     # Shear shear
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -362,12 +336,14 @@ def match_sources_and_correlate():
     ax.set_ylabel('JWST')
     ax.set_title('Shear Shear Comparison')
     ax.legend()
-    plt.savefig('Images/JWST/shear_shear.png', dpi=300)
+    plt.savefig('Images/JWST/Correlated_Signals/shear_shear.png', dpi=300)
 
     # aF
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(f1_hst*a_hst, f1_jwst*a_jwst, s=10, label='a*F1: correlation = {}'.format(np.round(np.corrcoef(f1_hst*a_hst, f1_jwst*a_jwst)[0,1], 2)))
-    ax.scatter(f2_hst*a_hst, f2_jwst*a_jwst, s=10, label='a*F2: correlation = {}'.format(np.round(np.corrcoef(f2_hst*a_hst, f2_jwst*a_jwst)[0,1], 2)))
+    # ax.scatter(f1_hst*a_hst, f1_jwst*a_jwst, s=10, label='a*F1: correlation = {}'.format(np.round(np.corrcoef(f1_hst*a_hst, f1_jwst*a_jwst)[0,1], 2)))
+    # ax.scatter(f2_hst*a_hst, f2_jwst*a_jwst, s=10, label='a*F2: correlation = {}'.format(np.round(np.corrcoef(f2_hst*a_hst, f2_jwst*a_jwst)[0,1], 2)))
+    ax.scatter(f1_hst*a_hst, f1_jwst_rot*a_jwst, s=10, label='a*F1 (rotated): correlation = {}'.format(np.round(np.corrcoef(f1_hst*a_hst, f1_jwst_rot*a_jwst)[0,1], 2)))
+    ax.scatter(f2_hst*a_hst, f2_jwst_rot*a_jwst, s=10, label='a*F2 (rotated): correlation = {}'.format(np.round(np.corrcoef(f2_hst*a_hst, f2_jwst_rot*a_jwst)[0,1], 2)))
     # Create an agreement line
     x = np.linspace(-0.5, 0.5, 100)
     ax.plot(x, x, color='black', linestyle='--', label='Agreement')
@@ -375,7 +351,7 @@ def match_sources_and_correlate():
     ax.set_ylabel('JWST')
     ax.set_title('aF Comparison')
     ax.legend()
-    plt.savefig('Images/JWST/af.png', dpi=300)
+    plt.savefig('Images/JWST/Correlated_Signals/af.png', dpi=300)
 
     # q
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -387,11 +363,12 @@ def match_sources_and_correlate():
     ax.set_ylabel('JWST')
     ax.set_title('q Comparison')
     ax.legend()
-    plt.savefig('Images/JWST/q.png', dpi=300)
+    plt.savefig('Images/JWST/Correlated_Signals/q.png', dpi=300)
 
 
 if __name__ == '__main__':
-    match_sources_and_correlate()
+    reconstructor()
+    # match_sources_and_correlate(30.38)
 
     raise SystemExit
 
@@ -417,18 +394,6 @@ if __name__ == '__main__':
     shear_mag_jwst = (q_jwst-1)/(q_jwst+1)
     e1_jwst, e2_jwst = shear_mag_jwst * np.cos(2*phi_jwst), shear_mag_jwst * np.sin(2*phi_jwst)
 
-    # Only take sources that are ABOVE the median size
-    jwst_cuts = np.where(a_jwst < np.median(a_jwst))[0]
-
-    ra_jwst = ra_jwst[jwst_cuts]
-    dec_jwst = dec_jwst[jwst_cuts]
-    a_jwst = a_jwst[jwst_cuts]
-    q_jwst = q_jwst[jwst_cuts]
-    phi_jwst = phi_jwst[jwst_cuts]
-    f1_jwst = f1_jwst[jwst_cuts]
-    f2_jwst = f2_jwst[jwst_cuts]
-
-
     # Shear
     print('Mean shear: ', np.mean(e1_jwst), np.mean(e2_jwst))
     print('Std shear: ', np.std(e1_jwst), np.std(e2_jwst))
@@ -449,59 +414,59 @@ if __name__ == '__main__':
     ax.scatter(e1_jwst, e2_jwst, s=10)
     ax.set_xlabel(r'$\gamma_1$')
     ax.set_ylabel(r'$\gamma_2$')
-    ax.set_title('Shear Distribution: Small a')
-    plt.savefig('Images/JWST/shear_dist_smallA.png', dpi=300)
+    ax.set_title('Shear Distribution')
+    plt.savefig('Images/JWST/shear_dist.png', dpi=300)
 
     # Flexion
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.scatter(f1_jwst, f2_jwst, s=10)
     ax.set_xlabel('F1')
     ax.set_ylabel('F2')
-    ax.set_title('Flexion Distribution: Small a')
-    plt.savefig('Images/JWST/flexion_dist_smallA.png', dpi=300)
+    ax.set_title('Flexion Distribution')
+    plt.savefig('Images/JWST/flexion_dist.png', dpi=300)
 
     # af
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.scatter(f1_jwst*a_jwst, f2_jwst*a_jwst, s=10)    
     ax.set_xlabel('aF1')
     ax.set_ylabel('aF2')
-    ax.set_title('aF Distribution: Small a')
-    plt.savefig('Images/JWST/af_dist_smallA.png', dpi=300)
+    ax.set_title('aF Distribution')
+    plt.savefig('Images/JWST/af_dist.png', dpi=300)
 
     # Lets also make histograms of these
     fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
-    fig.suptitle('JWST Shear Distribution: Small a')
-    ax[0].hist(e1_jwst, bins=50)
+    fig.suptitle('JWST Shear Distribution')
+    fancy_hist(e1_jwst, bins='freedman', ax=ax[0], histtype='step', label=r'$\gamma_1$')
     ax[0].set_xlabel(r'$\gamma_1$')
     ax[0].set_ylabel('Count')
-    ax[1].hist(e2_jwst, bins=50)
+    fancy_hist(e2_jwst, bins='freedman', ax=ax[1], histtype='step', label=r'$\gamma_2$')
     ax[1].set_xlabel(r'$\gamma_2$')
     ax[1].set_ylabel('Count')
-    plt.savefig('Images/JWST/shear_dist_hist_smallA.png', dpi=300)
+    plt.savefig('Images/JWST/shear_dist_hist.png', dpi=300)
 
     fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
-    fig.suptitle('JWST Flexion Distribution: Small a')
-    ax[0].hist(f1_jwst, bins=100)
+    fig.suptitle('JWST Flexion Distribution')
+    fancy_hist(f1_jwst, bins='freedman', ax=ax[0], histtype='step', label='F1')
     ax[0].set_xlabel('F1')
     ax[0].set_ylabel('Count')
-    ax[1].hist(f2_jwst, bins=100)
+    fancy_hist(f2_jwst, bins='freedman', ax=ax[1], histtype='step', label='F2')
     ax[1].set_xlabel('F2')
     ax[1].set_ylabel('Count')
-    plt.savefig('Images/JWST/flexion_dist_hist_smallA.png', dpi=300)
+    plt.savefig('Images/JWST/flexion_dist_hist.png', dpi=300)
 
     fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
-    fig.suptitle('JWST aF Distribution (Small a)')
-    ax[0].hist(f1_jwst*a_jwst, bins=50)
+    fig.suptitle('JWST aF Distribution')
+    fancy_hist(f1_jwst*a_jwst, bins='freedman', ax=ax[0], histtype='step', label='aF1')
     ax[0].set_xlabel('aF1')
     ax[0].set_ylabel('Count')
-    ax[1].hist(f2_jwst*a_jwst, bins=50)
+    fancy_hist(f2_jwst*a_jwst, bins='freedman', ax=ax[1], histtype='step', label='aF2')
     ax[1].set_xlabel('aF2')
     ax[1].set_ylabel('Count')
-    plt.savefig('Images/JWST/af_dist_hist_smallA.png', dpi=300)
+    plt.savefig('Images/JWST/af_dist_hist.png', dpi=300)
 
     # Lets also look at the distribution of a
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.hist(a_jwst, bins=50)
+    fancy_hist(a_jwst, bins='freedman', ax=ax, histtype='step', label='a')
     ax.set_xlabel('a')
     ax.set_ylabel('Count')
     ax.set_title('a Distribution')
