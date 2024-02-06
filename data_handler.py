@@ -9,7 +9,6 @@ from utils import calculate_mass, mass_sheet_transformation, print_progress_bar
 from astropy.visualization import hist as fancy_hist
 import scipy.ndimage
 from matplotlib.path import Path
-from scipy import ndimage
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -72,20 +71,28 @@ def get_img_data(fits_file_path) -> np.ndarray:
     return img_data, header
 
 
-def get_file_paths(cluster='a2744', field='cluster'):
+def get_file_paths(cluster='a2744', instrument='HST', field='cluster'):
     if cluster == 'a2744':
-        if field == 'cluster':
-            fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-            csv_file_path = 'Data/a2744_clu_lenser.csv'
-            vmax = 1 # Set the maximum value for the image normalization
-            dx = 115
-            dy = 55
-        elif field == 'parallel':
-            fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
-            csv_file_path = 'Data/a2744_par_lenser.csv'
-            vmax = 0.1 # Set the maximum value for the image normalization
-            dx = 865
-            dy = 400
+        if instrument == 'HST':
+            if field == 'cluster':
+                fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+                csv_file_path = 'Data/a2744_clu_lenser.csv'
+                vmax = 1 # Set the maximum value for the image normalization
+                dx = 115
+                dy = 55
+            elif field == 'parallel':
+                fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
+                csv_file_path = 'Data/a2744_par_lenser.csv'
+                vmax = 0.1 # Set the maximum value for the image normalization
+                dx = 865
+                dy = 400
+        elif instrument == 'JWST':
+            if field == 'cluster':
+                fits_file_path = Path('Data/JWST/Cluster Field/Image Data/') / 'jw02756-o003_t001_nircam_clear-f115w_i2d.fits'
+                csv_file_path = Path('Data/JWST/Cluster Field/Catalogs/') / 'F115W_flexion.pkl'
+                vmax = 100
+                dx = 0
+                dy = 0
     
     return fits_file_path, csv_file_path, vmax, dx, dy
 

@@ -158,7 +158,7 @@ def reconstructor():
     z_source = 0.5
     
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
-    naive_run()
+    # naive_run()
 
     # Load in the data
     lenses = pipeline.Lens(*np.load('Data/JWST/lenses.npy', allow_pickle=True))
@@ -198,8 +198,10 @@ def reconstructor():
     color_bar = plt.colorbar(color_map_overlay, ax=ax)
     color_bar.set_label(r'$\kappa$', rotation=0, labelpad=10)
 
-    ax.set_xlabel('RA (arcsec)')
-    ax.set_ylabel('Dec (arcsec)')
+    ax.scatter(lenses.x, lenses.y, s=10, color='red', label='Lensed Galaxies')
+
+    ax.set_xlabel('x (arcsec)')
+    ax.set_ylabel('y (arcsec)')
     mass = utils.calculate_mass(kappa, z_lens, z_source, 1)
 
     ax.set_title('Abell 2744 Convergence Map - JWST Data \n' + f'{mass:.3e}' + r' $h^{-1} M_\odot$')

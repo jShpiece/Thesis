@@ -3,10 +3,49 @@ import matplotlib.pyplot as plt
 import time
 import pandas as pd
 from astropy.visualization import hist as fancy_hist
+import pipeline
+import utils
+import astropy.units as u
+from astropy.cosmology import Planck15 as cosmo
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
+
+# Physical constants
+c = 3 * 10**8 # Speed of light in m/s
+G = 6.674 * 10**-11 # Gravitational constant in m^3/kg/s^2
+h = 0.7 # Hubble constant
+
+class Halo:
+    def __init__(self, x, y, z, c, mass):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.c = c
+        self.mass = mass
+    
+    def calc_R200(self, z):
+        omega_crit = 0.27
+        omega_z = 0.27 * (1 + z)**3 / (0.27 * (1 + z)**3 + 0.73)
+        R200 = (1.63 * 10**-2) * (self.mass / 0.69)**(1/3) * (omega_crit / omega_z)**(1/2) * (1 + z)**(3/2) # In Kpc
+        # Convert to arcseconds
+        # TBD - involves cosmology based on z
+        return R200
+    
+    def build_lenses(self, z, R200):
+        z_s = 0.8
+        # Given a set of halos, build the lenses
+        # Main computational step is getting the einstein radius for each lens
+        D_s = cosmo.angular_diameter_distance(z_s).to(u.meter)
+        D_ls = cosmo.angular_diameter_distance_z1z2(z, z_s).to(u.meter)
+
+        mass = self.mass / u.M_sun # Mass in kilograms
+        R200 = R200 * u.kpc # R200 in meters
+
+        eR = (2 * np.pi * G) / (c**2) * (D_ls / D_s) * (mass / R200) 
+
+        return pipeline.Lens(self.x, self.y, eR, np.zeros_like(self.x))
 
 
 def fix_file(z):
@@ -106,8 +145,105 @@ def count_clusters(z):
     print('Number of clusters with mass > 10^14 M_sun: {}'.format(count1))
     print('Number of clusters with mass > 10^14 M_sun and more than 1 halo: {}'.format(count2))
 
+
+def find_halos(ID, z):
+    # Given a cluster ID, locate the cluster in the data
+    # and return the relevant information
+    # This needs to be fast 
+
+    file = dir + 'Halos_{}.MDARK'.format(z)
+    chunks = chunk_data(file)
+    # Find all the halos with the given ID
+    output = []
+    for chunk in chunks:
+        mask = chunk['MainHaloID'] == ID
+        if np.any(mask):
+            output.append(chunk[mask])
+    # Flatten the list
+    output = pd.concat(output)
+    
+    # Now we have the correct objects, we can return the relevant information
+    xhalo = output['x'].values
+    yhalo = output['y'].values
+    zhalo = output['z'].values
+    chalo = output['concentration_NFW'].values
+    masshalo = output['HaloMass'].values
+
+    halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo)
+
+    return halos
+
+
+def choose_ID(z, mass_range, min_halos):
+    # Given a set of criteria, choose a cluster ID
+
+    file = dir + 'fixed_key_{}.MDARK'.format(z)
+    chunks = chunk_data(file)
+
+    # Choose a random cluster with mass in the given range
+    # and more than 1 halo
+    options = []
+    for chunk in chunks:
+        mask = (chunk[' Total Mass'].values > mass_range[0]) & (chunk[' Total Mass'].values < mass_range[1]) & (chunk[' Halo Number'].values > min_halos)        
+        if np.any(mask):
+            options.append(chunk[mask]['MainHaloID'].values)
+    # Flatten the list
+    options = np.concatenate(options)
+    # Choose one of the clusters at random
+    IDs = np.random.choice(options)
+
+    return IDs
+    
+    # Now we have the correct objects, we can return the relevant information
+    
+
+def run_analysis(halos):
+    '''
+    Given a set of halos, run the analysis
+    This involves the following steps
+
+    1. Compute the einstein radius for each cluster, from 
+        M200 and R200
+    2. Generate a set of background galaxies, with 
+        random positions and redshifts. Apply a shear
+        and flexion to each galaxy. 
+    3. Run these source galaxies through the pipeline. This
+        will generate a list of candidate lenses, which 
+        will be compared to the input list of halos. 
+    4. Generate a convergence map from the candidate lenses, 
+        compute the mass of each lens, and compare to the
+        input mass.
+    5. Generate a ROC curve for the pipeline
+    6. Generate a confusion matrix
+    7. Save the results to a file
+    '''
+    pass
+
+
+def run_bulk_analysis():
+    # Get a set of cluster IDs and run the analysis on each. 
+    pass
+
+
+def plot_results():
+    # Plot the results of the analysis
+    pass
+
+
 if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
+
+    start = time.time()
+    ID = choose_ID(0.194, [1e14, 1e15], 1)
+    halos = find_halos(ID, 0.194)
+    R200 = halos.calc_R200(0.194)
+    lenses = halos.build_lenses(0.194, R200)
+    print(lenses.x, lenses.y, lenses.te)
+    stop = time.time()
+    print('Time taken: {}'.format(stop - start))
+
+
+    raise SystemExit
 
     for z in zs:
         count_clusters(z)

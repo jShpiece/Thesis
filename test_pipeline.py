@@ -123,13 +123,11 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Initial Lens Positions', ax=axarr[0,0])
 
-    
     # Step 2: Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Optimized Lens Positions', ax=axarr[0,1], legend=False)
-    
-    
+
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
@@ -279,4 +277,4 @@ def accuracy_tests(use_shear, use_flexion, use_g_flexion):
 
 
 if __name__ == '__main__':
-    visualize_pipeline_steps(1, 10, 10, [True, True, True])
+    visualize_pipeline_steps(1, 10, 5, [True, True, True])

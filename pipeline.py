@@ -37,31 +37,10 @@ class Source:
         phi = np.arctan2(self.f2, self.f1)
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
+        gflexion = np.sqrt(self.g1**2 + self.g2**2)
         r = gamma / flexion # A characteristic distance from the source
         te = 2 * gamma * np.abs(r) # The Einstein radius of the lens
-        
-        '''
-        # Let's try something - also include the negative lenses - this will double the number of lenses
-        r2 = -gamma / flexion
-        te2 = -2 * gamma * np.abs(r)
 
-        # These are the positive predictions
-        xl = np.array(self.x + r * np.cos(phi))
-        yl = np.array(self.y + r * np.sin(phi))
-        te = np.array(te)
-
-        # These are the negative predictions
-        xl2 = np.array(self.x + r2 * np.cos(phi))
-        yl2 = np.array(self.y + r2 * np.sin(phi))
-        te2 = np.array(te2)
-
-        # Combine the positive and negative predictions
-        xl = np.concatenate((xl, xl2))
-        yl = np.concatenate((yl, yl2))
-        te = np.concatenate((te, te2))
-        
-        return Lens(xl, yl, te, np.empty_like(xl))
-        '''
 
         return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
 
@@ -84,13 +63,13 @@ class Source:
             sin2phi = 2*cosphi*sinphi
             cos3phi = cosphi*cosphi*cosphi - 3*cosphi*sinphi*sinphi
             sin3phi = 3*cosphi*cosphi*sinphi - sinphi*sinphi*sinphi
-      
+
             self.e1 += -lenses.te[i]/(2*r)*cos2phi
             self.e2 += -lenses.te[i]/(2*r)*sin2phi
             self.f1 += -dx*lenses.te[i]/(2*r*r*r)
             self.f2 += -dy*lenses.te[i]/(2*r*r*r)
-            self.g1 += (3 * lenses.te[i]) / (2 * r**2) * cos3phi
-            self.g2 += (3 * lenses.te[i]) / (2 * r**2) * sin3phi
+            self.g1 += (3*lenses.te[i]) / (2*r**2) * cos3phi
+            self.g2 += (3*lenses.te[i]) / (2*r**2) * sin3phi
 
 
 class Lens:
@@ -130,10 +109,10 @@ class Lens:
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=0.1):
         # Filter out lenses that are too close to sources or too far from the center
-        distances_to_sources = np.sqrt((self.x[:, None] - sources.x)**2 + (self.y[:, None] - sources.y)**2)
-        too_close_to_sources = (distances_to_sources < threshold_distance).any(axis=1)
+        distances_to_sources = np.sqrt((self.x - sources.x)**2 + (self.y - sources.y)**2)
+        too_close_to_sources = distances_to_sources < threshold_distance
         too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 2 * xmax
-        zero_te_indices = (np.abs(self.te) < 10**-3)
+        zero_te_indices = np.abs(self.te) < 10**-3
 
         valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
         self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
@@ -360,13 +339,14 @@ def print_step_info(flags,message,lenses,reducedchi2):
 
 
 def chi2wrapper(guess, params):
-    # Wrapper function for chi2 to allow for minimization
+    # Wrapper function for chi2 to allow for minimization for a single lens object
     lenses = Lens(guess[0], guess[1], guess[2], [0])
     return calc_raw_chi2(params[0],lenses, params[1])
 
 
 def chi2wrapper2(guess, params):
     # Wrapper function for chi2 to allow constrained minimization - only the einstein radii are allowed to vary
+    # This time, the lens object contains the full set of lenses
     lenses = Lens(params[0], params[1], guess, np.empty_like(params[0]))
     dof = calc_degrees_of_freedom(params[2], lenses, params[3])
     return calc_raw_chi2(params[2],lenses, params[3]) / dof - 1
@@ -430,7 +410,7 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     # If the merger threshold is too small, set it to 1
     if merger_threshold < 1:
         merger_threshold = 1
-    lenses.merge_close_lenses(merger_threshold=10)
+    lenses.merge_close_lenses(merger_threshold=10) #This is a placeholder value
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     print_step_info(flags, "After Merging:", lenses, reducedchi2)
 
