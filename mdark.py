@@ -28,7 +28,7 @@ class Halo:
     def calc_R200(self, z):
         omega_crit = 0.27
         omega_z = 0.27 * (1 + z)**3 / (0.27 * (1 + z)**3 + 0.73)
-        R200 = (1.63 * 10**-2) * (self.mass / 0.69)**(1/3) * (omega_crit / omega_z)**(1/2) * (1 + z)**(3/2) # In Kpc
+        R200 = (1.63 * 10**-2) * (self.mass / h**-1)**(1/3) * (omega_crit / omega_z)**(-1/3) * (1 + z)**(-1) * h**-1 # In Kpc
         # Convert to arcseconds
         # TBD - involves cosmology based on z
         return R200
@@ -40,10 +40,12 @@ class Halo:
         D_s = cosmo.angular_diameter_distance(z_s).to(u.meter)
         D_ls = cosmo.angular_diameter_distance_z1z2(z, z_s).to(u.meter)
 
-        mass = self.mass / u.M_sun # Mass in kilograms
-        R200 = R200 * u.kpc # R200 in meters
+        mass = self.mass * 2 * 10**30 # Mass in kilograms
+        print(R200)
+        print(mass)
+        R200 = R200 * 3.086 * 10**19 # Convert to meters
 
-        eR = (2 * np.pi * G) / (c**2) * (D_ls / D_s) * (mass / R200) 
+        eR = ((2 * np.pi * G) / (c**2) * (D_ls / D_s) * (mass / R200)).value
 
         return pipeline.Lens(self.x, self.y, eR, np.zeros_like(self.x))
 
