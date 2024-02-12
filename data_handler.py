@@ -309,4 +309,4 @@ if __name__ == '__main__':
     all_flex = [False, True, True] # Use flexion and g-flexion
     global_signals = [True, False, True] # Use shear and g-flexion (global signals)
 
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_flags=global_signals)
+    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_flags=shear_flex)

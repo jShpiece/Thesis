@@ -8,8 +8,10 @@ from astropy.visualization import hist as fancyhist
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
 # Define default noise parameters
-sigf = 0.01
 sigs = 0.1
+sigf = 0.01
+sigg = 0.02
+
 
 # ------------------------
 # Testing Plotting Functions
@@ -36,7 +38,7 @@ def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=Non
     ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
 
 
-def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrials, xmax, distinguish_lenses=False):
+def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrials, xmax, use_flags, distinguish_lenses=False):
     '''
     Plot histograms of the random realizations.
     '''
@@ -70,8 +72,7 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
 
     fig.suptitle(f'Random Realization Test \n {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(f'Images//rand_real//rr_test_{Nlens}_lens_{Nsource}_source_{Ntrials}.png')
-    plt.close()
+    plt.savefig(f'Images//tests//rr//{Nlens}_lens_{Nsource}_source_{Ntrials}_trials_{use_flags}.png')
 
 # ------------------------
 # Test Implementation Functions
@@ -110,13 +111,11 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     """
     # Setup lensing and source configurations
     true_lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
-    sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, sigg=2*sigf, randompos=True, xmax=xmax)
-
+    sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
     fig.suptitle('Lensing Reconstruction Pipeline', fontsize=16)
-
 
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess()
@@ -133,6 +132,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
 
+
     # Step 4: Iterative elimination
     lenses.iterative_elimination(sources, reducedchi2, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
@@ -141,7 +141,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     # Step 5: Merge lenses that are too close to each other
     ns = Nsource / (2 * xmax)**2
     merger_threshold = 1/np.sqrt(ns)
-    lenses.merge_close_lenses(merger_threshold=merger_threshold)
+    lenses.merge_close_lenses(merger_threshold=10)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Merging', ax=axarr[1,1], legend=False)
 
@@ -156,7 +156,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     plt.show()
 
 
-def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01, sigs=0.1):
+def generate_random_realizations(Ntrials, Nlens, Nsource, xmax, use_flags):
     '''
     Generate random realizations of the lensing field.
     '''
@@ -170,8 +170,8 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
     print_progress_bar(0, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
     
     for trial in range(Ntrials):
-        sources = pipeline.createSources(true_lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg = 2*sigf, randompos=True, xmax=xmax)
-        lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False, use_flags=[True, True, True])
+        sources = pipeline.createSources(true_lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg = sigg, randompos=True, xmax=xmax)
+        lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False, use_flags=use_flags)
         
         num_lenses_recovered = len(lenses.x)
         # Take the minimum of the recovered lenses and the specified number of lenses
@@ -191,7 +191,7 @@ def generate_random_realizations(Ntrials, Nlens=1, Nsource=1, xmax=10, sigf=0.01
     return xsol, ysol, er, true_lenses
 
 
-def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_random=False, source_random=True, use_flags=[True, True, True]):
+def assess_number_recovered(Nlens, Nsource, xmax, lens_random=False, source_random=True, use_flags=[True, True, True]):
     '''
     This runs a simple test of the algorithm, and returns the number of lenses recovered.
     Use this to determine whether the algorithm is able to recover the correct number of lenses when 
@@ -199,7 +199,7 @@ def assess_number_recovered(Nlens, Nsource, xmax, sigf=0.01, sigs=0.1, lens_rand
     '''
     # Initialize true lens and source configurations
     lenses = pipeline.createLenses(nlens=Nlens, randompos=lens_random, xmax=xmax)
-    sources = pipeline.createSources(lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg = 2*sigf, randompos=source_random, xmax=xmax)
+    sources = pipeline.createSources(lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg = sigg, randompos=source_random, xmax=xmax)
 
     # Perform lens position optimization
     recovered_lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False, use_flags=use_flags)
@@ -245,14 +245,14 @@ def visualize_examples(use_shear, use_flexion, use_g_flexion):
 def accuracy_tests(use_shear, use_flexion, use_g_flexion):
     use_flags = [use_shear, use_flexion, use_g_flexion]
     # Generate random realizations
-    Ntrials = 200
-    Nlens = [1, 2]
-    Nsource = 100
+    Ntrials = 1000
+    Nlens = [1,2]
+    Nsource = 100 # Choose source number & xmax such that source density is 0.01 per unit area
     xmax = 50
 
     for nlens in Nlens:
-        xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, sigf=sigf, sigs=sigs)
-        plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, distinguish_lenses=False)
+        xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, use_flags=use_flags)
+        plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, use_flags=use_flags, distinguish_lenses=False)
     
     # Assess number of lenses recovered
     # Use the same constants as above
@@ -274,10 +274,13 @@ def accuracy_tests(use_shear, use_flexion, use_g_flexion):
         plt.vlines(nlens, 0, plt.gca().get_ylim()[1], color='red', label='True Number of Lenses')
         plt.title(f'Number of Lenses Recovered \n {Nsource} Sources, {Ntrials} Trials')
         plt.tight_layout()
-        plt.savefig(f'Images//tests//num_recovered_{nlens}_lens_{Nsource}_source_{Ntrials}.png')
+        plt.savefig(f'Images//tests//n_recovered//{nlens}_lens_{Nsource}_source_{Ntrials}_{use_flags}.png')
         plt.close()
 
 
 if __name__ == '__main__':
-    #visualize_pipeline_steps(2, 20, 5, [True, True, True])
-    accuracy_tests(True, True, True)
+    # visualize_pipeline_steps(1, 100, 50, [True, True, True])
+    # accuracy_tests(True, True, False) # Run tests with shear and flexion
+    # accuracy_tests(True, False, True) # Run tests with shear and g_flexion - these are the two 'global' effects
+    # accuracy_tests(False, True, True) # Run tests with flexion and g_flexion
+    accuracy_tests(True, True, True) # Run tests with all three effects

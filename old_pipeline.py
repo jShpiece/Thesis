@@ -8,18 +8,15 @@ import scipy.optimize as opt
 class Source:
     # Class to store source information. Each source has a position (x, y) 
     # and ellipticity (e1, e2) and flexion (f1, f2)
-    def __init__(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
+    def __init__(self, x, y, e1, e2, f1, f2, sigs, sigf):
         self.x = x
         self.y = y
         self.e1 = e1
         self.e2 = e2
         self.f1 = f1
         self.f2 = f2
-        self.g1 = g1
-        self.g2 = g2
         self.sigs = sigs
         self.sigf = sigf
-        self.sigg = sigg
 
 
     def filter_sources(self, a, max_flexion=0.5):
@@ -28,7 +25,6 @@ class Source:
         self.x, self.y = self.x[valid_indices], self.y[valid_indices]
         self.e1, self.e2 = self.e1[valid_indices], self.e2[valid_indices]
         self.f1, self.f2 = self.f1[valid_indices], self.f2[valid_indices]
-        self.g1, self.g2 = self.g1[valid_indices], self.g2[valid_indices]
         return valid_indices
 
 
@@ -37,9 +33,8 @@ class Source:
         phi = np.arctan2(self.f2, self.f1)
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
-        gflexion = np.sqrt(self.g1**2 + self.g2**2)
         r = gamma / flexion # A characteristic distance from the source
-        te = 2 * gamma * r # The Einstein radius of the lens
+        te = 2 * gamma * np.abs(r) # The Einstein radius of the lens
 
         return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
 
@@ -60,15 +55,12 @@ class Source:
             sinphi = dy/r
             cos2phi = cosphi*cosphi-sinphi*sinphi
             sin2phi = 2*cosphi*sinphi
-            cos3phi = cosphi*cosphi*cosphi - 3*cosphi*sinphi*sinphi
-            sin3phi = 3*cosphi*cosphi*sinphi - sinphi*sinphi*sinphi
 
             self.e1 += -lenses.te[i]/(2*r)*cos2phi
             self.e2 += -lenses.te[i]/(2*r)*sin2phi
             self.f1 += -dx*lenses.te[i]/(2*r*r*r)
             self.f2 += -dy*lenses.te[i]/(2*r*r*r)
-            self.g1 += (3*lenses.te[i]) / (2*r*r) * cos3phi
-            self.g2 += (3*lenses.te[i]) / (2*r*r) * sin3phi
+
 
 
 class Lens:
@@ -86,8 +78,8 @@ class Lens:
         max_attempts = 1
         for i in range(len(self.x)):
             one_source = Source(sources.x[i], sources.y[i], 
-                                sources.e1[i], sources.e2[i], sources.f1[i], sources.f2[i], sources.g1[i], sources.g2[i],
-                                sources.sigs[i], sources.sigf[i], sources.sigg[i])
+                                sources.e1[i], sources.e2[i], sources.f1[i], sources.f2[i],
+                                sources.sigs[i], sources.sigf[i])
             guess = [self.x[i], self.y[i], self.te[i]] # Class is already initialized with initial guesses
             best_result = None
             best_params = guess
@@ -210,7 +202,7 @@ class Lens:
 # Initialization functions
 # ------------------------------
 
-def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5):
+def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,xmax=5):
     #Create sources for a lensing system and apply the lensing signal
 
     #Create the sources - require that they be distributed sphericaly
@@ -229,10 +221,8 @@ def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5
     e2data = np.random.normal(0,sigs,ns)
     f1data = np.random.normal(0,sigf,ns)
     f2data = np.random.normal(0,sigf,ns)
-    g1data = np.random.normal(0,sigg,ns)
-    g2data = np.random.normal(0,sigg,ns)
 
-    sources = Source(x, y, e1data, e2data, f1data, f2data, g1data, g2data, sigs*np.ones(ns), sigf*np.ones(ns), sigg*np.ones(ns))
+    sources = Source(x, y, e1data, e2data, f1data, f2data, sigs*np.ones(ns), sigf*np.ones(ns))
     # Apply the lensing effects of the lenses
     sources.apply_lensing_effects(lenses)
 
@@ -282,7 +272,7 @@ def eR_penalty_function(eR, lower_limit=-20.0, upper_limit=20.0, lambda_penalty_
 
 
 def calc_degrees_of_freedom(sources, lenses, use_flags):
-    dof = ((2 * np.sum(use_flags)) * len(sources.x)) - (3 * len(lenses.x))
+    dof = (2 * np.sum(use_flags)) * len(sources.x) - 3 * len(lenses.x)
     if dof <= 0:
         return np.inf
     return dof
@@ -293,12 +283,10 @@ def calc_raw_chi2(sources, lenses, use_flags):
     # Determine which lensing signals to use, based on the use_flags
     use_shear = use_flags[0]
     use_flexion = use_flags[1]
-    use_g_flexion = use_flags[2]
     # The source clone object represents the sources after the lensing effects of our 'test' lenses
     source_clone = Source(
         sources.x, sources.y, np.zeros_like(sources.e1), np.zeros_like(sources.e2), 
-        np.zeros_like(sources.f1), np.zeros_like(sources.f2), np.zeros_like(sources.g1), np.zeros_like(sources.g2), 
-        sources.sigs, sources.sigf, sources.sigg
+        np.zeros_like(sources.f1), np.zeros_like(sources.f2), sources.sigs, sources.sigf
         )
     source_clone.apply_lensing_effects(lenses) 
     
@@ -307,14 +295,10 @@ def calc_raw_chi2(sources, lenses, use_flags):
     chi2e = ((source_clone.e2 - sources.e2) / sources.sigs) ** 2
     chi1f = ((source_clone.f1 - sources.f1) / sources.sigf) ** 2
     chi2f = ((source_clone.f2 - sources.f2) / sources.sigf) ** 2
-    chi1g = ((source_clone.g1 - sources.g1) / sources.sigg) ** 2
-    chi2g = ((source_clone.g2 - sources.g2) / sources.sigg) ** 2
-
 
     shear_chi2 = (chi1e + chi2e) * use_shear #Check whether this run is using shear
     flexion_chi2 = (chi1f + chi2f) * use_flexion #Check whether this run is using flexion
-    g_flexion_chi2 = (chi1g + chi2g) * use_g_flexion #Check whether this run is using g_flexion
-    chi2 = np.sum(shear_chi2 + flexion_chi2 + g_flexion_chi2) 
+    chi2 = np.sum(shear_chi2 + flexion_chi2) 
 
     penalty = 0
     
@@ -407,7 +391,7 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     print_step_info(flags, "After Iterative Elimination:", lenses, reducedchi2)
 
-    
+
     # Merge lenses that are too close to each other
     # Try a merger threshold based on the source density
     ns = len(sources.x) / (2 * xmax)**2
@@ -418,7 +402,7 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     lenses.merge_close_lenses(merger_threshold=merger_threshold) #This is a placeholder value
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     print_step_info(flags, "After Merging:", lenses, reducedchi2)
-    
+
 
     # Perform a final local minimization on the remaining lenses
     # NOTE - if the number of lenses is too large, this step can take a long time
