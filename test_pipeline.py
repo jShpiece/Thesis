@@ -41,7 +41,7 @@ def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=Non
     ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
 
 
-def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrials, xmax, use_flags, title, distinguish_lenses=False):
+def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrials, xmax, use_flags, title):
     '''
     Plot histograms of the random realizations.
     '''
@@ -58,10 +58,7 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
                 range_val = (-xmax, xmax)
             elif param_label == r'$\theta_E$':
                 range_val = (0, 5)
-            if distinguish_lenses:
-                fancyhist(data[:, lens_num], ax=a, bins='scott', histtype='step', density=True, color=color, label=f'Lens {lens_num + 1}', range=range_val)
-            else:
-                fancyhist(data.flatten(), ax=a, bins='scott', histtype='step', density=True, color=colors[0], label=f'Lens {lens_num + 1}', range=range_val)
+            fancyhist(data.flatten(), ax=a, bins='scott', histtype='step', density=True, color=colors[0], label=f'Lens {lens_num + 1}', range=range_val)
             a.set_xlabel(param_label)
             a.set_ylabel('Probability Density')
 
@@ -191,6 +188,7 @@ def generate_random_realizations(Ntrials, Nlens, Nsource, xmax, use_flags):
 
     # Close the pool
     pool.close()
+    pool.join()
 
     return xsol, ysol, er, num_lenses, true_lenses
 
@@ -239,7 +237,7 @@ def accuracy_tests(use_shear, use_flexion, use_g_flexion):
 
     for nlens in Nlens:
         xsol, ysol, er, num_recovered, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, use_flags=use_flags)
-        plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, use_flags=use_flags, title=flag_title, distinguish_lenses=False)
+        plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, use_flags=use_flags, title=flag_title)
 
         plt.figure()
         fancyhist(num_recovered, bins='scott', histtype='step', density=True, label=f'{nlens} Lenses')
@@ -247,6 +245,7 @@ def accuracy_tests(use_shear, use_flexion, use_g_flexion):
         plt.ylabel('Probability Density')
         plt.legend()
         plt.vlines(nlens, 0, plt.gca().get_ylim()[1], color='red', label='True Number of Lenses')
+        plt.vlines(np.median(num_recovered), 0, plt.gca().get_ylim()[1], color='blue', label='Median: {:.2f}'.format(np.median(num_recovered)))
         plt.title(f'Number of Lenses Recovered \n {Nsource} Sources, {Ntrials} Trials' + '\n' + flag_title)
         plt.tight_layout()
         plt.savefig(f'Images//tests//n_recovered//{nlens}_lens_{Nsource}_source_{Ntrials}_{use_flags}.png')
