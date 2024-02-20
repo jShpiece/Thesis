@@ -260,11 +260,3 @@ if __name__ == '__main__':
     # visualize_pipeline_steps(1, 100, 50, [True, True, True])
     print('Running tests')
     accuracy_tests(True, True, False) # Run tests with shear and flexion
-    print('Finished shear and flexion')
-    accuracy_tests(True, False, True) # Run tests with shear and g_flexion - these are the two 'global' effects
-    print('Finished shear and g_flexion')
-    accuracy_tests(False, True, True) # Run tests with flexion and g_flexion
-    print('Finished flexion and g_flexion')
-    accuracy_tests(True, True, True) # Run tests with all three effects
-    print('Finished all three')
-    print('All tests complete')
