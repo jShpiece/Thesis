@@ -4,6 +4,9 @@ import pipeline
 from utils import print_progress_bar
 import time
 from astropy.visualization import hist as fancyhist
+from multiprocessing import Pool
+from functools import partial
+
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
@@ -38,7 +41,7 @@ def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=Non
     ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
 
 
-def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrials, xmax, use_flags, distinguish_lenses=False):
+def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrials, xmax, use_flags, title, distinguish_lenses=False):
     '''
     Plot histograms of the random realizations.
     '''
@@ -70,9 +73,10 @@ def plot_random_realizations(xsol, ysol, er, true_lenses, Nlens, Nsource, Ntrial
         a.vlines(true_value, 0, a.get_ylim()[1], color='red', label='True Lenses')
         a.legend(loc='upper right')
 
-    fig.suptitle(f'Random Realization Test \n {Nlens} lenses, {Nsource} sources \n {Ntrials} trials')
+    fig.suptitle(f'Random Realization Test \n {Nlens} lenses, {Nsource} sources \n {Ntrials} trials' + '\n' + title, fontsize=16)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig(f'Images//tests//rr//{Nlens}_lens_{Nsource}_source_{Ntrials}_trials_{use_flags}.png')
+    plt.close()
 
 # ------------------------
 # Test Implementation Functions
@@ -156,6 +160,12 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     plt.show()
 
 
+def process_trial(trial, true_lenses, Nsource, xmax, use_flags):
+    sources = pipeline.createSources(true_lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg=sigg, randompos=True, xmax=xmax)
+    lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False, use_flags=use_flags)
+    return lenses
+
+
 def generate_random_realizations(Ntrials, Nlens, Nsource, xmax, use_flags):
     '''
     Generate random realizations of the lensing field.
@@ -163,52 +173,27 @@ def generate_random_realizations(Ntrials, Nlens, Nsource, xmax, use_flags):
     # True lens configuration
     true_lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
 
-    # Store solution arrays
-    xsol, ysol, er = np.empty((Ntrials, Nlens)), np.empty((Ntrials, Nlens)), np.empty((Ntrials, Nlens))
+    solutions = []
+    num_processes = 40
 
-    # Initialize a progress bar
-    print_progress_bar(0, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
-    
-    for trial in range(Ntrials):
-        sources = pipeline.createSources(true_lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg = sigg, randompos=True, xmax=xmax)
-        lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False, use_flags=use_flags)
-        
-        num_lenses_recovered = len(lenses.x)
-        # Take the minimum of the recovered lenses and the specified number of lenses
-        for i in range(min(num_lenses_recovered, Nlens)):
-            xsol[trial, i], ysol[trial, i], er[trial, i] = lenses.x[i], lenses.y[i], lenses.te[i]
-    
-        # Update progress bar
-        print_progress_bar(trial, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
-    
-    # Finalize the progress bar so that I don't lose my mind
-    print_progress_bar(Ntrials, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
+    with Pool(num_processes) as pool:
+        # Map the function over the range of trials
+        func = partial(process_trial, true_lenses=true_lenses, Nsource=Nsource, xmax=xmax, use_flags=use_flags)
+        solutions = pool.map(func, range(Ntrials))
 
-    np.save('Data//xsol_{}_lens_{}_source'.format(Nlens, Nsource), xsol)
-    np.save('Data//ysol_{}_lens_{}_source'.format(Nlens, Nsource), ysol)
-    np.save('Data//er_{}_lens_{}_source'.format(Nlens, Nsource), er)
+    # Extract the lens positions from the solutions
+    xsol = np.array(np.concatenate([lenses.x for lenses in solutions]))
+    ysol = np.array(np.concatenate([lenses.y for lenses in solutions]))
+    er = np.array(np.concatenate([lenses.te for lenses in solutions]))
 
-    return xsol, ysol, er, true_lenses
+    # Count the number of lenses found in each trial
+    num_lenses = np.array([len(lenses.x) for lenses in solutions])
 
+    # Close the pool
+    pool.close()
 
-def assess_number_recovered(Nlens, Nsource, xmax, lens_random=False, source_random=True, use_flags=[True, True, True]):
-    '''
-    This runs a simple test of the algorithm, and returns the number of lenses recovered.
-    Use this to determine whether the algorithm is able to recover the correct number of lenses when 
-    the number of lenses is not known a priori by the algorithm.
-    '''
-    # Initialize true lens and source configurations
-    lenses = pipeline.createLenses(nlens=Nlens, randompos=lens_random, xmax=xmax)
-    sources = pipeline.createSources(lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg = sigg, randompos=source_random, xmax=xmax)
+    return xsol, ysol, er, num_lenses, true_lenses
 
-    # Perform lens position optimization
-    recovered_lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False, use_flags=use_flags)
-    # Don't count any lenses with an einstein radius of 0
-    num_recovered = 0
-    for eR in recovered_lenses.te:
-        if eR > 0:
-            num_recovered += 1
-    return num_recovered
 
 
 # ------------------------
@@ -244,6 +229,8 @@ def visualize_examples(use_shear, use_flexion, use_g_flexion):
 
 def accuracy_tests(use_shear, use_flexion, use_g_flexion):
     use_flags = [use_shear, use_flexion, use_g_flexion]
+    signals = ['Shear', 'Flexion', 'G-Flexion']
+    flag_title = 'Signals used: ' + ', '.join([signal for signal, flag in zip(signals, use_flags) if flag])
     # Generate random realizations
     Ntrials = 1000
     Nlens = [1,2]
@@ -251,36 +238,34 @@ def accuracy_tests(use_shear, use_flexion, use_g_flexion):
     xmax = 50
 
     for nlens in Nlens:
-        xsol, ysol, er, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, use_flags=use_flags)
-        plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, use_flags=use_flags, distinguish_lenses=False)
-    
-    # Assess number of lenses recovered
-    # Use the same constants as above
-    for nlens in Nlens:
+        xsol, ysol, er, num_recovered, true_lenses = generate_random_realizations(Ntrials, Nlens=nlens, Nsource=Nsource, xmax=xmax, use_flags=use_flags)
+        plot_random_realizations(xsol, ysol, er, true_lenses, Nlens=nlens, Nsource=Nsource, Ntrials=Ntrials, xmax=xmax, use_flags=use_flags, title=flag_title, distinguish_lenses=False)
+
         plt.figure()
-        num_recovered = []
-        # Initialize a progress bar
-        print_progress_bar(0, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
-        for trial in range(Ntrials):
-            # Update progress bar
-            print_progress_bar(trial, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
-            num_recovered.append(assess_number_recovered(nlens, Nsource, xmax, lens_random=False, source_random=True))
-        print_progress_bar(Ntrials, Ntrials, prefix='Random Realization Progress:', suffix='Complete', length=50)
-        np.save(f'Data//num_recovered_{nlens}_lens_{Nsource}_source', num_recovered)
         fancyhist(num_recovered, bins='scott', histtype='step', density=True, label=f'{nlens} Lenses')
         plt.xlabel('Number of Lenses Recovered')
         plt.ylabel('Probability Density')
         plt.legend()
         plt.vlines(nlens, 0, plt.gca().get_ylim()[1], color='red', label='True Number of Lenses')
-        plt.title(f'Number of Lenses Recovered \n {Nsource} Sources, {Ntrials} Trials')
+        plt.title(f'Number of Lenses Recovered \n {Nsource} Sources, {Ntrials} Trials' + '\n' + flag_title)
         plt.tight_layout()
         plt.savefig(f'Images//tests//n_recovered//{nlens}_lens_{Nsource}_source_{Ntrials}_{use_flags}.png')
         plt.close()
 
+        print('Finished test with', nlens, 'lenses')
+
+
+
 
 if __name__ == '__main__':
     # visualize_pipeline_steps(1, 100, 50, [True, True, True])
-    # accuracy_tests(True, True, False) # Run tests with shear and flexion
-    # accuracy_tests(True, False, True) # Run tests with shear and g_flexion - these are the two 'global' effects
-    # accuracy_tests(False, True, True) # Run tests with flexion and g_flexion
+    print('Running tests')
+    accuracy_tests(True, True, False) # Run tests with shear and flexion
+    print('Finished shear and flexion')
+    accuracy_tests(True, False, True) # Run tests with shear and g_flexion - these are the two 'global' effects
+    print('Finished shear and g_flexion')
+    accuracy_tests(False, True, True) # Run tests with flexion and g_flexion
+    print('Finished flexion and g_flexion')
     accuracy_tests(True, True, True) # Run tests with all three effects
+    print('Finished all three')
+    print('All tests complete')

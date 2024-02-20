@@ -41,11 +41,11 @@ class Halo:
         D_ls = cosmo.angular_diameter_distance_z1z2(z, z_s).to(u.meter)
 
         mass = self.mass * 2 * 10**30 # Mass in kilograms
-        print(R200)
-        print(mass)
+        # Print the mass in exponent form (mass is currently in kg as a numpy array)
+        print(f'Mass: {mass[0]:.2e} kg')
         R200 = R200 * 3.086 * 10**19 # Convert to meters
 
-        eR = ((2 * np.pi * G) / (c**2) * (D_ls / D_s) * (mass / R200)).value
+        eR = ((2 * np.pi * G) / (c**2) * (D_ls / D_s) * (mass / R200)).value * 206265 # Convert to arcseconds
 
         return pipeline.Lens(self.x, self.y, eR, np.zeros_like(self.x))
 
