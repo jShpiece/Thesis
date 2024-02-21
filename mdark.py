@@ -10,12 +10,16 @@ from astropy.cosmology import Planck15 as cosmo
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
+# Important Notes!
+# Total Mass is in units of M_sun/h
+# Characteristic Size is in units of arcseconds
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
 # Physical constants
 c = 3 * 10**8 # Speed of light in m/s
 G = 6.674 * 10**-11 # Gravitational constant in m^3/kg/s^2
 h = 0.7 # Hubble constant
+
 
 class Halo:
     def __init__(self, x, y, z, c, mass):
@@ -111,10 +115,13 @@ def plot_mass_dist(z):
     chunks = chunk_data(file)
 
     Mass = []
+    size = []
     for chunk in chunks:
         Mass.append(chunk[' Total Mass'].values)
+        size.append(chunk[' Characteristic Size'].values)
     
     Mass = np.concatenate(Mass)
+    size = np.concatenate(size)
     # Plot the mass distribution (log scale)
     # Use 1000 bins
     
@@ -127,6 +134,16 @@ def plot_mass_dist(z):
     ax.set_title(r'$Multidark: z = {}$'.format(z))
     fig.tight_layout()
     fig.savefig(dir + 'mass_dist_{}.png'.format(z))
+
+    fig, ax = plt.subplots()
+    fancy_hist(size, bins=1000, histtype='step', density=True, ax=ax)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlabel(r'$R_{\rm dark}$ [Mpc]')
+    ax.set_ylabel('Probability Density')
+    ax.set_title(r'$Multidark: z = {}$'.format(z))
+    fig.tight_layout()
+    fig.savefig(dir + 'size_dist_{}.png'.format(z))
 
 
 def count_clusters(z):
@@ -274,6 +291,21 @@ def plot_results():
 
 if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
+
+    z = 0.194
+    d = cosmo.angular_diameter_distance(z).to(u.meter)
+    # Given a distance in Mpc, convert to arcseconds
+
+    x = np.linspace(0, 1000, 1000)
+
+    y = ((x * 3.086 * 10**22) / d).value * 206265
+
+    plt.plot(x, y)
+    plt.show()
+
+    # plot_mass_dist(0.194)
+
+    raise SystemExit
 
     ID = choose_ID(0.194, (1e13, 1e14), 2)
     halos = find_halos(ID, 0.194)
