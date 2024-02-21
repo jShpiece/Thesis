@@ -248,6 +248,8 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         title += r'$\gamma$' if use_flags[0] else ''    
         title += ' F' if use_flags[1] else ''
         title += ' G' if use_flags[2] else ''
+    else:
+        title += '\n All Signals Used'
 
     # Plot the convergence map
     fig, ax = plt.subplots()
@@ -265,7 +267,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
                 break
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
-    plt.show()
+    plt.close()
 
 
 def plot_er_dist(merge_radius=1):
@@ -308,5 +310,8 @@ if __name__ == '__main__':
     shear_flex = [True, True, False] # Use shear and flexion
     all_flex = [False, True, True] # Use flexion and g-flexion
     global_signals = [True, False, True] # Use shear and g-flexion (global signals)
-
-    reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=True, use_flags=shear_flex)
+    signal_choices = [use_all_signals, shear_flex, all_flex, global_signals]
+        
+    for field in ['cluster', 'parallel']:
+        for use_flags in signal_choices:
+            reconstruct_a2744(field=field, randomize=False, full_reconstruction=True, use_flags=use_flags)

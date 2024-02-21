@@ -29,8 +29,6 @@ class Halo:
         omega_crit = 0.27
         omega_z = 0.27 * (1 + z)**3 / (0.27 * (1 + z)**3 + 0.73)
         R200 = (1.63 * 10**-2) * (self.mass / h**-1)**(1/3) * (omega_crit / omega_z)**(-1/3) * (1 + z)**(-1) * h**-1 # In Kpc
-        # Convert to arcseconds
-        # TBD - involves cosmology based on z
         return R200
     
     def build_lenses(self, z, R200):
@@ -47,7 +45,7 @@ class Halo:
 
         eR = ((2 * np.pi * G) / (c**2) * (D_ls / D_s) * (mass / R200)).value * 206265 # Convert to arcseconds
 
-        return pipeline.Lens(self.x, self.y, eR, np.zeros_like(self.x))
+        return pipeline.Lens(np.array(self.x), np.array(self.y), np.array(eR), np.zeros_like(self.x))
 
 
 def fix_file(z):
@@ -137,15 +135,19 @@ def count_clusters(z):
 
     count1 = 0
     count2 = 0
+    count3 = 0
 
     for chunk in chunks:
-        # Count each cluster with mass > 10^14 M_sun
-        count1 += np.sum(chunk[' Total Mass'].values > 1e14)
-        # Count each cluster of mass > 10^14 M_sun and more than 1 halo
-        count2 += np.sum((chunk[' Total Mass'].values > 1e14) & (chunk[' Halo Number'].values > 1))
+        # Count each cluster with mass > 10^13 M_sun
+        count1 += np.sum(chunk[' Total Mass'].values > 1e13)
+        # Count each cluster of mass > 10^14 M_sun 
+        count2 += np.sum((chunk[' Total Mass'].values > 1e14))
+        # Count each cluster of mass > 10^15 M_sun 
+        count2 += np.sum((chunk[' Total Mass'].values > 1e15))
 
-    print('Number of clusters with mass > 10^14 M_sun: {}'.format(count1))
-    print('Number of clusters with mass > 10^14 M_sun and more than 1 halo: {}'.format(count2))
+    print('Number of clusters with mass > 10^13 M_sun: {}'.format(count1))
+    print('Number of clusters with mass > 10^14 M_sun: {}'.format(count2))
+    print('Number of clusters with mass > 10^15 M_sun: {}'.format(count3))
 
 
 def find_halos(ID, z):
@@ -197,9 +199,9 @@ def choose_ID(z, mass_range, min_halos):
     return IDs
     
     # Now we have the correct objects, we can return the relevant information
-    
 
-def run_analysis(halos):
+
+def run_analysis(halos, z):
     '''
     Given a set of halos, run the analysis
     This involves the following steps
@@ -219,11 +221,49 @@ def run_analysis(halos):
     6. Generate a confusion matrix
     7. Save the results to a file
     '''
-    pass
+
+    # Convert coordinates to arcseconds
+    # Currently, coordinates are in Mpc
+    # We need to convert to arcseconds
+    d = cosmo.angular_diameter_distance(z).to(u.meter)
+    # Convert to meters
+    x = halos.x * 3.086 * 10**22
+    y = halos.y * 3.086 * 10**22
+    # Convert to arcseconds
+    x = (x / d).value * 206265
+    y = (y / d).value * 206265
+
+    halos.x = x
+    halos.y = y
+
+    lenses = halos.build_lenses(z, halos.calc_R200(z))
+    print(len(lenses.x))
+    print(np.mean(lenses.x))
+    print(np.std(lenses.x))
+
+    # Center the lenses at (0, 0)
+    # This is a necessary step for the pipeline
+    # to work correctly
+    centroid = np.mean(lenses.x), np.mean(lenses.y)
+    lenses.x -= np.mean(lenses.x)
+    lenses.y -= np.mean(lenses.y)
+
+    xmax = np.max([np.max(lenses.x), np.max(lenses.y)])
+    # Set the maximum extent of the field of view
+    # to be the maximum extent of the lenses
+
+    # Generate a set of background galaxies
+    ns = 0.01
+    Nsource = int(ns * (xmax*2)**2)
+    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax)
+
+    candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, [True, True, True])
+
+    return candidate_lenses
 
 
-def run_bulk_analysis():
-    # Get a set of cluster IDs and run the analysis on each. 
+def build_test_set(Nhalos):
+
     pass
 
 
@@ -235,9 +275,16 @@ def plot_results():
 if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
 
-    start = time.time()
-    ID = choose_ID(0.194, [1e14, 1e15], 1)
+    ID = choose_ID(0.194, (1e13, 1e14), 2)
     halos = find_halos(ID, 0.194)
+    lenses = run_analysis(halos, 0.194)
+    plt.figure()
+    plt.scatter(lenses.x, lenses.y, c = lenses.te, cmap='plasma', s = lenses.te * 100, alpha=0.5)
+    plt.colorbar()
+    plt.show()
+
+    raise SystemExit
+
     R200 = halos.calc_R200(0.194)
     lenses = halos.build_lenses(0.194, R200)
     print(lenses.x, lenses.y, lenses.te)
