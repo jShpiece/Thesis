@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pipeline
-from utils import print_progress_bar
+import utils
 import time
 from astropy.visualization import hist as fancyhist
 from multiprocessing import Pool
@@ -90,8 +90,8 @@ def run_simple_test(Nlens, Nsource, xmax, flags=False, lens_random=False, source
     start_time = time.time()
 
     # Initialize true lens and source configurations
-    lenses = pipeline.createLenses(nlens=Nlens, randompos=lens_random, xmax=xmax)
-    sources = pipeline.createSources(lenses, ns=Nsource, randompos=source_random, xmax=xmax)
+    lenses = utils.createLenses(nlens=Nlens, randompos=lens_random, xmax=xmax)
+    sources = utils.createSources(lenses, ns=Nsource, randompos=source_random, xmax=xmax)
 
     # Perform lens position optimization
     recovered_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=flags, use_flags=[True, True, True])
@@ -111,8 +111,8 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
         xmax: range of lensing field
     """
     # Setup lensing and source configurations
-    true_lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
-    sources = pipeline.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
+    true_lenses = utils.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
+    sources = utils.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax)
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
@@ -128,6 +128,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
 
+
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
@@ -138,6 +139,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     lenses.iterative_elimination(sources, reducedchi2, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Iterative Elimination', ax=axarr[1,0], legend=False)
+
 
     # Step 5: Merge lenses that are too close to each other
     ns = Nsource / (2 * xmax)**2
@@ -158,7 +160,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
 
 
 def process_trial(trial, true_lenses, Nsource, xmax, use_flags):
-    sources = pipeline.createSources(true_lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg=sigg, randompos=True, xmax=xmax)
+    sources = utils.createSources(true_lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg=sigg, randompos=True, xmax=xmax)
     lenses, _ = pipeline.fit_lensing_field(sources, xmax=xmax, flags=False, use_flags=use_flags)
     return lenses
 
@@ -168,7 +170,7 @@ def generate_random_realizations(Ntrials, Nlens, Nsource, xmax, use_flags):
     Generate random realizations of the lensing field.
     '''
     # True lens configuration
-    true_lenses = pipeline.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
+    true_lenses = utils.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
 
     solutions = []
     num_processes = 40

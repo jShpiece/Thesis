@@ -3,6 +3,7 @@ from astropy.cosmology import Planck15 as cosmo
 from astropy.constants import c, G
 from astropy import units as u
 import scipy.ndimage
+import pipeline
 
 # ------------------------
 # Terminal Utility Functions
@@ -201,3 +202,62 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
 
 def mass_sheet_transformation(kappa, k):
     return k*kappa + (1 - k)
+
+
+# ------------------------------
+# Initialization functions
+# ------------------------------
+
+def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5):
+    #Create sources for a lensing system and apply the lensing signal
+
+    #Create the sources - require that they be distributed sphericaly
+    if randompos == True:
+        r = xmax*np.sqrt(np.random.random(ns))
+        phi = 2*np.pi*np.random.random(ns)
+    else: #Uniformly spaced sources - single choice of r, uniform phi
+        r = xmax / 2
+        phi = 2*np.pi*(np.arange(ns)+0.5)/(ns)
+    
+    x = r*np.cos(phi)
+    y = r*np.sin(phi)
+
+    # Initialize lensing parameters with gaussian noise
+    e1data = np.random.normal(0,sigs,ns)
+    e2data = np.random.normal(0,sigs,ns)
+    f1data = np.random.normal(0,sigf,ns)
+    f2data = np.random.normal(0,sigf,ns)
+    g1data = np.random.normal(0,sigg,ns)
+    g2data = np.random.normal(0,sigg,ns)
+
+    sources = pipeline.Source(x, y, e1data, e2data, f1data, f2data, g1data, g2data, sigs*np.ones(ns), sigf*np.ones(ns), sigg*np.ones(ns))
+    # Apply the lensing effects of the lenses
+    sources.apply_lensing_effects(lenses)
+
+    return sources
+
+
+def createLenses(nlens=1,randompos=True,xmax=10,strength_choice='identical'):
+    if randompos == True:
+        xlarr = -xmax + 2*xmax*np.random.random(nlens)
+        ylarr = -xmax + 2*xmax*np.random.random(nlens)
+    else: #Uniformly spaced lenses
+        xlarr = -xmax + 2*xmax*(np.arange(nlens)+0.5)/(nlens)
+        ylarr = np.zeros(nlens)
+    
+    # Now we assign einstein radii based on the strength_choice
+    if strength_choice == 'identical':
+        tearr = np.ones(nlens)
+    elif strength_choice == 'random':
+        tearr = np.random.random(nlens) * 20
+    elif strength_choice == 'uniform':
+        tearr = np.linspace(0.1, 20, nlens)
+    elif strength_choice == 'cluster':
+        tearr = np.ones(nlens)
+        tearr[0] = 10
+    else:
+        raise ValueError("Invalid strength_choice")
+
+    
+    lenses = pipeline.Lens(xlarr, ylarr, tearr, np.empty(nlens))
+    return lenses
