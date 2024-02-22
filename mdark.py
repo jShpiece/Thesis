@@ -7,6 +7,7 @@ import pipeline
 import utils
 import astropy.units as u
 from astropy.cosmology import Planck15 as cosmo
+import sklearn.metrics
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
@@ -276,18 +277,91 @@ def run_analysis(halos, z):
 
     candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, [True, True, True])
 
-    return candidate_lenses
+    return lenses, candidate_lenses
 
 
-def build_test_set(Nhalos):
+def build_test_set(Nhalos, z):
+    # Select a number of halos, spaced evenly in log space across the mass range
+    M_min = 1e13
+    M_max = 1e15
+    masses = np.logspace(np.log10(M_min), np.log10(M_max), Nhalos)
+    IDs = []
+    # mass range will be between this mass and the next mass, for each ID
+    for i in range(Nhalos):
+        ID = choose_ID(z, (masses[i], masses[i+1]), 2)
+        IDs.append(ID)
+    return IDs
 
-    pass
 
 
-def plot_results():
-    # Plot the results of the analysis
-    pass
+def process_results(halos, lenses, candidate_lenses, z):
+    # Given the results of the pipeline, process the results
+    # We can directly compare the input lenses to the candidate lenses
+    # We can also compare the true mass from the halos to the inferred mass
+    # from the candidate lenses
 
+    # Get the true mass of the system
+    xmax = np.max([np.max(candidate_lenses.x), np.max(candidate_lenses.y)])
+    extent = [-xmax, xmax, -xmax, xmax]
+    kappa = utils.calculate_kappa(candidate_lenses, extent, 0.1, 0.01, 0.02)
+    mass = utils.calculate_mass(kappa, z, 0.5, 1)
+    true_mass = np.sum(halos.mass)
+
+    # Now compare the lenses to the candidate lenses
+    
+    # Match the lenses to the candidate lenses
+    # This will give us a list of true positives, false positives, true negatives, and false negatives
+    # We can use this to generate a confusion matrix
+
+    # We can also generate a ROC curve
+
+    x_true = lenses.X
+    y_true = lenses.Y
+    x_pred = candidate_lenses.x
+    y_pred = candidate_lenses.y
+
+    # We can use the sklearn.metrics module to generate a confusion matrix
+    # and a ROC curve
+
+    # First, we need to match the true and predicted lenses
+    # This is a simple nearest neighbour search
+    # We can use the sklearn.metrics.pairwise module to do this
+    # We can use the euclidean distance as a metric
+    # We can then use the sklearn.metrics.pairwise_distances function to generate the distance matrix
+    # We can then use the np.argmin function to find the nearest neighbour for each true lens
+    # We can then use the sklearn.metrics.confusion_matrix function to generate the confusion matrix
+    # We can then use the sklearn.metrics.roc_curve function to generate the ROC curve
+    # We can then use the sklearn.metrics.auc function to calculate the area under the ROC curve
+
+    # We can also use the sklearn.metrics.precision_recall_curve function to generate the precision-recall curve
+    # We can then use the sklearn.metrics.average_precision_score function to calculate the average precision score
+
+    # Beginning
+    # Generate the distance matrix
+    distance_matrix = sklearn.metrics.pairwise_distances(x_true, x_pred, metric='euclidean')
+    # Find the nearest neighbour for each true lens
+    nearest_neighbour = np.argmin(distance_matrix, axis=1)
+    # Generate the confusion matrix
+    confusion_matrix = sklearn.metrics.confusion_matrix(np.arange(len(x_true)), nearest_neighbour)
+    # Generate the ROC curve
+    fpr, tpr, thresholds = sklearn.metrics.roc_curve(np.arange(len(x_true)), nearest_neighbour)
+    # Calculate the area under the ROC curve
+    auc = sklearn.metrics.auc(fpr, tpr)
+    # Generate the precision-recall curve
+    precision, recall, thresholds = sklearn.metrics.precision_recall_curve(np.arange(len(x_true)), nearest_neighbour)
+    # Calculate the average precision score
+    average_precision = sklearn.metrics.average_precision_score(np.arange(len(x_true)), nearest_neighbour)
+
+    # Save the results to a file
+    results = {'True Mass': true_mass,
+                'Inferred Mass': mass,
+                'Confusion Matrix': confusion_matrix,
+                'ROC Curve': (fpr, tpr, auc),
+                'Precision-Recall Curve': (precision, recall, average_precision)
+                }
+
+    np.savez('results_{}.npz'.format(z), results)
+    return results
 
 if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
