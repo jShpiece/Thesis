@@ -310,57 +310,67 @@ def process_results(halos, lenses, candidate_lenses, z):
     # Now compare the lenses to the candidate lenses
     
     # Match the lenses to the candidate lenses
-    # This will give us a list of true positives, false positives, true negatives, and false negatives
-    # We can use this to generate a confusion matrix
+    # This is a nearest neighbour problem
+    # We can use the sklearn.metrics.pairwise_distances function
+    # to find the nearest neighbour for each lens
+    # We can then compare the true mass to the inferred mass
+    # We can also look at the number of lenses that were correctly
+    # identified, the number of false positives, and the number of
+    # false negatives
 
-    # We can also generate a ROC curve
 
-    x_true = lenses.X
-    y_true = lenses.Y
+    x_true = lenses.x
+    y_true = lenses.y
     x_pred = candidate_lenses.x
     y_pred = candidate_lenses.y
 
-    # We can use the sklearn.metrics module to generate a confusion matrix
-    # and a ROC curve
+    # Create a distance matrix
+    distance_matrix = sklearn.metrics.pairwise_distances(x_true, x_pred, y_true, y_pred)
 
-    # First, we need to match the true and predicted lenses
-    # This is a simple nearest neighbour search
-    # We can use the sklearn.metrics.pairwise module to do this
-    # We can use the euclidean distance as a metric
-    # We can then use the sklearn.metrics.pairwise_distances function to generate the distance matrix
-    # We can then use the np.argmin function to find the nearest neighbour for each true lens
-    # We can then use the sklearn.metrics.confusion_matrix function to generate the confusion matrix
-    # We can then use the sklearn.metrics.roc_curve function to generate the ROC curve
-    # We can then use the sklearn.metrics.auc function to calculate the area under the ROC curve
-
-    # We can also use the sklearn.metrics.precision_recall_curve function to generate the precision-recall curve
-    # We can then use the sklearn.metrics.average_precision_score function to calculate the average precision score
-
-    # Beginning
-    # Generate the distance matrix
-    distance_matrix = sklearn.metrics.pairwise_distances(x_true, x_pred, metric='euclidean')
-    # Find the nearest neighbour for each true lens
+    # Find the nearest neighbour for each lens
     nearest_neighbour = np.argmin(distance_matrix, axis=1)
-    # Generate the confusion matrix
-    confusion_matrix = sklearn.metrics.confusion_matrix(np.arange(len(x_true)), nearest_neighbour)
-    # Generate the ROC curve
-    fpr, tpr, thresholds = sklearn.metrics.roc_curve(np.arange(len(x_true)), nearest_neighbour)
-    # Calculate the area under the ROC curve
-    auc = sklearn.metrics.auc(fpr, tpr)
-    # Generate the precision-recall curve
-    precision, recall, thresholds = sklearn.metrics.precision_recall_curve(np.arange(len(x_true)), nearest_neighbour)
-    # Calculate the average precision score
-    average_precision = sklearn.metrics.average_precision_score(np.arange(len(x_true)), nearest_neighbour)
 
+    # Compare the strengths of the lenses
+    true_strength = lenses.te
+    pred_strength = candidate_lenses.te
+
+    # Assess the quality of the match
+    # Match lenses to candidate lenses based on distance
+    # If they are within a certain distance, and the strengths
+    # are similar, then we have a match
+
+    # Also, we aren't going to use a confusion matrix, because 
+    # we don't have a binary classification problem
+    # We have a regression problem
+
+    # Lets get started. First, match the lenses to the candidate lenses
+    true_positives = 0
+    for i in range(len(nearest_neighbour)):
+        # If the distance is small, and the strengths are similar
+        # then we have a match
+        if distance_matrix[i, nearest_neighbour[i]] < 0.1 and abs(true_strength[i] - pred_strength[nearest_neighbour[i]]) < 1:
+            true_positives += 1
+    
+    # Now, count the false positives
+    false_positives = len(candidate_lenses) - true_positives
+
+    # Now, count the false negatives
+    false_negatives = len(lenses) - true_positives
+
+    # Now, we can save the results to a file
+    results = {'true_mass': true_mass, 
+                'inferred_mass': mass,
+                'true_positives': true_positives,
+                'false_positives': false_positives,
+                'false_negatives': false_negatives}
+    
     # Save the results to a file
-    results = {'True Mass': true_mass,
-                'Inferred Mass': mass,
-                'Confusion Matrix': confusion_matrix,
-                'ROC Curve': (fpr, tpr, auc),
-                'Precision-Recall Curve': (precision, recall, average_precision)
-                }
-
-    np.savez('results_{}.npz'.format(z), results)
+    with open('results.txt', 'w') as f:
+        f.write('True Mass: {}\n'.format(true_mass))
+        f.write('Inferred Mass: {}\n'.format(mass))
+        f.write('True Positives: {}\n'.format(true_positives))
+        f.write('False Positives: {}\n'.format(false_positives))
+        f.write('False Negatives: {}\n'.format(false_negatives))
     return results
 
 if __name__ == '__main__':

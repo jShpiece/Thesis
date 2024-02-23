@@ -6,6 +6,7 @@ import time
 from astropy.visualization import hist as fancyhist
 from multiprocessing import Pool
 from functools import partial
+import sklearn.metrics
 
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
@@ -259,6 +260,74 @@ def accuracy_tests(use_shear, use_flexion, use_g_flexion):
 
 
 if __name__ == '__main__':
-    # visualize_pipeline_steps(1, 100, 50, [True, True, True])
-    print('Running tests')
-    accuracy_tests(True, True, False) # Run tests with shear and flexion
+    Nlens = 2
+    Nsource = 100
+    xmax = 50
+    use_flags = [True, True, True]
+
+    lenses = utils.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
+    sources = utils.createSources(lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg=sigg, randompos=True, xmax=xmax)
+    candidate_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=True, use_flags=use_flags)
+
+    x_true = lenses.x
+    y_true = lenses.y
+    x_pred = candidate_lenses.x
+    y_pred = candidate_lenses.y
+
+    # Create a distance matrix
+    distance_matrix = sklearn.metrics.pairwise_distances(np.array([x_true, y_true]).T, np.array([x_pred, y_pred]).T)
+
+    # Find the nearest neighbour for each lens
+    nearest_neighbour = np.argmin(distance_matrix, axis=1)
+
+    # Compare the strengths of the lenses
+    true_strength = lenses.te
+    pred_strength = candidate_lenses.te
+
+    # Assess the quality of the match
+    # Match lenses to candidate lenses based on distance
+    # If they are within a certain distance, and the strengths
+    # are similar, then we have a match
+
+    # Also, we aren't going to use a confusion matrix, because 
+    # we don't have a binary classification problem
+    # We have a regression problem
+
+    # Lets get started. First, match the lenses to the candidate lenses
+    true_positives = 0
+    for i in range(len(nearest_neighbour)):
+        # If the distance is small, and the strengths are similar
+        # then we have a match
+        if distance_matrix[i, nearest_neighbour[i]] < 1 and abs(true_strength[i] - pred_strength[nearest_neighbour[i]]) < 1:
+            true_positives += 1
+    # Now, count the false positives
+    false_positives = len(candidate_lenses.x) - true_positives
+
+    # Now, count the false negatives
+    false_negatives = len(lenses.x) - true_positives
+
+    # Plot the results, with the true positives and false positives colored
+    plt.figure()
+    plt.scatter(x_true, y_true, color='red', label='True Lenses')
+    plt.scatter(x_pred, y_pred, color='blue', label='Candidate Lenses')
+    # Label predicted lenses that are true positives
+    for i in range(len(nearest_neighbour)):
+        if distance_matrix[i, nearest_neighbour[i]] < 1 and abs(true_strength[i] - pred_strength[nearest_neighbour[i]]) < 1:
+            plt.scatter(x_pred[nearest_neighbour[i]], y_pred[nearest_neighbour[i]], color='green', label='True Positive')
+    # Label all lenses with einstein radii
+    for i, eR in enumerate(candidate_lenses.te):
+        plt.annotate(np.round(eR, 2), (x_pred[i], y_pred[i]))
+    plt.xlabel('x')
+    plt.ylabel('y')
+    title = 'Lensing Reconstruction \n'
+    if (true_positives == len(lenses.x)):
+        title += 'Perfect Match'
+    else:
+        title += f'Accuracy: {true_positives / len(lenses.x)}'
+    plt.title(title)
+    plt.legend()
+    plt.gca().set_aspect('equal')
+    plt.xlim(-xmax, xmax)
+    plt.ylim(-xmax, xmax)
+    plt.legend()
+    plt.show()
