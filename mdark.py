@@ -8,6 +8,7 @@ import utils
 import astropy.units as u
 from astropy.cosmology import Planck15 as cosmo
 import sklearn.metrics
+import pickle
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
@@ -44,9 +45,7 @@ class Halo:
         D_ls = cosmo.angular_diameter_distance_z1z2(z, z_s).to(u.meter)
 
         mass = self.mass * 2 * 10**30 # Mass in kilograms
-        # Print the mass in exponent form (mass is currently in kg as a numpy array)
-        print(f'Mass: {mass[0]:.2e} kg')
-        R200 = R200 * 3.086 * 10**19 # Convert to meters
+        R200 = (R200 / 206265) * D_s.value # Convert to meters
 
         eR = ((2 * np.pi * G) / (c**2) * (D_ls / D_s) * (mass / R200)).value * 206265 # Convert to arcseconds
 
@@ -196,7 +195,7 @@ def find_halos(ID, z):
     return halos
 
 
-def choose_ID(z, mass_range, min_halos):
+def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
     # Given a set of criteria, choose a cluster ID
 
     file = dir + 'fixed_key_{}.MDARK'.format(z)
@@ -206,17 +205,24 @@ def choose_ID(z, mass_range, min_halos):
     # and more than 1 halo
     options = []
     for chunk in chunks:
-        mask = (chunk[' Total Mass'].values > mass_range[0]) & (chunk[' Total Mass'].values < mass_range[1]) & (chunk[' Halo Number'].values > min_halos)        
-        if np.any(mask):
-            options.append(chunk[mask]['MainHaloID'].values)
-    # Flatten the list
-    options = np.concatenate(options)
-    # Choose one of the clusters at random
-    IDs = np.random.choice(options)
+        mass_criteria = (chunk[' Total Mass'] > mass_range[0]) & (chunk[' Total Mass'] < mass_range[1])
 
-    return IDs
+        combined_criteria = mass_criteria
+
+        if np.any(combined_criteria):
+            valid_ids = chunk.loc[combined_criteria, 'MainHaloID'].values
+            options.extend(valid_ids)
     
-    # Now we have the correct objects, we can return the relevant information
+    options = np.array(options)
+
+    # Choose a random ID from the list of options
+    if len(options) == 0:
+        return None
+    else:
+        ID = np.random.choice(options)
+        print('ID: {}'.format(ID))
+
+    return ID
 
 
 def run_analysis(halos, z):
@@ -232,12 +238,6 @@ def run_analysis(halos, z):
     3. Run these source galaxies through the pipeline. This
         will generate a list of candidate lenses, which 
         will be compared to the input list of halos. 
-    4. Generate a convergence map from the candidate lenses, 
-        compute the mass of each lens, and compare to the
-        input mass.
-    5. Generate a ROC curve for the pipeline
-    6. Generate a confusion matrix
-    7. Save the results to a file
     '''
 
     # Convert coordinates to arcseconds
@@ -255,46 +255,54 @@ def run_analysis(halos, z):
     halos.y = y
 
     lenses = halos.build_lenses(z, halos.calc_R200(z))
-    print(len(lenses.x))
-    print(np.mean(lenses.x))
-    print(np.std(lenses.x))
 
     # Center the lenses at (0, 0)
     # This is a necessary step for the pipeline
     # to work correctly
     centroid = np.mean(lenses.x), np.mean(lenses.y)
-    lenses.x -= np.mean(lenses.x)
-    lenses.y -= np.mean(lenses.y)
+    lenses.x -= centroid[0]
+    lenses.y -= centroid[1]
 
-    xmax = np.max([np.max(lenses.x), np.max(lenses.y)])
+    xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
+    print('xmax: {}'.format(xmax))
+    xmax = np.min([xmax, 200])
+
     # Set the maximum extent of the field of view
     # to be the maximum extent of the lenses
 
     # Generate a set of background galaxies
-    ns = 0.01
-    Nsource = int(ns * (xmax*2)**2)
+    ns = 0.005
+    Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
+
     sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax)
+    candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags= [True, True, True])
 
-    candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, [True, True, True])
-
-    return lenses, candidate_lenses
+    return lenses, candidate_lenses, sources
 
 
 def build_test_set(Nhalos, z):
     # Select a number of halos, spaced evenly in log space across the mass range
     M_min = 1e13
-    M_max = 1e15
-    masses = np.logspace(np.log10(M_min), np.log10(M_max), Nhalos)
+    M_max = 1e15  
+    Nhalo_min = 1
+    Nhalo_max = 20
+    substructure_min = 0.01
+    substructure_max = 0.1
+    size_min = 50
+    size_max = 500
+    masses = np.logspace(np.log10(M_min), np.log10(M_max), Nhalos+1)
     IDs = []
-    # mass range will be between this mass and the next mass, for each ID
+    # Choose a cluster in each mass bin
     for i in range(Nhalos):
-        ID = choose_ID(z, (masses[i], masses[i+1]), 2)
-        IDs.append(ID)
+        mass_range = [masses[i], masses[i+1]]
+        halo_range = [Nhalo_min, Nhalo_max]
+        substructure_range = [substructure_min, substructure_max]
+        size_range = [size_min, size_max]
+        IDs.append(choose_ID(z, mass_range, halo_range, substructure_range, size_range))
     return IDs
 
 
-
-def process_results(halos, lenses, candidate_lenses, z):
+def process_results(halos, lenses, candidate_lenses, z, label):
     # Given the results of the pipeline, process the results
     # We can directly compare the input lenses to the candidate lenses
     # We can also compare the true mass from the halos to the inferred mass
@@ -303,113 +311,88 @@ def process_results(halos, lenses, candidate_lenses, z):
     # Get the true mass of the system
     xmax = np.max([np.max(candidate_lenses.x), np.max(candidate_lenses.y)])
     extent = [-xmax, xmax, -xmax, xmax]
-    kappa = utils.calculate_kappa(candidate_lenses, extent, 0.1, 0.01, 0.02)
+    _,_,kappa = utils.calculate_kappa(candidate_lenses, extent, 5)
     mass = utils.calculate_mass(kappa, z, 0.5, 1)
     true_mass = np.sum(halos.mass)
-
-    # Now compare the lenses to the candidate lenses
-    
-    # Match the lenses to the candidate lenses
-    # This is a nearest neighbour problem
-    # We can use the sklearn.metrics.pairwise_distances function
-    # to find the nearest neighbour for each lens
-    # We can then compare the true mass to the inferred mass
-    # We can also look at the number of lenses that were correctly
-    # identified, the number of false positives, and the number of
-    # false negatives
+    return mass, true_mass
 
 
-    x_true = lenses.x
-    y_true = lenses.y
-    x_pred = candidate_lenses.x
-    y_pred = candidate_lenses.y
+def make_catalogue(sources, name):
+    # Given a set of sources, save the catalogue to a file
+    # Build this as a csv file, with the following columns
+    # x, y, e1, e2, f1, f2, g1, g2
+    # This is the format expected by the pipeline
 
-    # Create a distance matrix
-    distance_matrix = sklearn.metrics.pairwise_distances(x_true, x_pred, y_true, y_pred)
+    # Save the catalogue to a file
+    with open(name, 'w') as f:
+        f.write('x, y, e1, e2, f1, f2, g1, g2\n')
+        for i in range(len(sources.x)):
+            f.write('{}, {}, {}, {}, {}, {}, {}, {}\n'.format(sources.x[i], sources.y[i], sources.e1[i], sources.e2[i], sources.f1[i], sources.f2[i], sources.g1[i], sources.g2[i]))
+    f.close()
 
-    # Find the nearest neighbour for each lens
-    nearest_neighbour = np.argmin(distance_matrix, axis=1)
 
-    # Compare the strengths of the lenses
-    true_strength = lenses.te
-    pred_strength = candidate_lenses.te
+def run_test():
+    ID_file = 'Data/MDARK_Test/ID_list.txt'
 
-    # Assess the quality of the match
-    # Match lenses to candidate lenses based on distance
-    # If they are within a certain distance, and the strengths
-    # are similar, then we have a match
+    IDs = []
+    # Load the list of IDs
+    with open(ID_file, 'r') as f:
+        for line in f:
+            IDs.append(int(line.strip()))
+    IDs = np.array(IDs)
 
-    # Also, we aren't going to use a confusion matrix, because 
-    # we don't have a binary classification problem
-    # We have a regression problem
+    # Create a CSV file to hold the results
+    with open('Data/MDARK_Test/results.csv', 'w') as f:
+        f.write('ID, Mass, True Mass, N_halos, N_candidates\n')
+    f.close()
 
-    # Lets get started. First, match the lenses to the candidate lenses
-    true_positives = 0
-    for i in range(len(nearest_neighbour)):
-        # If the distance is small, and the strengths are similar
-        # then we have a match
-        if distance_matrix[i, nearest_neighbour[i]] < 0.1 and abs(true_strength[i] - pred_strength[nearest_neighbour[i]]) < 1:
-            true_positives += 1
-    
-    # Now, count the false positives
-    false_positives = len(candidate_lenses) - true_positives
+    for ID in IDs:
+        z = 0.194
+        label = 'Data/MDARK_Test/{}_test'.format(ID)
 
-    # Now, count the false negatives
-    false_negatives = len(lenses) - true_positives
+        halos = find_halos(ID, z)
 
-    # Now, we can save the results to a file
-    results = {'true_mass': true_mass, 
-                'inferred_mass': mass,
-                'true_positives': true_positives,
-                'false_positives': false_positives,
-                'false_negatives': false_negatives}
-    
-    # Save the results to a file
-    with open('results.txt', 'w') as f:
-        f.write('True Mass: {}\n'.format(true_mass))
-        f.write('Inferred Mass: {}\n'.format(mass))
-        f.write('True Positives: {}\n'.format(true_positives))
-        f.write('False Positives: {}\n'.format(false_positives))
-        f.write('False Negatives: {}\n'.format(false_negatives))
-    return results
+        lenses, candidate_lenses, sources = run_analysis(halos, z)
+        mass, true_mass = process_results(halos, lenses, candidate_lenses, z, label+'_results.txt')
+        with open('Data/MDARK_Test/results.csv', 'a') as f:
+            f.write('{}, {}, {}, {}, {}\n'.format(ID, mass, true_mass, len(lenses.x), len(candidate_lenses.x)))
+        f.close()
 
+        # Save the sources - these can be passed off to other pipelines for comparison
+        make_catalogue(sources, label+'_sources.csv')
+
+        # Also save the lenses - use pickle to save these objects
+        with open(label+'_lenses.pkl', 'wb') as f:
+            pickle.dump(lenses, f)
+        with open(label+'_candidate_lenses.pkl', 'wb') as f:
+            pickle.dump(candidate_lenses, f)
+
+    print('Done!')
+  
 if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
 
-    z = 0.194
-    d = cosmo.angular_diameter_distance(z).to(u.meter)
-    # Given a distance in Mpc, convert to arcseconds
+    # Open the results file and read in the data
+    results = pd.read_csv('Data/MDARK_Test/results.csv')
+    # Get the mass and true mass
+    mass = results[' Mass'].values
+    true_mass = results[' True Mass'].values
 
-    x = np.linspace(0, 1000, 1000)
-
-    y = ((x * 3.086 * 10**22) / d).value * 206265
-
-    plt.plot(x, y)
-    plt.show()
-
-    # plot_mass_dist(0.194)
-
-    raise SystemExit
-
-    ID = choose_ID(0.194, (1e13, 1e14), 2)
-    halos = find_halos(ID, 0.194)
-    lenses = run_analysis(halos, 0.194)
-    plt.figure()
-    plt.scatter(lenses.x, lenses.y, c = lenses.te, cmap='plasma', s = lenses.te * 100, alpha=0.5)
-    plt.colorbar()
-    plt.show()
-
-    raise SystemExit
-
-    R200 = halos.calc_R200(0.194)
-    lenses = halos.build_lenses(0.194, R200)
-    print(lenses.x, lenses.y, lenses.te)
-    stop = time.time()
-    print('Time taken: {}'.format(stop - start))
-
-
-    raise SystemExit
-
-    for z in zs:
-        count_clusters(z)
-        print('Done with z = {}'.format(z))
+    # Plot the results, calculate the correlation coefficient
+    fig, ax = plt.subplots()
+    ax.scatter(true_mass, mass, s=10, color='black')
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    # Add a line of best fit
+    m, b = np.polyfit(np.log10(true_mass), np.log10(mass), 1)
+    x = np.linspace(1e13, 1e15, 100)
+    y = 10**b * x**m
+    ax.plot(x, y, color='red', label='Best Fit: {:.2f}'.format(m))
+    # Also add a 1:1 line
+    ax.plot(x, x, color='blue', label='1:1')
+    ax.legend()
+    ax.set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
+    ax.set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
+    ax.set_title('Multidark: Mass Inference \n Correlation Coefficient: {:.2f}'.format(np.corrcoef(true_mass, mass)[0, 1]))
+    fig.tight_layout()
+    fig.savefig('Data/MDARK_Test/mass_inference.png')
