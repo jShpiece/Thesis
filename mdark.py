@@ -368,12 +368,11 @@ def run_test():
             pickle.dump(candidate_lenses, f)
 
     print('Done!')
-  
-if __name__ == '__main__':
-    zs = [0.194, 0.221, 0.248, 0.276]
 
+
+def build_mass_correlation_plot(file_name):
     # Open the results file and read in the data
-    results = pd.read_csv('Data/MDARK_Test/results.csv')
+    results = pd.read_csv(file_name)
     # Get the mass and true mass
     mass = results[' Mass'].values
     true_mass = results[' True Mass'].values
@@ -396,3 +395,13 @@ if __name__ == '__main__':
     ax.set_title('Multidark: Mass Inference \n Correlation Coefficient: {:.2f}'.format(np.corrcoef(true_mass, mass)[0, 1]))
     fig.tight_layout()
     fig.savefig('Data/MDARK_Test/mass_inference.png')
+
+
+if __name__ == '__main__':
+    zs = [0.194, 0.221, 0.248, 0.276]
+
+    file = 'MDARK/Halos_0.194.MDARK'
+    # Lets print the first 5 rows of the file
+    df = pd.read_csv(file, nrows=5)
+    print(df)
+
