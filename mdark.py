@@ -206,42 +206,41 @@ def find_halos(ID, z):
     file = dir + 'Halos_{}.MDARK'.format(z)
     chunks = chunk_data(file)
     # Find all the halos with the given ID
-    output = []
-    # THIS CODE IS BROKEN
-    # NEED TO TAKE ADVANTAGE OF THE FACT THAT I SORTED THE HALOS BY ID
-    # WE DONT NEED TO READ THE WHOLE FILE
-    # JUST FIND THE FIRST INSTANCE OF THE ID, THEN READ THE FOLLOWING LINES UNTIL THE ID CHANGES
-    # THEN WE CAN STOP READING
-    for chunk in chunks:
-        # Find all the halos with the given ID
-        output.append(chunk.loc[chunk['MainHaloID'] == ID])
-    output = pd.concat(output)
-    
+
+    # Create an empty DataFrame to store the results
+    filtered_data = pd.DataFrame()
+
+    # Read the CSV file in chunks
+    for chunk in pd.read_csv(file, chunksize=10000):
+        # Filter the chunk for the specified ObjectID
+        filtered_chunk = chunk[chunk['MainHaloID'] == ID]
+
+        # Concatenate the filtered chunk to the final DataFrame
+        filtered_data = pd.concat([filtered_data, filtered_chunk])
+
     # Now we have the correct objects, we can return the relevant information
-    xhalo = output['x'].values
-    yhalo = output['y'].values
-    zhalo = output['z'].values
-    chalo = output['concentration_NFW'].values
-    masshalo = output['HaloMass'].values
+    xhalo = filtered_data['x'].values
+    yhalo = filtered_data['y'].values
+    zhalo = filtered_data['z'].values
+    chalo = filtered_data['concentration_NFW'].values
+    masshalo = filtered_data['HaloMass'].values
 
     halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo)
 
     print('Found {} halos'.format(len(halos.x)))
-    print('Mass: {}'.format(halos.mass))
+    print('Mass: {:.2e}'.format(np.sum(halos.mass)))
 
     return halos
 
 
 def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
     # Given a set of criteria, choose a cluster ID
-
     file = dir + 'fixed_key_{}.MDARK'.format(z)
     chunks = chunk_data(file)
 
     # Choose a random cluster with mass in the given range
     # and more than 1 halo
-    options = []
-    fail_state = []
+    rows = []
     for chunk in chunks:
         IDs = chunk['MainHaloID'].values
         masses = chunk[' Total Mass'].values
@@ -256,46 +255,24 @@ def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
         size_criteria = (size > size_range[0]) & (size < size_range[1])
 
         # Find all clusters that satisfy all criteria
-        combined_criteria = mass_criteria & halo_criteria & substructure_criteria 
-
-        failure_cause = ''
-        if not np.any(mass_criteria):
-            failure_cause += 'm'
-        if not np.any(halo_criteria):
-            failure_cause += 'h'
-        if not np.any(substructure_criteria):
-            failure_cause += 's'
-        if not np.any(size_criteria):
-            failure_cause += 'r'
-        
-        fail_state.append(failure_cause)
+        combined_criteria = mass_criteria & substructure_criteria
 
         if np.any(combined_criteria):
             valid_ids = IDs[combined_criteria]
-            options.extend(valid_ids)
-    
-    options = np.array(options)
+            # Add these to the list of rows
+            rows.append(chunk[chunk['MainHaloID'].isin(valid_ids)])
+    # Turn this into a single dataframe
+    rows = pd.concat(rows)
 
-    # Process the failure state
-    fail_state = np.array(fail_state)
-    # Count the number of times each failure state occurs
-    unique, counts = np.unique(fail_state, return_counts=True)
-    print('Failure state: {}'.format(dict(zip(unique, counts))))
-
-    # Choose a random ID from the list of options
-    if len(options) == 0:
-        print('No options found')
-        print(options)
-        return None, None, None, None, None
+    # Choose a random cluster from the list of valid rows
+    if len(rows) > 0:
+        # Choose a single row
+        row = rows.sample(n=1)
+        print('Found a cluster with mass in range')
+        return row
     else:
-        ID = np.random.choice(options)
-        mass = chunk.loc[chunk['MainHaloID'] == ID, ' Total Mass'].values
-        Nhalo = chunk.loc[chunk['MainHaloID'] == ID, ' Halo Number'].values
-        substructure = chunk.loc[chunk['MainHaloID'] == ID, ' Mass Fraction'].values
-        size = chunk.loc[chunk['MainHaloID'] == ID, ' Characteristic Size'].values
-        print('ID: {}'.format(ID))
+        return None
 
-    return ID, mass, Nhalo, substructure, size
 
 
 def run_analysis(halos, z):
@@ -354,7 +331,7 @@ def run_analysis(halos, z):
     return lenses, candidate_lenses, sources
 
 
-def build_test_set(Nhalos, z):
+def build_test_set(Nhalos, z, file_name):
     # Select a number of halos, spaced evenly in log space across the mass range
     M_min = 1e12
     M_max = 1e16
@@ -365,25 +342,27 @@ def build_test_set(Nhalos, z):
     size_min = 50
     size_max = 500
     mass_bins = np.logspace(np.log10(M_min), np.log10(M_max), Nhalos+1)
-    IDs = []
-    masses = []
-    Nhaloes = []
-    substructures = []
-    sizes = []
+
     # Choose a cluster in each mass bin
+    rows = []
     for i in range(Nhalos):
         mass_range = [mass_bins[i], mass_bins[i+1]]
         halo_range = [Nhalo_min, Nhalo_max]
         substructure_range = [substructure_min, substructure_max]
         size_range = [size_min, size_max]
-        ID, mass, Nhalo, substructure, size = choose_ID(z, mass_range, halo_range, substructure_range, size_range)
-        if ID is not None:
-            IDs.append(ID)
-            masses.append(mass)
-            Nhaloes.append(Nhalo)
-            substructures.append(substructure)
-            sizes.append(size)
-    return IDs, masses, Nhalos, substructures, sizes
+        row = choose_ID(z, mass_range, halo_range, substructure_range, size_range)
+        if row is not None:
+            print('Found a cluster in mass bin {}'.format(i))
+            rows.append(row)
+
+    # Save the rows to a file
+    with open(file_name, 'w') as f:
+        f.write('ID, Mass, Halo Number, Mass Fraction, Size\n')
+        for row in rows:
+            for i in range(len(row)):
+                f.write('{}, {}, {}, {}, {}\n'.format(row['MainHaloID'].values[i], row[' Total Mass'].values[i], row[' Halo Number'].values[i], row[' Mass Fraction'].values[i], row[' Characteristic Size'].values[i]))
+    
+    return 
 
 
 def process_results(halos, lenses, candidate_lenses, z, label):
@@ -455,25 +434,6 @@ def run_test(ID_file):
     print('Done!')
 
 
-if __name__ == '__main__':
-    zs = [0.194, 0.221, 0.248, 0.276]
-
-    run_test('Data/MDARK_Test/ID_list_2.csv')
-
-    raise ValueError('Stop here')
-
-    IDs, mass, Nhalo, substructure, size = build_test_set(30, 0.194)
-
-    with open('Data/MDARK_Test/ID_list_2.csv', 'w') as f:
-        f.write('ID, Mass, Nhalo, Substructure, Size\n')
-        for ID in IDs:
-            f.write('{}, {}, {}, {}, {}\n'.format(ID, mass, Nhalo, substructure, size))
-    f.close()
-
-    # plot_mass_dist(0.194)
-
-    raise ValueError('Stop here')
-
 def build_mass_correlation_plot(file_name):
     # Open the results file and read in the data
     results = pd.read_csv(file_name)
@@ -505,7 +465,20 @@ if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
 
     file = 'MDARK/Halos_0.194.MDARK'
-    # Lets print the first 5 rows of the file
-    df = pd.read_csv(file, nrows=5)
-    print(df)
 
+    build_test_set(2, 0.194, 'Data/MDARK_Test/ID_list_5.csv')
+
+    print('Done building test set')
+
+    IDs = []
+    # Load the list of IDs - this is a csv file
+    with open('Data/MDARK_Test/ID_list_5.csv', 'r') as f:
+        lines = f.readlines() # Read the lines
+        # Skip the first line
+        lines = lines[1:]
+        for line in lines:
+            ID = line.split(',')[0]
+            IDs.append(ID)
+    
+    for ID in IDs:
+        halos = find_halos(ID, 0.194)
