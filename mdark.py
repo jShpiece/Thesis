@@ -21,6 +21,7 @@ plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentat
 c = 3 * 10**8 # Speed of light in m/s
 G = 6.674 * 10**-11 # Gravitational constant in m^3/kg/s^2
 h = 0.7 # Hubble constant
+M_solar = 1.989 * 10**30 # Solar mass in kg
 
 
 class Halo:
@@ -44,7 +45,7 @@ class Halo:
         D_s = cosmo.angular_diameter_distance(z_s).to(u.meter)
         D_ls = cosmo.angular_diameter_distance_z1z2(z, z_s).to(u.meter)
 
-        mass = self.mass * 2 * 10**30 # Mass in kilograms
+        mass = self.mass * M_solar # Mass in kilograms
         R200 = (R200 / 206265) * D_s.value # Convert to meters
 
         eR = ((2 * np.pi * G) / (c**2) * (D_ls / D_s) * (mass / R200)).value * 206265 # Convert to arcseconds
@@ -105,7 +106,7 @@ def chunk_data(file):
     df = pd.read_csv(file, nrows=0)
 
     # Read the CSV file in chunks
-    chunk_size = 10000  # Adjust based on your memory constraints
+    chunk_size = 50000  # Adjust based on your memory constraints
     chunks = pd.read_csv(file, dtype=data_types, chunksize=chunk_size)
     return chunks
 
@@ -113,17 +114,29 @@ def chunk_data(file):
 def plot_mass_dist(z):
     file = dir + 'fixed_key_{}.MDARK'.format(z) 
     chunks = chunk_data(file)
+    print('Reading data...')
 
     Mass = []
     size = []
+    N_halo = []
+    M_frac = []
     for chunk in chunks:
         Mass.append(chunk[' Total Mass'].values)
         size.append(chunk[' Characteristic Size'].values)
+        N_halo.append(chunk[' Halo Number'].values)
+        M_frac.append(chunk[' Mass Fraction'].values)
     
     Mass = np.concatenate(Mass)
     size = np.concatenate(size)
+    N_halo = np.concatenate(N_halo)
+    M_frac = np.concatenate(M_frac)
     # Plot the mass distribution (log scale)
     # Use 1000 bins
+    # Remove nan values
+    Mass = Mass[~np.isnan(Mass)]
+    size = size[~np.isnan(size)]
+    N_halo = N_halo[~np.isnan(N_halo)]
+    M_frac = M_frac[~np.isnan(M_frac)]
     
     fig, ax = plt.subplots()
     fancy_hist(Mass, bins=1000, histtype='step', density=True, ax=ax)
@@ -133,7 +146,7 @@ def plot_mass_dist(z):
     ax.set_ylabel('Probability Density')
     ax.set_title(r'$Multidark: z = {}$'.format(z))
     fig.tight_layout()
-    fig.savefig(dir + 'mass_dist_{}.png'.format(z))
+    fig.savefig('Images/mass_dist_{}.png'.format(z))
 
     fig, ax = plt.subplots()
     fancy_hist(size, bins=1000, histtype='step', density=True, ax=ax)
@@ -143,7 +156,25 @@ def plot_mass_dist(z):
     ax.set_ylabel('Probability Density')
     ax.set_title(r'$Multidark: z = {}$'.format(z))
     fig.tight_layout()
-    fig.savefig(dir + 'size_dist_{}.png'.format(z))
+    fig.savefig('Images/size_dist_{}.png'.format(z))
+
+    fig, ax = plt.subplots()
+    fancy_hist(N_halo, bins=1000, histtype='step', density=True, ax=ax)
+    ax.set_yscale('log')
+    ax.set_xlabel(r'$N_{\rm dark}$')
+    ax.set_ylabel('Probability Density')
+    ax.set_title(r'$Multidark: z = {}$'.format(z))
+    fig.tight_layout()
+    fig.savefig('Images/N_halo_dist_{}.png'.format(z))
+
+    fig, ax = plt.subplots()
+    fancy_hist(M_frac, bins=1000, histtype='step', density=True, ax=ax)
+    ax.set_yscale('log')
+    ax.set_xlabel(r'$f_{\rm dark}$')
+    ax.set_ylabel('Probability Density')
+    ax.set_title(r'$Multidark: z = {}$'.format(z))
+    fig.tight_layout()
+    fig.savefig('Images/M_frac_dist_{}.png'.format(z))
 
 
 def count_clusters(z):
@@ -176,11 +207,14 @@ def find_halos(ID, z):
     chunks = chunk_data(file)
     # Find all the halos with the given ID
     output = []
+    # THIS CODE IS BROKEN
+    # NEED TO TAKE ADVANTAGE OF THE FACT THAT I SORTED THE HALOS BY ID
+    # WE DONT NEED TO READ THE WHOLE FILE
+    # JUST FIND THE FIRST INSTANCE OF THE ID, THEN READ THE FOLLOWING LINES UNTIL THE ID CHANGES
+    # THEN WE CAN STOP READING
     for chunk in chunks:
-        mask = chunk['MainHaloID'] == ID
-        if np.any(mask):
-            output.append(chunk[mask])
-    # Flatten the list
+        # Find all the halos with the given ID
+        output.append(chunk.loc[chunk['MainHaloID'] == ID])
     output = pd.concat(output)
     
     # Now we have the correct objects, we can return the relevant information
@@ -191,6 +225,9 @@ def find_halos(ID, z):
     masshalo = output['HaloMass'].values
 
     halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo)
+
+    print('Found {} halos'.format(len(halos.x)))
+    print('Mass: {}'.format(halos.mass))
 
     return halos
 
@@ -204,25 +241,61 @@ def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
     # Choose a random cluster with mass in the given range
     # and more than 1 halo
     options = []
+    fail_state = []
     for chunk in chunks:
-        mass_criteria = (chunk[' Total Mass'] > mass_range[0]) & (chunk[' Total Mass'] < mass_range[1])
+        IDs = chunk['MainHaloID'].values
+        masses = chunk[' Total Mass'].values
+        halos = chunk[' Halo Number'].values
+        substructure = chunk[' Mass Fraction'].values
+        size = chunk[' Characteristic Size'].values
 
-        combined_criteria = mass_criteria
+        # Apply the criteria
+        mass_criteria = (masses > mass_range[0]) & (masses < mass_range[1])
+        halo_criteria = (halos > halo_range[0]) & (halos < halo_range[1])
+        substructure_criteria = (substructure > substructure_range[0]) & (substructure < substructure_range[1])
+        size_criteria = (size > size_range[0]) & (size < size_range[1])
+
+        # Find all clusters that satisfy all criteria
+        combined_criteria = mass_criteria & halo_criteria & substructure_criteria 
+
+        failure_cause = ''
+        if not np.any(mass_criteria):
+            failure_cause += 'm'
+        if not np.any(halo_criteria):
+            failure_cause += 'h'
+        if not np.any(substructure_criteria):
+            failure_cause += 's'
+        if not np.any(size_criteria):
+            failure_cause += 'r'
+        
+        fail_state.append(failure_cause)
 
         if np.any(combined_criteria):
-            valid_ids = chunk.loc[combined_criteria, 'MainHaloID'].values
+            valid_ids = IDs[combined_criteria]
             options.extend(valid_ids)
     
     options = np.array(options)
 
+    # Process the failure state
+    fail_state = np.array(fail_state)
+    # Count the number of times each failure state occurs
+    unique, counts = np.unique(fail_state, return_counts=True)
+    print('Failure state: {}'.format(dict(zip(unique, counts))))
+
     # Choose a random ID from the list of options
     if len(options) == 0:
-        return None
+        print('No options found')
+        print(options)
+        return None, None, None, None, None
     else:
         ID = np.random.choice(options)
+        mass = chunk.loc[chunk['MainHaloID'] == ID, ' Total Mass'].values
+        Nhalo = chunk.loc[chunk['MainHaloID'] == ID, ' Halo Number'].values
+        substructure = chunk.loc[chunk['MainHaloID'] == ID, ' Mass Fraction'].values
+        size = chunk.loc[chunk['MainHaloID'] == ID, ' Characteristic Size'].values
         print('ID: {}'.format(ID))
 
-    return ID
+    return ID, mass, Nhalo, substructure, size
 
 
 def run_analysis(halos, z):
@@ -262,6 +335,7 @@ def run_analysis(halos, z):
     centroid = np.mean(lenses.x), np.mean(lenses.y)
     lenses.x -= centroid[0]
     lenses.y -= centroid[1]
+    print('Centroid: {}'.format(centroid))
 
     xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
     print('xmax: {}'.format(xmax))
@@ -282,24 +356,34 @@ def run_analysis(halos, z):
 
 def build_test_set(Nhalos, z):
     # Select a number of halos, spaced evenly in log space across the mass range
-    M_min = 1e13
-    M_max = 1e15  
+    M_min = 1e12
+    M_max = 1e16
     Nhalo_min = 1
     Nhalo_max = 20
     substructure_min = 0.01
     substructure_max = 0.1
     size_min = 50
     size_max = 500
-    masses = np.logspace(np.log10(M_min), np.log10(M_max), Nhalos+1)
+    mass_bins = np.logspace(np.log10(M_min), np.log10(M_max), Nhalos+1)
     IDs = []
+    masses = []
+    Nhaloes = []
+    substructures = []
+    sizes = []
     # Choose a cluster in each mass bin
     for i in range(Nhalos):
-        mass_range = [masses[i], masses[i+1]]
+        mass_range = [mass_bins[i], mass_bins[i+1]]
         halo_range = [Nhalo_min, Nhalo_max]
         substructure_range = [substructure_min, substructure_max]
         size_range = [size_min, size_max]
-        IDs.append(choose_ID(z, mass_range, halo_range, substructure_range, size_range))
-    return IDs
+        ID, mass, Nhalo, substructure, size = choose_ID(z, mass_range, halo_range, substructure_range, size_range)
+        if ID is not None:
+            IDs.append(ID)
+            masses.append(mass)
+            Nhaloes.append(Nhalo)
+            substructures.append(substructure)
+            sizes.append(size)
+    return IDs, masses, Nhalos, substructures, sizes
 
 
 def process_results(halos, lenses, candidate_lenses, z, label):
@@ -331,18 +415,19 @@ def make_catalogue(sources, name):
     f.close()
 
 
-def run_test():
-    ID_file = 'Data/MDARK_Test/ID_list.txt'
-
+def run_test(ID_file):
     IDs = []
-    # Load the list of IDs
+    # Load the list of IDs - this is a csv file
     with open(ID_file, 'r') as f:
-        for line in f:
-            IDs.append(int(line.strip()))
-    IDs = np.array(IDs)
+        lines = f.readlines() # Read the lines
+        # Skip the first line
+        lines = lines[1:]
+        for line in lines:
+            ID = line.split(',')[0]
+            IDs.append(ID)
 
     # Create a CSV file to hold the results
-    with open('Data/MDARK_Test/results.csv', 'w') as f:
+    with open('Data/MDARK_Test/results_2.csv', 'w') as f:
         f.write('ID, Mass, True Mass, N_halos, N_candidates\n')
     f.close()
 
@@ -369,6 +454,25 @@ def run_test():
 
     print('Done!')
 
+
+if __name__ == '__main__':
+    zs = [0.194, 0.221, 0.248, 0.276]
+
+    run_test('Data/MDARK_Test/ID_list_2.csv')
+
+    raise ValueError('Stop here')
+
+    IDs, mass, Nhalo, substructure, size = build_test_set(30, 0.194)
+
+    with open('Data/MDARK_Test/ID_list_2.csv', 'w') as f:
+        f.write('ID, Mass, Nhalo, Substructure, Size\n')
+        for ID in IDs:
+            f.write('{}, {}, {}, {}, {}\n'.format(ID, mass, Nhalo, substructure, size))
+    f.close()
+
+    # plot_mass_dist(0.194)
+
+    raise ValueError('Stop here')
 
 def build_mass_correlation_plot(file_name):
     # Open the results file and read in the data
