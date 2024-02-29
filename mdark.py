@@ -233,6 +233,15 @@ def find_halos(ID, z):
     chalo = chalo[halo_type != 2]
     masshalo = masshalo[halo_type != 2]
 
+    # Filter nan values (must remove all objects that have any nan values)
+    nan_mask = np.isnan(xhalo) | np.isnan(yhalo) | np.isnan(zhalo) | np.isnan(chalo) | np.isnan(masshalo)
+    xhalo = xhalo[~nan_mask]
+    yhalo = yhalo[~nan_mask]
+    zhalo = zhalo[~nan_mask]
+    chalo = chalo[~nan_mask]
+    masshalo = masshalo[~nan_mask]
+
+
     halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo)
 
     print('Found {} halos'.format(len(halos.x)))
@@ -420,7 +429,7 @@ def run_test(ID_file):
         z = 0.194
         label = 'Data/MDARK_Test/{}_test'.format(ID)
 
-        halos = find_halos(ID, z)
+        halos = find_halos(int(ID), z)
 
         lenses, candidate_lenses, sources = run_analysis(halos, z)
         mass, true_mass = process_results(halos, lenses, candidate_lenses, z, label+'_results.txt')
@@ -473,20 +482,5 @@ if __name__ == '__main__':
     file = 'MDARK/Halos_0.194.MDARK'
     ID_file = 'Data/MDARK_Test/ID_list_3.csv'
 
-    # build_test_set(30, 0.194, ID_file)
-    print('Done building test set')
-
-    IDs = []
-    # Load the list of IDs - this is a csv file
-    with open(ID_file, 'r') as f:
-        lines = f.readlines() # Read the lines
-        # Skip the first line
-        lines = lines[1:]
-        for line in lines:
-            ID = line.split(',')[0]
-            IDs.append(ID)
-    
-    for ID in IDs:
-        print('Processing ID: {}'.format(ID))
-        halos = find_halos(float(ID), 0.194)
+    run_test(ID_file)
         
