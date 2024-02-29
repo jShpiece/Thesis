@@ -224,6 +224,14 @@ def find_halos(ID, z):
     zhalo = filtered_data['z'].values
     chalo = filtered_data['concentration_NFW'].values
     masshalo = filtered_data['HaloMass'].values
+    halo_type = filtered_data['GalaxyType'].values
+
+    # Remove any halos of type 2 - these are 'orphan' halos that could not be properly tracked
+    xhalo = xhalo[halo_type != 2]
+    yhalo = yhalo[halo_type != 2]
+    zhalo = zhalo[halo_type != 2]
+    chalo = chalo[halo_type != 2]
+    masshalo = masshalo[halo_type != 2]
 
     halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo)
 
@@ -261,11 +269,10 @@ def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
             valid_ids = IDs[combined_criteria]
             # Add these to the list of rows
             rows.append(chunk[chunk['MainHaloID'].isin(valid_ids)])
-    # Turn this into a single dataframe
-    rows = pd.concat(rows)
 
     # Choose a random cluster from the list of valid rows
     if len(rows) > 0:
+        rows = pd.concat(rows)
         # Choose a single row
         row = rows.sample(n=1)
         print('Found a cluster with mass in range')
@@ -464,10 +471,14 @@ if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
 
     file = 'MDARK/Halos_0.194.MDARK'
+    ID_file = 'Data/MDARK_Test/ID_list_3.csv'
+
+    # build_test_set(30, 0.194, ID_file)
+    print('Done building test set')
 
     IDs = []
     # Load the list of IDs - this is a csv file
-    with open('Data/MDARK_Test/ID_list_2.csv', 'r') as f:
+    with open(ID_file, 'r') as f:
         lines = f.readlines() # Read the lines
         # Skip the first line
         lines = lines[1:]
