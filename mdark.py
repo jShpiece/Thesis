@@ -274,7 +274,6 @@ def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
         return None
 
 
-
 def run_analysis(halos, z):
     '''
     Given a set of halos, run the analysis
@@ -466,13 +465,9 @@ if __name__ == '__main__':
 
     file = 'MDARK/Halos_0.194.MDARK'
 
-    build_test_set(2, 0.194, 'Data/MDARK_Test/ID_list_5.csv')
-
-    print('Done building test set')
-
     IDs = []
     # Load the list of IDs - this is a csv file
-    with open('Data/MDARK_Test/ID_list_5.csv', 'r') as f:
+    with open('Data/MDARK_Test/ID_list_2.csv', 'r') as f:
         lines = f.readlines() # Read the lines
         # Skip the first line
         lines = lines[1:]
@@ -481,4 +476,6 @@ if __name__ == '__main__':
             IDs.append(ID)
     
     for ID in IDs:
-        halos = find_halos(ID, 0.194)
+        print('Processing ID: {}'.format(ID))
+        halos = find_halos(float(ID), 0.194)
+        
