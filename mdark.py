@@ -204,7 +204,6 @@ def find_halos(ID, z):
     # This needs to be fast 
 
     file = dir + 'Halos_{}.MDARK'.format(z)
-    chunks = chunk_data(file)
     # Find all the halos with the given ID
 
     # Create an empty DataFrame to store the results
@@ -214,8 +213,6 @@ def find_halos(ID, z):
     for chunk in pd.read_csv(file, chunksize=10000):
         # Filter the chunk for the specified ObjectID
         filtered_chunk = chunk[chunk['MainHaloID'] == ID]
-
-        # Concatenate the filtered chunk to the final DataFrame
         filtered_data = pd.concat([filtered_data, filtered_chunk])
 
     # Now we have the correct objects, we can return the relevant information
@@ -233,6 +230,7 @@ def find_halos(ID, z):
     chalo = chalo[halo_type != 2]
     masshalo = masshalo[halo_type != 2]
 
+    '''
     # Filter nan values (must remove all objects that have any nan values)
     nan_mask = np.isnan(xhalo) | np.isnan(yhalo) | np.isnan(zhalo) | np.isnan(chalo) | np.isnan(masshalo)
     xhalo = xhalo[~nan_mask]
@@ -240,12 +238,8 @@ def find_halos(ID, z):
     zhalo = zhalo[~nan_mask]
     chalo = chalo[~nan_mask]
     masshalo = masshalo[~nan_mask]
-
-
+    '''
     halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo)
-
-    print('Found {} halos'.format(len(halos.x)))
-    print('Mass: {:.2e}'.format(np.sum(halos.mass)))
 
     return halos
 
@@ -327,17 +321,20 @@ def run_analysis(halos, z):
     centroid = np.mean(lenses.x), np.mean(lenses.y)
     lenses.x -= centroid[0]
     lenses.y -= centroid[1]
-    print('Centroid: {}'.format(centroid))
 
     xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
     print('xmax: {}'.format(xmax))
-    xmax = np.min([xmax, 200])
+    
+    # Don't allow the field of view to be larger than 5 arcminutes - or smaller than 1 arcminute
+    xmax = np.min([xmax, 5*60])
+    xmax = np.max([xmax, 1*60])
+
 
     # Set the maximum extent of the field of view
     # to be the maximum extent of the lenses
 
     # Generate a set of background galaxies
-    ns = 0.005
+    ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
 
     sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax)
@@ -409,7 +406,7 @@ def make_catalogue(sources, name):
     f.close()
 
 
-def run_test(ID_file):
+def run_test(ID_file, result_file):
     IDs = []
     # Load the list of IDs - this is a csv file
     with open(ID_file, 'r') as f:
@@ -421,8 +418,8 @@ def run_test(ID_file):
             IDs.append(ID)
 
     # Create a CSV file to hold the results
-    with open('Data/MDARK_Test/results_2.csv', 'w') as f:
-        f.write('ID, Mass, True Mass, N_halos, N_candidates\n')
+    with open(result_file, 'w') as f:
+        f.write('ID, Reconstructed Mass, True Mass, N_halos, N_candidates\n')
     f.close()
 
     for ID in IDs:
@@ -433,7 +430,7 @@ def run_test(ID_file):
 
         lenses, candidate_lenses, sources = run_analysis(halos, z)
         mass, true_mass = process_results(halos, lenses, candidate_lenses, z, label+'_results.txt')
-        with open('Data/MDARK_Test/results.csv', 'a') as f:
+        with open(result_file, 'a') as f:
             f.write('{}, {}, {}, {}, {}\n'.format(ID, mass, true_mass, len(lenses.x), len(candidate_lenses.x)))
         f.close()
 
@@ -456,6 +453,7 @@ def build_mass_correlation_plot(file_name):
     mass = results[' Mass'].values
     true_mass = results[' True Mass'].values
 
+
     # Plot the results, calculate the correlation coefficient
     fig, ax = plt.subplots()
     ax.scatter(true_mass, mass, s=10, color='black')
@@ -463,7 +461,7 @@ def build_mass_correlation_plot(file_name):
     ax.set_yscale('log')
     # Add a line of best fit
     m, b = np.polyfit(np.log10(true_mass), np.log10(mass), 1)
-    x = np.linspace(1e13, 1e15, 100)
+    x = np.linspace(1e12, 1e15, 100)
     y = 10**b * x**m
     ax.plot(x, y, color='red', label='Best Fit: {:.2f}'.format(m))
     # Also add a 1:1 line
@@ -473,7 +471,8 @@ def build_mass_correlation_plot(file_name):
     ax.set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
     ax.set_title('Multidark: Mass Inference \n Correlation Coefficient: {:.2f}'.format(np.corrcoef(true_mass, mass)[0, 1]))
     fig.tight_layout()
-    fig.savefig('Data/MDARK_Test/mass_inference.png')
+    fig.savefig('Data/MDARK_Test/mass_inference_3.png')
+    plt.show()
 
 
 if __name__ == '__main__':
@@ -481,6 +480,9 @@ if __name__ == '__main__':
 
     file = 'MDARK/Halos_0.194.MDARK'
     ID_file = 'Data/MDARK_Test/ID_list_3.csv'
+    result_file = 'Data/MDARK_Test/results_3.csv'
 
-    run_test(ID_file)
+    # run_test(ID_file, result_file)
+
+    build_mass_correlation_plot(result_file)
         
