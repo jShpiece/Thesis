@@ -55,6 +55,8 @@ class Halo:
 
 def fix_file(z):
     # Fix the key files
+    # THIS HAS BEEN COMPLETED - IT SHOULD NOT BE RUN AGAIN
+    # IT IS INCLUDED FOR ARCHIVAL PURPOSES
 
     file = dir + 'Key_{}.MDARK'.format(z) 
 
@@ -94,7 +96,6 @@ def fix_file(z):
             chunk_subset = chunk.iloc[:, :6]
             chunk_subset.to_csv(new_file, mode='a', header=False, index=False)
 
-    
     # close the file
     f.close()
 
@@ -102,16 +103,15 @@ def fix_file(z):
 def chunk_data(file):
     # Define the data types for each column to improve performance
     data_types = {f'column_{i}': 'float' for i in range(6)}
-
-    df = pd.read_csv(file, nrows=0)
-
     # Read the CSV file in chunks
     chunk_size = 50000  # Adjust based on your memory constraints
     chunks = pd.read_csv(file, dtype=data_types, chunksize=chunk_size)
     return chunks
 
 
-def plot_mass_dist(z):
+def plot_cluster_properties(z):
+    # For a key file, read in every cluster and plot the distribution of 
+    # mass, size, number of halos and substructure mass fraction
     file = dir + 'fixed_key_{}.MDARK'.format(z) 
     chunks = chunk_data(file)
     print('Reading data...')
@@ -132,7 +132,7 @@ def plot_mass_dist(z):
     M_frac = np.concatenate(M_frac)
     # Plot the mass distribution (log scale)
     # Use 1000 bins
-    # Remove nan values
+    # Remove nan values (these should mostly be from m_frac, where we had 0/0 = nan)
     Mass = Mass[~np.isnan(Mass)]
     size = size[~np.isnan(size)]
     N_halo = N_halo[~np.isnan(N_halo)]
@@ -178,6 +178,7 @@ def plot_mass_dist(z):
 
 
 def count_clusters(z):
+    # Count the number of clusters with within a given mass range
     file = dir + 'fixed_key_{}.MDARK'.format(z)
     chunks = chunk_data(file)
 
@@ -230,21 +231,12 @@ def find_halos(ID, z):
     chalo = chalo[halo_type != 2]
     masshalo = masshalo[halo_type != 2]
 
-    '''
-    # Filter nan values (must remove all objects that have any nan values)
-    nan_mask = np.isnan(xhalo) | np.isnan(yhalo) | np.isnan(zhalo) | np.isnan(chalo) | np.isnan(masshalo)
-    xhalo = xhalo[~nan_mask]
-    yhalo = yhalo[~nan_mask]
-    zhalo = zhalo[~nan_mask]
-    chalo = chalo[~nan_mask]
-    masshalo = masshalo[~nan_mask]
-    '''
     halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo)
 
     return halos
 
 
-def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
+def choose_ID(z, mass_range, substructure_range):
     # Given a set of criteria, choose a cluster ID
     file = dir + 'fixed_key_{}.MDARK'.format(z)
     chunks = chunk_data(file)
@@ -255,15 +247,11 @@ def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
     for chunk in chunks:
         IDs = chunk['MainHaloID'].values
         masses = chunk[' Total Mass'].values
-        halos = chunk[' Halo Number'].values
         substructure = chunk[' Mass Fraction'].values
-        size = chunk[' Characteristic Size'].values
 
         # Apply the criteria
         mass_criteria = (masses > mass_range[0]) & (masses < mass_range[1])
-        halo_criteria = (halos > halo_range[0]) & (halos < halo_range[1])
         substructure_criteria = (substructure > substructure_range[0]) & (substructure < substructure_range[1])
-        size_criteria = (size > size_range[0]) & (size < size_range[1])
 
         # Find all clusters that satisfy all criteria
         combined_criteria = mass_criteria & substructure_criteria
@@ -275,10 +263,8 @@ def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
 
     # Choose a random cluster from the list of valid rows
     if len(rows) > 0:
-        rows = pd.concat(rows)
-        # Choose a single row
-        row = rows.sample(n=1)
-        print('Found a cluster with mass in range')
+        rows = pd.concat(rows) # Concatenate the rows
+        row = rows.sample(n=1) # Choose a random row
         return row
     else:
         return None
@@ -342,25 +328,22 @@ def build_lensing_field(halos, z):
 
 
 def build_test_set(Nhalos, z, file_name):
-    # Select a number of halos, spaced evenly in log space across the mass range
+    # Select a number of clusters, spaced evenly in log space across the mass range
+    # This set will be used to test the pipeline
+    # For each cluster, we will save the following information
+    # ID, Mass, Halo Number, Mass Fraction, Size
     M_min = 1e12
-    M_max = 1e15
-    Nhalo_min = 1
-    Nhalo_max = 20
+    M_max = 5e15
     substructure_min = 0.01
-    substructure_max = 0.1
-    size_min = 50
-    size_max = 500
+    substructure_max = 0.05
     mass_bins = np.logspace(np.log10(M_min), np.log10(M_max), Nhalos+1)
 
     # Choose a cluster in each mass bin
     rows = []
     for i in range(Nhalos):
         mass_range = [mass_bins[i], mass_bins[i+1]]
-        halo_range = [Nhalo_min, Nhalo_max]
         substructure_range = [substructure_min, substructure_max]
-        size_range = [size_min, size_max]
-        row = choose_ID(z, mass_range, halo_range, substructure_range, size_range)
+        row = choose_ID(z, mass_range, substructure_range)
         if row is not None:
             print('Found a cluster in mass bin {}'.format(i))
             rows.append(row)
@@ -376,12 +359,9 @@ def build_test_set(Nhalos, z, file_name):
 
 
 def make_catalogue(sources, name):
-    # Given a set of sources, save the catalogue to a file
-    # Build this as a csv file, with the following columns
+    # Given a set of sources, build a catalogue as a csv file, with the following columns
     # x, y, e1, e2, f1, f2, g1, g2
     # This is the format expected by the pipeline
-
-    # Save the catalogue to a file
     with open(name, 'w') as f:
         f.write('x, y, e1, e2, f1, f2, g1, g2\n')
         for i in range(len(sources.x)):
@@ -389,7 +369,7 @@ def make_catalogue(sources, name):
     f.close()
 
 
-def compute_masses(halos, candidate_lenses, z):
+def compute_masses(candidate_lenses, z):
     # Given the results of the pipeline, process the results
     # We can directly compare the input lenses to the candidate lenses
     # We can also compare the true mass from the halos to the inferred mass
@@ -400,11 +380,10 @@ def compute_masses(halos, candidate_lenses, z):
     extent = [-xmax, xmax, -xmax, xmax]
     _,_,kappa = utils.calculate_kappa(candidate_lenses, extent, 5)
     mass = utils.calculate_mass(kappa, z, 0.5, 1)
-    true_mass = np.sum(halos.mass)
-    return mass, true_mass
+    return mass
 
 
-def run_test(ID_file, result_file):
+def run_test(ID_file, result_file, z):
     IDs = []
     # Load the list of IDs - this is a csv file
     with open(ID_file, 'r') as f:
@@ -427,17 +406,18 @@ def run_test(ID_file, result_file):
     signal_choices = [use_all_signals, shear_flex, all_flex, global_signals]
 
     for ID in IDs:
-        z = 0.194
         label = 'Data/MDARK_Test/{}_test'.format(ID)
 
         halos = find_halos(int(ID), z)
+        true_mass = np.sum(halos.mass)
 
         lenses, sources, xmax = build_lensing_field(halos, z)
         masses = []
 
         for signal_choice in signal_choices:
+            # Run the pipeline with each possible choice of signals
             candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
-            mass, true_mass = compute_masses(halos, candidate_lenses, z)
+            mass = compute_masses(candidate_lenses, z) # Compute the mass of the resulting system
             masses.append(mass)
 
         # Save the results to a file
@@ -474,7 +454,7 @@ def build_mass_correlation_plot(file_name, plot_name):
     true_mass = true_mass[~outliers]
     '''
     # Plot the results for each signal combination
-    fig, ax = plt.subplots(1, 4)
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
     ax = ax.flatten()
     for i in range(4):
         ax[i].scatter(true_mass, masses[i], s=10, color='black')
@@ -482,10 +462,16 @@ def build_mass_correlation_plot(file_name, plot_name):
         ax[i].set_yscale('log')
         # Add a line of best fit
         x = np.linspace(1e12, 1e15, 100)
-        m, b = np.polyfit(np.log10(true_mass), np.log10(masses[i]), 1)
-        y = 10**b * x**m
+        try:
+            # Remove any mass values that are zero
+            true_mass = true_mass[masses[i] > 0]
+            masses[i] = masses[i][masses[i] > 0]
+            m, b = np.polyfit(np.log10(true_mass), np.log10(masses[i]), 1)
+            ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: slope = {:.2f}'.format(m))
+        except:
+            print('RuntimeWarning: Skipping line of best fit')
+            continue
         # Plot the line of best fit and an agreement line
-        ax[i].plot(x, y, color='red', label='Best Fit: {:.2f} - Log Scale'.format(m))
         ax[i].plot(x, x, color='blue', label='Agreement Line')
         ax[i].legend()
         ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
@@ -502,13 +488,10 @@ if __name__ == '__main__':
 
     file = 'MDARK/Halos_0.194.MDARK'
     test_number = 3
-    ID_file = 'Data/MDARK_Test/ID_file_{}.csv'.format(test_number)
-    result_file = 'Data/MDARK_Test/results_{}.csv'.format(test_number)
+    ID_file = 'Data/MDARK_Test/Test3/ID_file_{}.csv'.format(test_number)
+    result_file = 'Data/MDARK_Test/Test3/results_{}.csv'.format(test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
-    build_test_set(10, 0.194, ID_file)
-
-    # run_test(ID_file, result_file)
-
-    # build_mass_correlation_plot(result_file, plot_name)
-        
+    # build_test_set(30, zs[0], ID_file)
+    # run_test(ID_file, result_file, zs[0])
+    build_mass_correlation_plot(result_file, plot_name)
