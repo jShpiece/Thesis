@@ -284,7 +284,7 @@ def choose_ID(z, mass_range, halo_range, substructure_range, size_range):
         return None
 
 
-def run_analysis(halos, z):
+def build_lensing_field(halos, z):
     '''
     Given a set of halos, run the analysis
     This involves the following steps
@@ -329,7 +329,6 @@ def run_analysis(halos, z):
     xmax = np.min([xmax, 5*60])
     xmax = np.max([xmax, 1*60])
 
-
     # Set the maximum extent of the field of view
     # to be the maximum extent of the lenses
 
@@ -338,15 +337,14 @@ def run_analysis(halos, z):
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
 
     sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax)
-    candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags= [True, True, True])
 
-    return lenses, candidate_lenses, sources
+    return lenses, sources, xmax
 
 
 def build_test_set(Nhalos, z, file_name):
     # Select a number of halos, spaced evenly in log space across the mass range
     M_min = 1e12
-    M_max = 1e16
+    M_max = 1e15
     Nhalo_min = 1
     Nhalo_max = 20
     substructure_min = 0.01
@@ -377,21 +375,6 @@ def build_test_set(Nhalos, z, file_name):
     return 
 
 
-def process_results(halos, lenses, candidate_lenses, z, label):
-    # Given the results of the pipeline, process the results
-    # We can directly compare the input lenses to the candidate lenses
-    # We can also compare the true mass from the halos to the inferred mass
-    # from the candidate lenses
-
-    # Get the true mass of the system
-    xmax = np.max([np.max(candidate_lenses.x), np.max(candidate_lenses.y)])
-    extent = [-xmax, xmax, -xmax, xmax]
-    _,_,kappa = utils.calculate_kappa(candidate_lenses, extent, 5)
-    mass = utils.calculate_mass(kappa, z, 0.5, 1)
-    true_mass = np.sum(halos.mass)
-    return mass, true_mass
-
-
 def make_catalogue(sources, name):
     # Given a set of sources, save the catalogue to a file
     # Build this as a csv file, with the following columns
@@ -404,6 +387,21 @@ def make_catalogue(sources, name):
         for i in range(len(sources.x)):
             f.write('{}, {}, {}, {}, {}, {}, {}, {}\n'.format(sources.x[i], sources.y[i], sources.e1[i], sources.e2[i], sources.f1[i], sources.f2[i], sources.g1[i], sources.g2[i]))
     f.close()
+
+
+def compute_masses(halos, candidate_lenses, z):
+    # Given the results of the pipeline, process the results
+    # We can directly compare the input lenses to the candidate lenses
+    # We can also compare the true mass from the halos to the inferred mass
+    # from the candidate lenses
+
+    # Get the true mass of the system
+    xmax = np.max([np.max(candidate_lenses.x), np.max(candidate_lenses.y)])
+    extent = [-xmax, xmax, -xmax, xmax]
+    _,_,kappa = utils.calculate_kappa(candidate_lenses, extent, 5)
+    mass = utils.calculate_mass(kappa, z, 0.5, 1)
+    true_mass = np.sum(halos.mass)
+    return mass, true_mass
 
 
 def run_test(ID_file, result_file):
@@ -419,8 +417,14 @@ def run_test(ID_file, result_file):
 
     # Create a CSV file to hold the results
     with open(result_file, 'w') as f:
-        f.write('ID, Reconstructed Mass, True Mass, N_halos, N_candidates\n')
+        f.write('ID, True Mass, Mass_all_signals, Mass_gamma_F, Mass_F_G, Mass_gamma_G, N_halos, N_candidates\n')
     f.close()
+
+    use_all_signals = [True, True, True] # Use all signals
+    shear_flex = [True, True, False] # Use shear and flexion
+    all_flex = [False, True, True] # Use flexion and g-flexion
+    global_signals = [True, False, True] # Use shear and g-flexion (global signals)
+    signal_choices = [use_all_signals, shear_flex, all_flex, global_signals]
 
     for ID in IDs:
         z = 0.194
@@ -428,12 +432,17 @@ def run_test(ID_file, result_file):
 
         halos = find_halos(int(ID), z)
 
-        lenses, candidate_lenses, sources = run_analysis(halos, z)
-        mass, true_mass = process_results(halos, lenses, candidate_lenses, z, label+'_results.txt')
-        with open(result_file, 'a') as f:
-            f.write('{}, {}, {}, {}, {}\n'.format(ID, mass, true_mass, len(lenses.x), len(candidate_lenses.x)))
-        f.close()
+        lenses, sources, xmax = build_lensing_field(halos, z)
+        masses = []
 
+        for signal_choice in signal_choices:
+            candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
+            mass, true_mass = compute_masses(halos, candidate_lenses, z)
+            masses.append(mass)
+
+        # Save the results to a file
+        with open(result_file, 'a') as f:
+            f.write('{}, {}, {}, {}, {}, {}, {}, {}\n'.format(ID, true_mass, masses[0], masses[1], masses[2], masses[3], len(halos.mass), len(candidate_lenses.x)))
         # Save the sources - these can be passed off to other pipelines for comparison
         make_catalogue(sources, label+'_sources.csv')
 
@@ -446,32 +455,45 @@ def run_test(ID_file, result_file):
     print('Done!')
 
 
-def build_mass_correlation_plot(file_name):
+def build_mass_correlation_plot(file_name, plot_name):
     # Open the results file and read in the data
     results = pd.read_csv(file_name)
     # Get the mass and true mass
-    mass = results[' Mass'].values
     true_mass = results[' True Mass'].values
+    mass = results[' Mass_all_signals'].values
+    mass_gamma_f = results[' Mass_gamma_F'].values
+    mass_f_g = results[' Mass_F_G'].values
+    mass_gamma_g = results[' Mass_gamma_G'].values
+    masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
+    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
 
+    '''
+    # Remove outliers
+    outliers = (mass > 1e15) | (mass < 1e12)
+    mass = mass[~outliers]
+    true_mass = true_mass[~outliers]
+    '''
+    # Plot the results for each signal combination
+    fig, ax = plt.subplots(1, 4)
+    ax = ax.flatten()
+    for i in range(4):
+        ax[i].scatter(true_mass, masses[i], s=10, color='black')
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+        # Add a line of best fit
+        x = np.linspace(1e12, 1e15, 100)
+        m, b = np.polyfit(np.log10(true_mass), np.log10(masses[i]), 1)
+        y = 10**b * x**m
+        # Plot the line of best fit and an agreement line
+        ax[i].plot(x, y, color='red', label='Best Fit: {:.2f} - Log Scale'.format(m))
+        ax[i].plot(x, x, color='blue', label='Agreement Line')
+        ax[i].legend()
+        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
+        ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
+        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass, masses[i])[0, 1]))
 
-    # Plot the results, calculate the correlation coefficient
-    fig, ax = plt.subplots()
-    ax.scatter(true_mass, mass, s=10, color='black')
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    # Add a line of best fit
-    m, b = np.polyfit(np.log10(true_mass), np.log10(mass), 1)
-    x = np.linspace(1e12, 1e15, 100)
-    y = 10**b * x**m
-    ax.plot(x, y, color='red', label='Best Fit: {:.2f}'.format(m))
-    # Also add a 1:1 line
-    ax.plot(x, x, color='blue', label='1:1')
-    ax.legend()
-    ax.set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
-    ax.set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-    ax.set_title('Multidark: Mass Inference \n Correlation Coefficient: {:.2f}'.format(np.corrcoef(true_mass, mass)[0, 1]))
     fig.tight_layout()
-    fig.savefig('Data/MDARK_Test/mass_inference_3.png')
+    fig.savefig(plot_name)
     plt.show()
 
 
@@ -479,10 +501,14 @@ if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
 
     file = 'MDARK/Halos_0.194.MDARK'
-    ID_file = 'Data/MDARK_Test/ID_list_3.csv'
-    result_file = 'Data/MDARK_Test/results_3.csv'
+    test_number = 3
+    ID_file = 'Data/MDARK_Test/ID_file_{}.csv'.format(test_number)
+    result_file = 'Data/MDARK_Test/results_{}.csv'.format(test_number)
+    plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
+
+    build_test_set(10, 0.194, ID_file)
 
     # run_test(ID_file, result_file)
 
-    build_mass_correlation_plot(result_file)
+    # build_mass_correlation_plot(result_file, plot_name)
         
