@@ -238,35 +238,39 @@ def find_halos(ID, z):
 
 def choose_ID(z, mass_range, substructure_range):
     # Given a set of criteria, choose a cluster ID
-    file = dir + 'fixed_key_{}.MDARK'.format(z)
+    file = 'MDARK/fixed_key_0.194.MDARK'
     chunks = chunk_data(file)
 
     # Choose a random cluster with mass in the given range
     # and more than 1 halo
     rows = []
+    counter = 0
     for chunk in chunks:
         IDs = chunk['MainHaloID'].values
         masses = chunk[' Total Mass'].values
         substructure = chunk[' Mass Fraction'].values
 
         # Apply the criteria
-        mass_criteria = (masses > mass_range[0]) & (masses < mass_range[1])
-        substructure_criteria = (substructure > substructure_range[0]) & (substructure < substructure_range[1])
+        # mass_criteria = (masses > mass_range[0]) & (masses < mass_range[1])
+        # substructure_criteria = (substructure > substructure_range[0]) & (substructure < substructure_range[1])
+        # counter += np.sum(mass_criteria & substructure_criteria)
 
         # Find all clusters that satisfy all criteria
-        combined_criteria = mass_criteria & substructure_criteria
+        combined_criteria = (masses > mass_range[0]) & (masses < mass_range[1]) & (substructure > substructure_range[0]) & (substructure < substructure_range[1])
+        counter += np.sum(combined_criteria)
 
         if np.any(combined_criteria):
             valid_ids = IDs[combined_criteria]
             # Add these to the list of rows
             rows.append(chunk[chunk['MainHaloID'].isin(valid_ids)])
-
+    print('Number of clusters found: {}'.format(counter))
     # Choose a random cluster from the list of valid rows
     if len(rows) > 0:
         rows = pd.concat(rows) # Concatenate the rows
         row = rows.sample(n=1) # Choose a random row
         return row
     else:
+        print(rows)
         return None
 
 
@@ -332,21 +336,25 @@ def build_test_set(Nhalos, z, file_name):
     # This set will be used to test the pipeline
     # For each cluster, we will save the following information
     # ID, Mass, Halo Number, Mass Fraction, Size
-    M_min = 1e12
-    M_max = 5e15
-    substructure_min = 0.01
-    substructure_max = 0.05
+    M_min = 1e13
+    M_max = 1e15
+    substructure_min = 0
+    substructure_max = 0.1
     mass_bins = np.logspace(np.log10(M_min), np.log10(M_max), Nhalos+1)
-
+    print(mass_bins)    
+    # flip the mass bin to check the largest ones first
+    mass_bins = mass_bins[::-1]
     # Choose a cluster in each mass bin
     rows = []
     for i in range(Nhalos):
-        mass_range = [mass_bins[i], mass_bins[i+1]]
+        mass_range = [mass_bins[i+1], mass_bins[i]]
         substructure_range = [substructure_min, substructure_max]
         row = choose_ID(z, mass_range, substructure_range)
         if row is not None:
             print('Found a cluster in mass bin {}'.format(i))
             rows.append(row)
+        else:
+            print('No cluster found in mass bin {}'.format(i))
 
     # Save the rows to a file
     with open(file_name, 'w') as f:
@@ -396,7 +404,7 @@ def run_test(ID_file, result_file, z):
 
     # Create a CSV file to hold the results
     with open(result_file, 'w') as f:
-        f.write('ID, True Mass, Mass_all_signals, Mass_gamma_F, Mass_F_G, Mass_gamma_G, N_halos, N_candidates\n')
+        f.write('ID, True Mass, Mass_all_signals, Mass_gamma_F, Mass_F_G, Mass_gamma_G, N_halos, Nfound_all_signals, Nfound_gamma_F, Nfound_F_G, Nfound_gamma_G\n')
     f.close()
 
     use_all_signals = [True, True, True] # Use all signals
@@ -413,16 +421,18 @@ def run_test(ID_file, result_file, z):
 
         lenses, sources, xmax = build_lensing_field(halos, z)
         masses = []
+        candidate_number = []
 
         for signal_choice in signal_choices:
             # Run the pipeline with each possible choice of signals
             candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
             mass = compute_masses(candidate_lenses, z) # Compute the mass of the resulting system
             masses.append(mass)
+            candidate_number.append(len(candidate_lenses.mass))
 
         # Save the results to a file
         with open(result_file, 'a') as f:
-            f.write('{}, {}, {}, {}, {}, {}, {}, {}\n'.format(ID, true_mass, masses[0], masses[1], masses[2], masses[3], len(halos.mass), len(candidate_lenses.x)))
+            f.write('{}, {}, {}, {}, {}, {}, {}, {}\n'.format(ID, true_mass, masses[0], masses[1], masses[2], masses[3], len(halos.mass), candidate_number[0], candidate_number[1], candidate_number[2]))
         # Save the sources - these can be passed off to other pipelines for comparison
         make_catalogue(sources, label+'_sources.csv')
 
@@ -472,7 +482,7 @@ def build_mass_correlation_plot(file_name, plot_name):
             print('RuntimeWarning: Skipping line of best fit')
             continue
         # Plot the line of best fit and an agreement line
-        ax[i].plot(x, x, color='blue', label='Agreement Line')
+        ax[i].plot(x, x, color='blue', label='Agreement Line', linestyle='--') # Agreement line - use a different linestyle because the paper won't be in color
         ax[i].legend()
         ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
         ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
@@ -487,11 +497,11 @@ if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
 
     file = 'MDARK/Halos_0.194.MDARK'
-    test_number = 3
-    ID_file = 'Data/MDARK_Test/Test3/ID_file_{}.csv'.format(test_number)
-    result_file = 'Data/MDARK_Test/Test3/results_{}.csv'.format(test_number)
+    test_number = 4
+    ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
+    result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
-    # build_test_set(30, zs[0], ID_file)
-    # run_test(ID_file, result_file, zs[0])
+    build_test_set(30, zs[0], ID_file)
+    run_test(ID_file, result_file, zs[0])
     build_mass_correlation_plot(result_file, plot_name)
