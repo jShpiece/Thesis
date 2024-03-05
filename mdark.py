@@ -466,7 +466,7 @@ def build_mass_correlation_plot(file_name, plot_name):
         ax[i].set_xscale('log')
         ax[i].set_yscale('log')
         # Add a line of best fit
-        x = np.linspace(1e12, 1e15, 100)
+        x = np.linspace(1e13, 1e15, 100)
         try:
             # Remove any mass values that are zero
             true_mass = true_mass[masses[i] > 0]
@@ -498,5 +498,5 @@ if __name__ == '__main__':
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
     # build_test_set(30, zs[0], ID_file)
-    run_test(ID_file, result_file, zs[0])
+    # run_test(ID_file, result_file, zs[0])
     build_mass_correlation_plot(result_file, plot_name)
