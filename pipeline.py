@@ -44,8 +44,11 @@ class Source:
         return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
 
 
-    def apply_lensing_effects(self, lenses):
+    def apply_SIS_lensing(self, lenses):
         # Apply the lensing effects of a set of lenses to the sources
+        # Model the lenses as Singular Isothermal Spheres (SIS)
+        # Then the primary parameter is the Einstein radii of the lenses
+
         if type(lenses.x) is not np.ndarray:
             lenses.x = np.array([lenses.x])
             lenses.y = np.array([lenses.y])
@@ -69,6 +72,24 @@ class Source:
             self.f2 += -dy*lenses.te[i] / (2*r*r*r)
             self.g1 += (3*lenses.te[i]) / (2*r*r) * cos3phi
             self.g2 += (3*lenses.te[i]) / (2*r*r) * sin3phi
+    
+    
+    def apply_NFW_lensing(self, halos):
+        # Apply the lensing effects of a set of halos to the sources
+        # Model the halos as Navarro-Frenk-White (NFW) profiles
+        # Then the primary parameters are the masses and concentrations of the halos
+
+        gamma1, gamma2 = halos.calc_shear_signal(self.x, self.y)
+        flex1, flex2 = halos.calc_F_signal(self.x, self.y)
+        gflex1, gflex2 = halos.calc_G_signal(self.x, self.y)
+
+        self.e1 += gamma1
+        self.e2 += gamma2
+        self.f1 += flex1
+        self.f2 += flex2
+        self.g1 += gflex1
+        self.g2 += gflex2
+
 
 
 class Lens:
@@ -234,7 +255,7 @@ def calc_raw_chi2(sources, lenses, use_flags):
         np.zeros_like(sources.f1), np.zeros_like(sources.f2), np.zeros_like(sources.g1), np.zeros_like(sources.g2), 
         sources.sigs, sources.sigf, sources.sigg
         )
-    source_clone.apply_lensing_effects(lenses) 
+    source_clone.apply_SIS_lensing(lenses) 
     
     # Now we compare the lensing signals on our source_clone object to the original sources
     chi1e = ((source_clone.e1 - sources.e1) / sources.sigs) ** 2
