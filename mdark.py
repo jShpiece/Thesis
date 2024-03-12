@@ -1,13 +1,11 @@
 import numpy as np 
 import matplotlib.pyplot as plt
-import time
 import pandas as pd
 from astropy.visualization import hist as fancy_hist
 import pipeline
 import utils
 import astropy.units as u
 from astropy.cosmology import Planck15 as cosmo
-import sklearn.metrics
 import pickle
 
 dir = 'MDARK/'
@@ -60,7 +58,7 @@ class Halo:
             if x < 1:
                 term1 = 8 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / (x**2 * np.sqrt(1 - x**2))
                 term2 = 4 / x**2 * np.log(x / 2)
-                term3 = -2 / (x**2 - 1)
+                term3 = -2 / (x**2 * np.sqrt(1 - x**2))
                 term4 = 4 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / ((x**2 - 1) * np.sqrt(1 - x**2))
                 sol = term1 + term2 + term3 + term4
             elif x == 1:
@@ -77,37 +75,41 @@ class Halo:
             return sol
         
         r200, r200_arcsec = self.calc_R200()
-        rs = r200 / self.c
+        rs = r200 / self.c # In meters
+
+        z_source = 0.5
+        # z_source gives the redshift of the source galaxies, redshift of the lens is self.redshift
+        # Compute the angular diameter distances
+        Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
+        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
+        Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, z_source).to(u.meter).value
+
+        # Compute the critical surface density
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value 
-        sigma_c = (c**2 / (4 * np.pi * G)) * (1 / (4 * np.pi * (1 + self.redshift)**2 * rho_c)) 
-        kappa_s = rho_c * self.calc_delta_c() * rs / sigma_c
+        rho_s = rho_c * self.calc_delta_c() 
+        sigma_c = (c**2 / (4 * np.pi * G)) * (Ds / (Dl * Dls))
+        kappa_s = rho_s * rs / sigma_c
 
         shear_1 = np.zeros(len(xs))
         shear_2 = np.zeros(len(xs))
 
         for i in range(len(xs)):
-            dx = np.array(xs[i] - self.x)
-            dy = np.array(ys[i] - self.y)
+            dx = xs[i] - self.x
+            dy = ys[i] - self.y
             r = (dx**2 + dy**2)**0.5
-            print('dx: {}'.format(dx))
-            print('dy: {}'.format(dy))
-            print('r: {}'.format(r))
-            print(type(dx), type(dy), type(r))
-            print('np: {}'.format(np.__name__))
 
             x = r / (r200_arcsec / self.c)
-            print('x: {}'.format(x))
             term_2 = np.zeros(len(x))
             for val in range(len(x)):
                 term_2[val] = radial_term_2(x[val])
 
-            shear_mag = 2 * kappa_s / (x**2 - 1) * term_2
-            print(np.pi)
-            phi = np.arctan2(dy, dx)
+            shear_mag = kappa_s * term_2
+            phi = np.empty(len(dx))
+            for j in range(len(dx)):
+                phi[j] = np.arctan2(dy[j], dx[j])
 
             shear_1[i] += np.sum(shear_mag * np.cos(2 * phi))
             shear_2[i] += np.sum(shear_mag * np.sin(2 * phi))
-            print('Shear: ({}, {})'.format(shear_1[i], shear_2[i]))
 
         return shear_1, shear_2
 
@@ -129,7 +131,7 @@ class Halo:
         def radial_term_3(x):
             # Compute the radial term - this is called h(x) in theory
             if x < 1:
-                sol = (2 * x) / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x))) - 1 / x
+                sol = 1/x - (2 * x) / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
             elif x == 1:
                 sol = 1 / 3
             elif x > 1:
@@ -137,12 +139,24 @@ class Halo:
             return sol
 
         r200, r200_arcsec = self.calc_R200()
-        rs = r200 / self.c
-        rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
-        sigma_c = (c**2 / (4 * np.pi * G)) * (1 / (4 * np.pi * (1 + self.redshift)**2 * rho_c))
-        kappa_s = rho_c * self.calc_delta_c() * rs / sigma_c
-        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value 
-        F_s = kappa_s * Dl / (r200 / self.c)
+        print(r200_arcsec / self.c)
+        rs = r200 / self.c # In meters
+
+        z_source = 0.5
+        # z_source gives the redshift of the source galaxies, redshift of the lens is self.redshift
+        # Compute the angular diameter distances
+        Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
+        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
+        Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, z_source).to(u.meter).value
+
+        # Compute the critical surface density
+        rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value 
+        rho_s = rho_c * self.calc_delta_c()
+        sigma_c = (c**2 / (4 * np.pi * G)) * (Ds / (Dl * Dls))
+        kappa_s = rho_s * rs / sigma_c
+        F_s = kappa_s * Dl / rs
+
+        print('F_s: {}'.format(F_s))
 
         f1_1 = np.zeros(len(xs))
         f1_2 = np.zeros(len(ys))
@@ -150,20 +164,22 @@ class Halo:
         for i in range(len(xs)):
             dx = xs[i] - self.x
             dy = ys[i] - self.y
-            print(dx, dy)
-            r = np.sqrt(dx**2 + dy**2)**0.5
-            phi = np.arctan2(dy, dx)
+            r = (dx**2 + dy**2)**0.5
+            phi = np.empty(len(dx))
+            for j in range(len(dx)):
+                phi[j] = np.arctan2(dy[j], dx[j])
 
-            x = r / (r200_arcsec / self.c)
+            x = r / (r200_arcsec / self.c) # In arcseconds
             term_1 = np.zeros(len(r))
             term_3 = np.zeros(len(r))
             for val in range(len(x)):
                 term_1[val] = radial_term_1(x[val])
                 term_3[val] = radial_term_3(x[val])
 
-            f1_mag = 2 * F_s / (x**2 - 1) * (2 * x * term_1 - term_3)
-            f1_1[i] += np.sum(f1_mag * np.cos(phi))
-            f1_2[i] += np.sum(f1_mag * np.sin(phi))
+            F_mag = (-2 * F_s / (x**2 - 1)**2) * (2 * x * term_1 - term_3) # In units of inverse radians
+            F_mag /= 206265 # Convert to inverse arcseconds
+            f1_1[i] += np.sum(F_mag * np.cos(phi))
+            f1_2[i] += np.sum(F_mag * np.sin(phi))
 
         return f1_1, f1_2
 
@@ -183,12 +199,22 @@ class Halo:
             return sol
 
         r200, r200_arcsec = self.calc_R200()
+        print(r200_arcsec / self.c)
         rs = r200 / self.c
-        rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
-        sigma_c = (c**2 / (4 * np.pi * G)) * (1 / (4 * np.pi * (1 + self.redshift)**2 * rho_c))
-        kappa_s = rho_c * self.calc_delta_c() * rs / sigma_c
-        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value 
-        F_s = kappa_s * Dl / (r200 / self.c)
+
+        z_source = 0.5
+        # z_source gives the redshift of the source galaxies, redshift of the lens is self.redshift
+        # Compute the angular diameter distances
+        Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
+        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
+        Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, z_source).to(u.meter).value
+
+        # Compute the critical surface density
+        rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value 
+        rho_s = rho_c * self.calc_delta_c()
+        sigma_c = (c**2 / (4 * np.pi * G)) * (Ds / (Dl * Dls))
+        kappa_s = rho_s * rs / sigma_c
+        F_s = kappa_s * Dl / rs
 
         f2_1 = np.zeros(len(xs))
         f2_2 = np.zeros(len(ys))
@@ -196,18 +222,25 @@ class Halo:
         for i in range(len(xs)):
             dx = xs[i] - self.x
             dy = ys[i] - self.y
-            print(type(np))
-            r = np.sqrt(dx**2 + dy**2)
-            phi = np.arctan2(dy, dx)
+            r = (dx**2 + dy**2)**0.5
+            phi = np.empty(len(dx))
+            for j in range(len(dx)):
+                phi[j] = np.arctan2(dy[j], dx[j])
 
             x = r / (r200_arcsec / self.c)
             term_4 = np.zeros(len(r))
             for val in range(len(x)):
                 term_4[val] = radial_term_4(x[val])
 
-            f2_mag = 2 * F_s * [8 / x**3 * np.log(x/2) + ((3/x)*(1 - x*x**2) + term_4) / (x**2 - 1)**2]
-            f2_1[i] += np.sum(f2_mag * np.cos(3 * phi))
-            f2_2[i] += np.sum(f2_mag * np.sin(3 * phi))
+            log_term = np.empty(len(x))
+            for val in range(len(x)):
+                # Quick hack to avoid error in log term
+                log_term[val] = 8 / x[val]**3 * np.log(x[val] / 2)
+            
+            G_mag = 2 * F_s * (log_term + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)
+            G_mag /= 206265 # Convert to inverse arcseconds 
+            f2_1[i] += np.sum(G_mag * np.cos(3 * phi))
+            f2_2[i] += np.sum(G_mag * np.sin(3 * phi))
         
         return f2_1, f2_2
 
@@ -390,6 +423,13 @@ def find_halos(ID, z):
     chalo = chalo[halo_type != 2]
     masshalo = masshalo[halo_type != 2]
 
+    # Set these to be numpy arrays
+    xhalo = np.array(xhalo)
+    yhalo = np.array(yhalo)
+    zhalo = np.array(zhalo)
+    chalo = np.array(chalo)
+    masshalo = np.array(masshalo)
+
     halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo, z)
 
     return halos
@@ -457,7 +497,7 @@ def build_lensing_field(halos, z):
     halos.x = x
     halos.y = y
 
-    lenses = None # Placeholder for the lenses
+    lenses = halos # Placeholder for the lenses
 
     # Center the lenses at (0, 0)
     # This is a necessary step for the pipeline
@@ -480,7 +520,7 @@ def build_lensing_field(halos, z):
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
 
-    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax)
+    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
 
     return lenses, sources, xmax
 
@@ -573,7 +613,7 @@ def run_test(ID_file, result_file, z):
         halos = find_halos(int(ID), z)
         true_mass = np.sum(halos.mass)
 
-        lenses, sources, xmax = build_lensing_field(halos, z)
+        halos, sources, xmax = build_lensing_field(halos, z)
         masses = []
         candidate_number = []
 
@@ -591,8 +631,8 @@ def run_test(ID_file, result_file, z):
         make_catalogue(sources, label+'_sources.csv')
 
         # Also save the lenses - use pickle to save these objects
-        with open(label+'_lenses.pkl', 'wb') as f:
-            pickle.dump(lenses, f)
+        with open(label+'_halos.pkl', 'wb') as f:
+            pickle.dump(halos, f)
         with open(label+'_candidate_lenses.pkl', 'wb') as f:
             pickle.dump(candidate_lenses, f)
 
@@ -651,51 +691,52 @@ if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
 
     file = 'MDARK/Halos_0.194.MDARK'
-    test_number = 4
+    test_number = 5
     ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
-    # build_test_set(30, zs[0], ID_file)
-    # run_test(ID_file, result_file, zs[0])
-    # build_mass_correlation_plot(result_file, plot_name)
+    #build_test_set(30, zs[0], ID_file)
+    #run_test(ID_file, result_file, zs[0])
+    #build_mass_correlation_plot(result_file, plot_name)
+
+    #raise SystemExit
+
+    '''
+    TEST TO MAKE SURE NFW PRODUCED LENSING SIGNALS ARE REASONABLE
+    '''
 
     # pick a random cluster
     ID = 11494083558
     halos = find_halos(ID, zs[0])
-    # Convert x and y to arcseconds
+    # Convert x and y to arcseconds (from Mpc)
     x = halos.x * 3.086 * 10**22 / cosmo.angular_diameter_distance(zs[0]).to(u.meter).value * 206265
     y = halos.y * 3.086 * 10**22 / cosmo.angular_diameter_distance(zs[0]).to(u.meter).value * 206265
 
     centroid = np.mean(x), np.mean(y)
     x = x - centroid[0]
     y = y - centroid[1]
-    xc = x[0] + 10.5
-    yc = y[0] + 1.5
+    xc = 0
+    yc = 0
 
     # update the halos object
     halos.x = x
     halos.y = y
-    print(halos.x)
-    print(halos.y)
 
     r200 = halos.calc_R200()
-    print('R200: {}'.format(r200))
 
     # Evaluate the lensing signals at this centroid
     gamma1, gamma2 = halos.calc_shear_signal([xc], [yc])
-    #f1, f2 = halos.calc_F_signal([xc], [yc])
-    #g1, g2 = halos.calc_G_signal([xc], [yc])
+    f1, f2 = halos.calc_F_signal([xc], [yc])
+    g1, g2 = halos.calc_G_signal([xc], [yc])
 
     print('For cluster {}:'.format(ID))
     print('With {} halos'.format(len(halos.x)))
-    print('And a total mass of {}'.format(np.sum(halos.mass)))
+    print('And a total mass of {:.2e}'.format(np.sum(halos.mass)))
     print('The r200 is')
     print(r200)
-    print('The centroid is')
-    print(centroid)
     print('And 5 arcseconds from the primary halo, the signals are:')
     print('Gamma: ({}, {})'.format(gamma1, gamma2))
-    #print('F: ({}, {})'.format(f1, f2))
-    #print('G: ({}, {})'.format(g1, g2))
+    print('F: ({}, {})'.format(f1, f2))
+    print('G: ({}, {})'.format(g1, g2))
     print('Analysis complete!')

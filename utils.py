@@ -132,7 +132,7 @@ def mass_sheet_transformation(kappa, k):
 # Initialization functions
 # ------------------------------
 
-def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5):
+def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5,lens_type='SIS'):
     #Create sources for a lensing system and apply the lensing signal
 
     #Create the sources - require that they be distributed sphericaly
@@ -156,7 +156,12 @@ def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5
 
     sources = pipeline.Source(x, y, e1data, e2data, f1data, f2data, g1data, g2data, sigs*np.ones(ns), sigf*np.ones(ns), sigg*np.ones(ns))
     # Apply the lensing effects of the lenses
-    sources.apply_lensing_effects(lenses)
+    if lens_type == 'SIS':
+        sources.apply_SIS_lensing(lenses)
+    elif lens_type == 'NFW':
+        # Note - in this case the 'lenses' object is actually a 'halos' object
+        # The effect is the same in practice
+        sources.apply_NFW_lensing(lenses)
 
     return sources
 
