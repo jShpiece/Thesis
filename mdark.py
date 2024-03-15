@@ -657,16 +657,24 @@ def build_mass_correlation_plot(file_name, plot_name):
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
     ax = ax.flatten()
     for i in range(4):
-        ax[i].scatter(true_mass, masses[i], s=10, color='black')
+        # true_mass_temp = true_mass[masses[i] > 0]
+        # masses[i] = masses[i][masses[i] > 0]
+        true_mass_temp = true_mass
+        masses[i] = np.abs(masses[i])
+        if masses[i].min() == 0:
+            true_mass_temp = true_mass_temp[masses[i] > 0]
+            masses[i] = masses[i][masses[i] > 0]
+
+        ax[i].scatter(true_mass_temp, masses[i], s=10, color='black')
         ax[i].set_xscale('log')
         ax[i].set_yscale('log')
         # Add a line of best fit
         x = np.linspace(1e13, 1e15, 100)
         try:
             # Remove any mass values that are zero
-            true_mass = true_mass[masses[i] > 0]
-            masses[i] = masses[i][masses[i] > 0]
-            m, b = np.polyfit(np.log10(true_mass), np.log10(masses[i]), 1)
+            # true_mass = true_mass[masses[i] > 0]
+            # masses[i] = masses[i][masses[i] > 0]
+            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(masses[i]), 1)
             ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
         except:
             print('RuntimeWarning: Skipping line of best fit')
@@ -676,7 +684,7 @@ def build_mass_correlation_plot(file_name, plot_name):
         ax[i].legend()
         ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
         ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass, masses[i])[0, 1]))
+        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, masses[i])[0, 1]))
 
     fig.tight_layout()
     fig.savefig(plot_name)
@@ -693,7 +701,7 @@ if __name__ == '__main__':
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
     # build_test_set(30, zs[0], ID_file)
-    run_test(ID_file, result_file, zs[0])
+    # run_test(ID_file, result_file, zs[0])
     build_mass_correlation_plot(result_file, plot_name)
 
     raise SystemExit
