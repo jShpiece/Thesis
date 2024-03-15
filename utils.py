@@ -66,8 +66,9 @@ def calculate_kappa(lenses, extent, smoothing_scale) -> tuple:
         extent (tuple): The extent of the convergence map in arcsec.
         smoothing_scale (float): The smoothing scale in arcsec.
     '''
-    X = np.linspace(extent[0], extent[1], int(extent[1]))
-    Y = np.linspace(extent[2], extent[3], int(extent[3]))
+    # Take absolute value of difference in extent to avoid negative step size
+    X = np.linspace(extent[0], extent[1], np.abs(int(extent[1] - extent[0])))
+    Y = np.linspace(extent[2], extent[3], np.abs(int(extent[3] - extent[2])))
     X, Y = np.meshgrid(X, Y)
     kappa = np.zeros_like(X)
 

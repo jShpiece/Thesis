@@ -139,7 +139,6 @@ class Halo:
             return sol
 
         r200, r200_arcsec = self.calc_R200()
-        print(r200_arcsec / self.c)
         rs = r200 / self.c # In meters
 
         z_source = 0.5
@@ -155,8 +154,6 @@ class Halo:
         sigma_c = (c**2 / (4 * np.pi * G)) * (Ds / (Dl * Dls))
         kappa_s = rho_s * rs / sigma_c
         F_s = kappa_s * Dl / rs
-
-        print('F_s: {}'.format(F_s))
 
         f1_1 = np.zeros(len(xs))
         f1_2 = np.zeros(len(ys))
@@ -199,7 +196,6 @@ class Halo:
             return sol
 
         r200, r200_arcsec = self.calc_R200()
-        print(r200_arcsec / self.c)
         rs = r200 / self.c
 
         z_source = 0.5
@@ -591,7 +587,7 @@ def run_test(ID_file, result_file, z):
     with open(ID_file, 'r') as f:
         lines = f.readlines() # Read the lines
         # Skip the first line
-        lines = lines[1:]
+        lines = lines[1:] 
         for line in lines:
             ID = line.split(',')[0]
             IDs.append(ID)
@@ -626,7 +622,7 @@ def run_test(ID_file, result_file, z):
 
         # Save the results to a file
         with open(result_file, 'a') as f:
-            f.write('{}, {}, {}, {}, {}, {}, {}, {}\n'.format(ID, true_mass, masses[0], masses[1], masses[2], masses[3], len(halos.mass), candidate_number[0], candidate_number[1], candidate_number[2], candidate_number[3]))
+            f.write('{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}\n'.format(ID, true_mass, masses[0], masses[1], masses[2], masses[3], len(halos.mass), candidate_number[0], candidate_number[1], candidate_number[2], candidate_number[3]))
         # Save the sources - these can be passed off to other pipelines for comparison
         make_catalogue(sources, label+'_sources.csv')
 
@@ -696,11 +692,11 @@ if __name__ == '__main__':
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
-    #build_test_set(30, zs[0], ID_file)
-    #run_test(ID_file, result_file, zs[0])
-    #build_mass_correlation_plot(result_file, plot_name)
+    # build_test_set(30, zs[0], ID_file)
+    run_test(ID_file, result_file, zs[0])
+    build_mass_correlation_plot(result_file, plot_name)
 
-    #raise SystemExit
+    raise SystemExit
 
     '''
     TEST TO MAKE SURE NFW PRODUCED LENSING SIGNALS ARE REASONABLE
@@ -716,8 +712,8 @@ if __name__ == '__main__':
     centroid = np.mean(x), np.mean(y)
     x = x - centroid[0]
     y = y - centroid[1]
-    xc = 0
-    yc = 0
+    xc = x[0] + 5
+    yc = y[0]
 
     # update the halos object
     halos.x = x
