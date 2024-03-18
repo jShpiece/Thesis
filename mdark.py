@@ -498,15 +498,20 @@ def build_lensing_field(halos, z):
     # Center the lenses at (0, 0)
     # This is a necessary step for the pipeline
     # to work correctly
-    centroid = np.mean(lenses.x), np.mean(lenses.y)
-    lenses.x -= centroid[0]
-    lenses.y -= centroid[1]
+    # Let the centroid be the location of the most massive halo
+    # Offset by a small amount, so that we are looking at the
+    # center of the cluster, but not directly at the most massive halo
+
+    largest_halo = np.argmax(lenses.mass)
+    centroid = [lenses.x[largest_halo], lenses.y[largest_halo]]
+    lenses.x -= centroid[0] + np.random.uniform(-10, 10)
+    lenses.y -= centroid[1] + np.random.uniform(-10, 10)
 
     xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
     print('xmax: {}'.format(xmax))
     
-    # Don't allow the field of view to be larger than 5 arcminutes - or smaller than 1 arcminute
-    xmax = np.min([xmax, 5*60])
+    # Don't allow the field of view to be larger than 2 arcminutes - or smaller than 1 arcminute
+    xmax = np.min([xmax, 2*60])
     xmax = np.max([xmax, 1*60])
 
     # Set the maximum extent of the field of view
@@ -695,13 +700,13 @@ if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
 
     file = 'MDARK/Halos_0.194.MDARK'
-    test_number = 5
+    test_number = 6
     ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
     # build_test_set(30, zs[0], ID_file)
-    # run_test(ID_file, result_file, zs[0])
+    run_test(ID_file, result_file, zs[0])
     build_mass_correlation_plot(result_file, plot_name)
 
     raise SystemExit
