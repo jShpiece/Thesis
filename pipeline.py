@@ -91,7 +91,6 @@ class Source:
         self.g2 += gflex2
 
 
-
 class Lens:
     # Class to store lens information. Each lens has a position (x, y) and an Einstein radius (te)
     def __init__(self, x, y, te, chi2):

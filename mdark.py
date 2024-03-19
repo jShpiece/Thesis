@@ -7,6 +7,8 @@ import utils
 import astropy.units as u
 from astropy.cosmology import Planck15 as cosmo
 import pickle
+import concurrent.futures
+import time
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
@@ -155,8 +157,8 @@ class Halo:
         kappa_s = rho_s * rs / sigma_c
         F_s = kappa_s * Dl / rs
 
-        f1_1 = np.zeros(len(xs))
-        f1_2 = np.zeros(len(ys))
+        f1 = np.zeros(len(xs))
+        f2 = np.zeros(len(ys))
 
         for i in range(len(xs)):
             dx = xs[i] - self.x
@@ -175,10 +177,10 @@ class Halo:
 
             F_mag = (-2 * F_s / (x**2 - 1)**2) * (2 * x * term_1 - term_3) # In units of inverse radians
             F_mag /= 206265 # Convert to inverse arcseconds
-            f1_1[i] += np.sum(F_mag * np.cos(phi))
-            f1_2[i] += np.sum(F_mag * np.sin(phi))
+            f1[i] += np.sum(F_mag * np.cos(phi))
+            f2[i] += np.sum(F_mag * np.sin(phi))
 
-        return f1_1, f1_2
+        return f1, f2
 
 
     def calc_G_signal(self, xs, ys):
@@ -212,8 +214,8 @@ class Halo:
         kappa_s = rho_s * rs / sigma_c
         F_s = kappa_s * Dl / rs
 
-        f2_1 = np.zeros(len(xs))
-        f2_2 = np.zeros(len(ys))
+        g1 = np.zeros(len(xs))
+        g2 = np.zeros(len(ys))
 
         for i in range(len(xs)):
             dx = xs[i] - self.x
@@ -235,10 +237,10 @@ class Halo:
             
             G_mag = 2 * F_s * (log_term + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)
             G_mag /= 206265 # Convert to inverse arcseconds 
-            f2_1[i] += np.sum(G_mag * np.cos(3 * phi))
-            f2_2[i] += np.sum(G_mag * np.sin(3 * phi))
+            g1[i] += np.sum(G_mag * np.cos(3 * phi))
+            g2[i] += np.sum(G_mag * np.sin(3 * phi))
         
-        return f2_1, f2_2
+        return g1, g2
 
 
 def fix_file(z):
@@ -508,7 +510,6 @@ def build_lensing_field(halos, z):
     lenses.y -= centroid[1] + np.random.uniform(-10, 10)
 
     xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
-    print('xmax: {}'.format(xmax))
     
     # Don't allow the field of view to be larger than 2 arcminutes - or smaller than 1 arcminute
     xmax = np.min([xmax, 2*60])
@@ -650,6 +651,8 @@ def build_mass_correlation_plot(file_name, plot_name):
     mass_f_g = results[' Mass_F_G'].values
     mass_gamma_g = results[' Mass_gamma_G'].values
     masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
+    # True mass is in units of M_sun / h - convert others to the same units
+    masses = [mass / h for mass in masses]
     signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
 
     '''
@@ -696,56 +699,133 @@ def build_mass_correlation_plot(file_name, plot_name):
     plt.show()
 
 
+def run_single_test(ID, z, N_test, signal_choices, result_file):
+    # Run the pipeline for a single cluster, with a given set of signal choices
+    # N_test times. Save the results to a file
+
+    all_masses = []
+    all_candidate_numbers = []
+
+    for _ in range(N_test):
+        halos = find_halos(int(ID), z)
+        true_mass = np.sum(halos.mass)
+
+        halos, sources, xmax = build_lensing_field(halos, z)
+        masses = []
+        candidate_number = []
+
+        for signal_choice in signal_choices:
+            candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
+            mass = compute_masses(candidate_lenses, z)
+            masses.append(mass)
+            candidate_number.append(len(candidate_lenses.x))
+
+        all_masses.append(masses)
+        all_candidate_numbers.append(candidate_number)
+        print('Finished test {} for ID {}'.format(_, ID))
+
+    # Calculate mean and standard deviation for each type of mass and candidate number
+    mean_masses = np.mean(all_masses, axis=0)
+    std_masses = np.std(all_masses, axis=0)
+    mean_candidate_numbers = np.mean(all_candidate_numbers, axis=0)
+    std_candidate_numbers = np.std(all_candidate_numbers, axis=0)
+    print('Results for ID {}:'.format(ID))
+
+    result = '{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}\n'.format(
+        ID, true_mass, 
+        *mean_masses, *std_masses, 
+        len(halos.mass), 
+        *mean_candidate_numbers, *std_candidate_numbers)
+
+    with open(result_file, 'a') as f:
+        f.write(result)
+
+
+def run_test_parallel(ID_file, result_file, z, N_test):
+    IDs = []
+
+    with open(ID_file, 'r') as f:
+        lines = f.readlines()[1:]
+        for line in lines:
+            ID = line.split(',')[0]
+            IDs.append(ID)
+    IDs = IDs[:10] # Just use the first 10 IDs for testing
+
+    header = 'ID, True Mass, Mean Mass_all_signals, Std Mass_all_signals, Mean Mass_gamma_F, Std Mass_gamma_F, Mean Mass_F_G, Std Mass_F_G, Mean Mass_gamma_G, Std Mass_gamma_G, N_halos, Mean Nfound_all_signals, Std Nfound_all_signals, Mean Nfound_gamma_F, Std Nfound_gamma_F, Mean Nfound_F_G, Std Nfound_F_G, Mean Nfound_gamma_G, Std Nfound_gamma_G\n'
+    with open(result_file, 'w') as f:
+        f.write(header)
+
+    signal_choices = [
+        [True, True, True], # All signals
+        [True, True, False], # Shear and flexion
+        [False, True, True], # Flexion and g-flexion
+        [True, False, True] # Shear and g-flexion
+    ]
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(run_single_test, ID, z, N_test, signal_choices, result_file) for ID in IDs]
+
+
+
+def build_mass_correlation_plot_errors(file_name, plot_name):
+    # Open the results file and read in the data
+    results = pd.read_csv(file_name)
+    # Get the mass and true mass
+    true_mass = results[' True Mass'].values
+    mean_masses = results[[' Mean Mass_all_signals', ' Mean Mass_gamma_F', ' Mean Mass_F_G', ' Mean Mass_gamma_G']].values
+    std_masses = results[[' Std Mass_all_signals', ' Std Mass_gamma_F', ' Std Mass_F_G', ' Std Mass_gamma_G']].values
+    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
+
+    # Plot the results for each signal combination
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+
+    for i in range(4):
+        # true_mass_temp = true_mass[masses[i] > 0]
+        # masses[i] = masses[i][masses[i] > 0]
+        true_mass_temp = true_mass
+        mean_masses_temp = mean_masses[:, i]
+        std_masses_temp = std_masses[:, i]
+
+        mean_masses_temp = np.abs(mean_masses_temp)
+        if mean_masses_temp.min() == 0:
+            true_mass_temp = true_mass_temp[mean_masses_temp > 0]
+            mean_masses_temp = mean_masses_temp[mean_masses_temp > 0]
+            std_masses_temp = std_masses_temp[mean_masses_temp > 0]
+
+        ax[i].errorbar(true_mass_temp, mean_masses_temp, yerr=std_masses_temp, fmt='o', color='black')
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+        # Add a line of best fit
+        x = np.linspace(1e13, 1e15, 100)
+        try:
+            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(mean_masses_temp), 1)
+            ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
+        except:
+            print('RuntimeWarning: Skipping line of best fit')
+            continue
+        # Plot the line of best fit and an agreement line
+        ax[i].plot(x, x, color='blue', label='Agreement Line', linestyle='--') # Agreement line - use a different linestyle because the paper won't be in color
+        ax[i].legend()
+        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
+        ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
+        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, mean_masses_temp)[0, 1]))
+
+    fig.tight_layout()
+    fig.savefig(plot_name)
+    plt.show()
+
+
 if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
-
+    start = time.time()
     file = 'MDARK/Halos_0.194.MDARK'
-    test_number = 6
+    test_number = 7
     ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
-    # build_test_set(30, zs[0], ID_file)
-    run_test(ID_file, result_file, zs[0])
-    build_mass_correlation_plot(result_file, plot_name)
-
-    raise SystemExit
-
-    '''
-    TEST TO MAKE SURE NFW PRODUCED LENSING SIGNALS ARE REASONABLE
-    '''
-
-    # pick a random cluster
-    ID = 11494083558
-    halos = find_halos(ID, zs[0])
-    # Convert x and y to arcseconds (from Mpc)
-    x = halos.x * 3.086 * 10**22 / cosmo.angular_diameter_distance(zs[0]).to(u.meter).value * 206265
-    y = halos.y * 3.086 * 10**22 / cosmo.angular_diameter_distance(zs[0]).to(u.meter).value * 206265
-
-    centroid = np.mean(x), np.mean(y)
-    x = x - centroid[0]
-    y = y - centroid[1]
-    xc = x[0] + 5
-    yc = y[0]
-
-    # update the halos object
-    halos.x = x
-    halos.y = y
-
-    r200 = halos.calc_R200()
-
-    # Evaluate the lensing signals at this centroid
-    gamma1, gamma2 = halos.calc_shear_signal([xc], [yc])
-    f1, f2 = halos.calc_F_signal([xc], [yc])
-    g1, g2 = halos.calc_G_signal([xc], [yc])
-
-    print('For cluster {}:'.format(ID))
-    print('With {} halos'.format(len(halos.x)))
-    print('And a total mass of {:.2e}'.format(np.sum(halos.mass)))
-    print('The r200 is')
-    print(r200)
-    print('And 5 arcseconds from the primary halo, the signals are:')
-    print('Gamma: ({}, {})'.format(gamma1, gamma2))
-    print('F: ({}, {})'.format(f1, f2))
-    print('G: ({}, {})'.format(g1, g2))
-    print('Analysis complete!')
+    run_test_parallel(ID_file, result_file, zs[0], 2)
+    build_mass_correlation_plot_errors(result_file, plot_name)
+    stop = time.time()
+    print('Time taken: {}'.format(stop - start))
