@@ -7,7 +7,7 @@ import utils
 import astropy.units as u
 from astropy.cosmology import Planck15 as cosmo
 import pickle
-import concurrent.futures
+from multiprocessing import Pool
 import time
 
 dir = 'MDARK/'
@@ -699,18 +699,18 @@ def build_mass_correlation_plot(file_name, plot_name):
     plt.show()
 
 
-def run_single_test(ID, z, N_test, signal_choices, result_file):
+def run_single_test(args):
+    ID, z, N_test, signal_choices = args
     # Run the pipeline for a single cluster, with a given set of signal choices
     # N_test times. Save the results to a file
 
     all_masses = []
     all_candidate_numbers = []
 
-    for _ in range(N_test):
-        halos = find_halos(int(ID), z)
-        true_mass = np.sum(halos.mass)
+    halos = find_halos(int(ID), z)
+    halos, sources, xmax = build_lensing_field(halos, z)
 
-        halos, sources, xmax = build_lensing_field(halos, z)
+    for _ in range(N_test):
         masses = []
         candidate_number = []
 
@@ -729,16 +729,11 @@ def run_single_test(ID, z, N_test, signal_choices, result_file):
     std_masses = np.std(all_masses, axis=0)
     mean_candidate_numbers = np.mean(all_candidate_numbers, axis=0)
     std_candidate_numbers = np.std(all_candidate_numbers, axis=0)
-    print('Results for ID {}:'.format(ID))
 
-    result = '{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}\n'.format(
-        ID, true_mass, 
-        *mean_masses, *std_masses, 
-        len(halos.mass), 
-        *mean_candidate_numbers, *std_candidate_numbers)
+    # Now sort the results into a list, with the mean and std of each signal in order
+    results = [mean_masses[0], std_masses[0], mean_masses[1], std_masses[1], mean_masses[2], std_masses[2], mean_masses[3], std_masses[3], len(halos.mass), mean_candidate_numbers[0], std_candidate_numbers[0], mean_candidate_numbers[1], std_candidate_numbers[1], mean_candidate_numbers[2], std_candidate_numbers[2], mean_candidate_numbers[3], std_candidate_numbers[3]]
 
-    with open(result_file, 'a') as f:
-        f.write(result)
+    return results
 
 
 def run_test_parallel(ID_file, result_file, z, N_test):
@@ -749,21 +744,29 @@ def run_test_parallel(ID_file, result_file, z, N_test):
         for line in lines:
             ID = line.split(',')[0]
             IDs.append(ID)
-    IDs = IDs[:10] # Just use the first 10 IDs for testing
-
-    header = 'ID, True Mass, Mean Mass_all_signals, Std Mass_all_signals, Mean Mass_gamma_F, Std Mass_gamma_F, Mean Mass_F_G, Std Mass_F_G, Mean Mass_gamma_G, Std Mass_gamma_G, N_halos, Mean Nfound_all_signals, Std Nfound_all_signals, Mean Nfound_gamma_F, Std Nfound_gamma_F, Mean Nfound_F_G, Std Nfound_F_G, Mean Nfound_gamma_G, Std Nfound_gamma_G\n'
-    with open(result_file, 'w') as f:
-        f.write(header)
 
     signal_choices = [
-        [True, True, True], # All signals
-        [True, True, False], # Shear and flexion
-        [False, True, True], # Flexion and g-flexion
-        [True, False, True] # Shear and g-flexion
+        [True, True, True], 
+        [True, True, False], 
+        [False, True, True], 
+        [True, False, True]
     ]
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(run_single_test, ID, z, N_test, signal_choices, result_file) for ID in IDs]
+    # Prepare the arguments for each task
+    tasks = [(ID, z, N_test, signal_choices) for ID in IDs]
+
+    # Process pool
+    with Pool() as pool:
+        results = pool.map(run_single_test, tasks)
+    
+    # Turn the results into a list of strings
+    results = [','.join([ID] + [str(val) for val in result]) + '\n' for ID, result in zip(IDs, results)]
+
+    # Write results to file
+    with open(result_file, 'w') as f:
+        f.write('ID, True Mass, Mean Mass_all_signals, Std Mass_all_signals, Mean Mass_gamma_F, Std Mass_gamma_F, Mean Mass_F_G, Std Mass_F_G, Mean Mass_gamma_G, Std Mass_gamma_G, N_halos, Mean Nfound_all_signals, Std Nfound_all_signals, Mean Nfound_gamma_F, Std Nfound_gamma_F, Mean Nfound_F_G, Std Nfound_F_G, Mean Nfound_gamma_G, Std Nfound_gamma_G\n')
+        for result in results:
+            f.write(result)
 
 
 
