@@ -828,7 +828,7 @@ if __name__ == '__main__':
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
-    run_test_parallel(ID_file, result_file, zs[0], 2)
+    run_test_parallel(ID_file, result_file, zs[0], 10)
     build_mass_correlation_plot_errors(result_file, plot_name)
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
