@@ -20,6 +20,32 @@ def print_progress_bar(iteration, total, prefix='', suffix='',
         print() 
 
 
+
+# ------------------------
+# General Calculation Functions
+# ------------------------
+        
+
+def project_onto_principal_axis(x, y, z):
+    # Combine the x, y, z coordinates into a single matrix
+    points = np.vstack((x, y, z)).T
+
+    # Calculate the covariance matrix
+    cov_matrix = np.cov(points, rowvar=False)
+
+    # Compute the eigenvectors and eigenvalues
+    eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
+
+    # Sort the eigenvectors by eigenvalues in descending order
+    idx = eigenvalues.argsort()[::-1]
+    eigenvectors = eigenvectors[:, idx]
+
+    # Project the points onto the plane formed by the first two principal eigenvectors
+    projected_points = np.dot(points, eigenvectors[:, :2])
+
+    return projected_points[:, 0], projected_points[:, 1]
+
+
 # ------------------------
 # Image Processing Functions
 # ------------------------

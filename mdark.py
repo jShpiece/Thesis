@@ -471,27 +471,24 @@ def build_lensing_field(halos, z):
     Given a set of halos, run the analysis
     This involves the following steps
 
-    1. Compute the einstein radius for each cluster, from 
-        M200 and R200
-    2. Generate a set of background galaxies, with 
-        random positions and redshifts. Apply a shear
-        and flexion to each galaxy. 
-    3. Run these source galaxies through the pipeline. This
-        will generate a list of candidate lenses, which 
-        will be compared to the input list of halos. 
+    1. Convert the halo coordinates to a 2D projection
+    2. Convert the coordinates to arcseconds
+    3. Generate a set of background galaxies
+    4. Center the lenses at (0, 0)
+    5. Set the maximum extent of the field of view
+    6. Return the lenses and sources
     '''
 
-    # Convert coordinates to arcseconds
-    # Currently, coordinates are in Mpc
-    # We need to convert to arcseconds
-    d = cosmo.angular_diameter_distance(z).to(u.meter)
-    # Convert to meters
-    x = halos.x * 3.086 * 10**22
-    y = halos.y * 3.086 * 10**22
-    # Convert to arcseconds
-    x = (x / d).value * 206265
-    y = (y / d).value * 206265
+    # Convert the halo coordinates to a 2D projection
+    x,y = utils.project_onto_principal_axis(halos.x, halos.y, halos.z)
 
+    # Convert coordinates to arcseconds (from Mpc)
+    d = cosmo.angular_diameter_distance(z).to(u.meter)
+    # Convert to arcseconds (first to meters as intermediate step)
+    x = (x * 3.086 * 10**22 / d).value * 206265
+    y = (y * 3.086 * 10**22 / d).value * 206265
+
+    # Update the halos object
     halos.x = x
     halos.y = y
 
@@ -499,7 +496,6 @@ def build_lensing_field(halos, z):
 
     # Center the lenses at (0, 0)
     # This is a necessary step for the pipeline
-    # to work correctly
     # Let the centroid be the location of the most massive halo
     # Offset by a small amount, so that we are looking at the
     # center of the cluster, but not directly at the most massive halo
@@ -512,7 +508,7 @@ def build_lensing_field(halos, z):
     xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
     
     # Don't allow the field of view to be larger than 2 arcminutes - or smaller than 1 arcminute
-    xmax = np.min([xmax, 2*60])
+    xmax = np.min([xmax, 3*60])
     xmax = np.max([xmax, 1*60])
 
     # Set the maximum extent of the field of view
@@ -573,14 +569,13 @@ def make_catalogue(sources, name):
     f.close()
 
 
-def compute_masses(candidate_lenses, z):
+def compute_masses(candidate_lenses, z, xmax):
     # Given the results of the pipeline, process the results
     # We can directly compare the input lenses to the candidate lenses
     # We can also compare the true mass from the halos to the inferred mass
     # from the candidate lenses
 
     # Get the true mass of the system
-    xmax = np.max([np.max(candidate_lenses.x), np.max(candidate_lenses.y)])
     extent = [-xmax, xmax, -xmax, xmax]
     _,_,kappa = utils.calculate_kappa(candidate_lenses, extent, 5)
     mass = utils.calculate_mass(kappa, z, 0.5, 1)
@@ -709,29 +704,80 @@ def run_single_test(args):
 
     halos = find_halos(int(ID), z)
     halos, sources, xmax = build_lensing_field(halos, z)
+    chi_scores = []
 
     for _ in range(N_test):
         masses = []
         candidate_number = []
 
+        # Vary the source noise for each test
+        Nsource = len(sources.x)
+        sources.e1 += np.random.normal(0, 0.1, Nsource)
+        sources.e2 += np.random.normal(0, 0.1, Nsource)
+        sources.f1 += np.random.normal(0, 0.01, Nsource)
+        sources.f2 += np.random.normal(0, 0.01, Nsource)
+        sources.g1 += np.random.normal(0, 0.02, Nsource)
+        sources.g2 += np.random.normal(0, 0.02, Nsource)
+
+
         for signal_choice in signal_choices:
-            candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
-            mass = compute_masses(candidate_lenses, z)
+            candidate_lenses, chi2 = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
+
+            if chi2 > 5:
+                print('Chi2 score above 5 for ID {}'.format(ID))
+                mass = 0
+                candidate_num = 0
+            else:
+                mass = compute_masses(candidate_lenses, z, xmax)
+                candidate_num = len(candidate_lenses.x)
+            
+            
+            chi_scores.append(chi2)
             masses.append(mass)
-            candidate_number.append(len(candidate_lenses.x))
+            candidate_number.append(candidate_num)
 
         all_masses.append(masses)
         all_candidate_numbers.append(candidate_number)
         print('Finished test {} for ID {}'.format(_, ID))
 
     # Calculate mean and standard deviation for each type of mass and candidate number
-    mean_masses = np.mean(all_masses, axis=0)
-    std_masses = np.std(all_masses, axis=0)
-    mean_candidate_numbers = np.mean(all_candidate_numbers, axis=0)
-    std_candidate_numbers = np.std(all_candidate_numbers, axis=0)
+    all_masses = np.array(all_masses)
+    all_candidate_numbers = np.array(all_candidate_numbers)
+
+    # This is crude, but not slow
+    masses_1 = all_masses[:, 0]
+    masses_2 = all_masses[:, 1]
+    masses_3 = all_masses[:, 2]
+    masses_4 = all_masses[:, 3]
+
+    candidate_numbers_1 = all_candidate_numbers[:, 0]
+    candidate_numbers_2 = all_candidate_numbers[:, 1]
+    candidate_numbers_3 = all_candidate_numbers[:, 2]
+    candidate_numbers_4 = all_candidate_numbers[:, 3]
+
+    zeros_1 = masses_1 == 0
+    zeros_2 = masses_2 == 0
+    zeros_3 = masses_3 == 0
+    zeros_4 = masses_4 == 0
+
+    masses_1 = masses_1[~zeros_1]
+    masses_2 = masses_2[~zeros_2]
+    masses_3 = masses_3[~zeros_3]
+    masses_4 = masses_4[~zeros_4]
+
+    candidate_numbers_1 = candidate_numbers_1[~zeros_1]
+    candidate_numbers_2 = candidate_numbers_2[~zeros_2]
+    candidate_numbers_3 = candidate_numbers_3[~zeros_3]
+    candidate_numbers_4 = candidate_numbers_4[~zeros_4]
+    
+    mean_masses = [np.mean(masses_1), np.mean(masses_2), np.mean(masses_3), np.mean(masses_4)]
+    std_masses = [np.std(masses_1), np.std(masses_2), np.std(masses_3), np.std(masses_4)]
+
+    mean_candidate_numbers = [np.mean(candidate_numbers_1), np.mean(candidate_numbers_2), np.mean(candidate_numbers_3), np.mean(candidate_numbers_4)]
+    std_candidate_numbers = [np.std(candidate_numbers_1), np.std(candidate_numbers_2), np.std(candidate_numbers_3), np.std(candidate_numbers_4)]
 
     # Now sort the results into a list, with the mean and std of each signal in order
-    results = [mean_masses[0], std_masses[0], mean_masses[1], std_masses[1], mean_masses[2], std_masses[2], mean_masses[3], std_masses[3], len(halos.mass), mean_candidate_numbers[0], std_candidate_numbers[0], mean_candidate_numbers[1], std_candidate_numbers[1], mean_candidate_numbers[2], std_candidate_numbers[2], mean_candidate_numbers[3], std_candidate_numbers[3]]
+    results = [[np.sum(halos.mass), mean_masses[0], std_masses[0], mean_masses[1], std_masses[1], mean_masses[2], std_masses[2], mean_masses[3], std_masses[3], len(halos.mass), mean_candidate_numbers[0], std_candidate_numbers[0], mean_candidate_numbers[1], std_candidate_numbers[1], mean_candidate_numbers[2], std_candidate_numbers[2], mean_candidate_numbers[3], std_candidate_numbers[3]], chi_scores]
 
     return results
 
@@ -756,11 +802,15 @@ def run_test_parallel(ID_file, result_file, z, N_test):
     tasks = [(ID, z, N_test, signal_choices) for ID in IDs]
 
     # Process pool
-    with Pool() as pool:
+    with Pool(processes=30) as pool:
         results = pool.map(run_single_test, tasks)
+    
+    # Extract the results and chi2 scores
+    results, chi2_scores = zip(*results)
     
     # Turn the results into a list of strings
     results = [','.join([ID] + [str(val) for val in result]) + '\n' for ID, result in zip(IDs, results)]
+
 
     # Write results to file
     with open(result_file, 'w') as f:
@@ -768,6 +818,13 @@ def run_test_parallel(ID_file, result_file, z, N_test):
         for result in results:
             f.write(result)
 
+    # Make the chi2 scores into a list
+    chi2_scores = [score for sublist in chi2_scores for score in sublist]
+
+    # Save the chi2 scores to a file
+    with open(result_file.replace('results', 'chi2_scores'), 'w') as f:
+        for score in chi2_scores:
+            f.write('{}\n'.format(score))
 
 
 def build_mass_correlation_plot_errors(file_name, plot_name):
@@ -784,25 +841,29 @@ def build_mass_correlation_plot_errors(file_name, plot_name):
     ax = ax.flatten()
 
     for i in range(4):
-        # true_mass_temp = true_mass[masses[i] > 0]
-        # masses[i] = masses[i][masses[i] > 0]
-        true_mass_temp = true_mass
-        mean_masses_temp = mean_masses[:, i]
-        std_masses_temp = std_masses[:, i]
+        mass_values = mean_masses[:, i]
+        mass_errors = std_masses[:, i]
 
-        mean_masses_temp = np.abs(mean_masses_temp)
+        # Remove NaN values
+        nan_values = np.isnan(mass_values)
+        true_mass_temp = true_mass[~nan_values]
+        mass_values = mass_values[~nan_values]
+        mass_errors = mass_errors[~nan_values]
+
+
+        '''
         if mean_masses_temp.min() == 0:
             true_mass_temp = true_mass_temp[mean_masses_temp > 0]
             mean_masses_temp = mean_masses_temp[mean_masses_temp > 0]
             std_masses_temp = std_masses_temp[mean_masses_temp > 0]
-
-        ax[i].errorbar(true_mass_temp, mean_masses_temp, yerr=std_masses_temp, fmt='o', color='black')
+        '''
+        ax[i].errorbar(true_mass_temp, mass_values, yerr=mass_errors, fmt='o', color='black')
         ax[i].set_xscale('log')
         ax[i].set_yscale('log')
         # Add a line of best fit
         x = np.linspace(1e13, 1e15, 100)
         try:
-            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(mean_masses_temp), 1)
+            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(mass_values), 1)
             ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
         except:
             print('RuntimeWarning: Skipping line of best fit')
@@ -812,23 +873,170 @@ def build_mass_correlation_plot_errors(file_name, plot_name):
         ax[i].legend()
         ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
         ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, mean_masses_temp)[0, 1]))
+        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, mass_values)[0, 1]))
 
+    fig.suptitle('Mass Correlation without "Bad Fits"')
     fig.tight_layout()
     fig.savefig(plot_name)
+    # plt.show()
+
+
+def goodness_of_fit_test(ID):
+    # Given a cluster ID, run the pipeline with the best signal combination
+    # and plot the results
+    z = 0.194
+    halos = find_halos(ID, z)
+    halos, sources, xmax = build_lensing_field(halos, z)
+
+    # Run the pipeline with the best signal combination
+    candidate_lenses, chi2 = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True])
+
+    # Plot the results
+    fig, ax = plt.subplots()
+    _plot_results(xmax, halos, sources, None, chi2, 'Goodness of Fit Test', ax=ax, legend=False)
+    fig.tight_layout()
     plt.show()
 
-
 if __name__ == '__main__':
+    # goodness_of_fit_test(11480284401)
+
+    # raise ValueError('Pipeline testing complete')
+
+
     zs = [0.194, 0.221, 0.248, 0.276]
     start = time.time()
     file = 'MDARK/Halos_0.194.MDARK'
-    test_number = 7
+    test_number = 9
     ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
-    run_test_parallel(ID_file, result_file, zs[0], 10)
-    build_mass_correlation_plot_errors(result_file, plot_name)
+    
+    # run_test_parallel(ID_file, result_file, zs[0], 30)
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
+    # build_mass_correlation_plot_errors(result_file, plot_name)
+    
+    
+    # read in the chi2 scores from test9
+    chi2_scores = []
+    with open('Data/MDARK_Test/Test9/chi2_scores_9.csv', 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            chi2_scores.append(float(line))
+    
+    good_fit = 5
+    print('Mean chi2 score: {}'.format(np.mean(chi2_scores)))
+    print('Median chi2 score: {}'.format(np.median(chi2_scores)))
+    print('Standard deviation of chi2 scores: {}'.format(np.std(chi2_scores)))
+    print('Number of chi2 scores above 5: {}'.format(np.sum(np.array(chi2_scores) > good_fit)))
+    print('Fraction of "good" fits: {}'.format(np.sum(np.array(chi2_scores) < good_fit) / len(chi2_scores)))
+
+    raise ValueError('Pipeline testing complete')
+    
+    # Plot the chi2 scores
+    fig, ax = plt.subplots()
+    fancy_hist(chi2_scores, bins='freedman', histtype='step', ax=ax)
+    ax.set_xlabel(r'$\chi^2$')
+    ax.set_ylabel('Frequency')
+    ax.set_title(r'$\chi^2$ Distribution for Test 9')
+    fig.tight_layout()
+    fig.savefig('Images/MDARK/chi2_distribution_9.png')
+    plt.show()
+    
+    # raise ValueError('Pipeline testing complete')
+
+    # I'd like to examine the actual quality of these tests
+    # Lets stick with test 7, choose a random cluster from the ID file, and run the pipeline
+    # We don't need to save anything - I want to directly examine the results
+
+    ID_file = 'Data/MDARK_Test/Test7/ID_file_7.csv'
+    ID_data = pd.read_csv(ID_file)
+    ID = ID_data['ID'].sample(n=1).values[0]
+    halos = find_halos(int(ID), zs[0])
+    halos, sources, xmax = build_lensing_field(halos, zs[0])
+    # Lets save the sources to a file, so that we can re-run the pipeline with the same sources
+    make_catalogue(sources, 'Data/MDARK_Test/Test7/{}_sources.csv'.format(ID))
+    # And lets save the halos
+    with open('Data/MDARK_Test/Test7/{}_halos.pkl'.format(ID), 'wb') as f:
+        pickle.dump(halos, f)
+    # Now we can run the pipeline and examine the results
+
+    plt.figure()
+    plt.scatter(halos.x, halos.y, color='red', label='True Lenses')
+    plt.scatter(sources.x, sources.y, color='blue', label='{} Sources'.format(len(sources.x)), alpha=0.5)
+    plt.legend()
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.title('True Lenses and Sources: ID {}'.format(ID))
+    plt.show()
+
+
+    def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=None, legend=True):
+        """Private helper function to plot the results of lensing reconstruction."""
+        if ax is None:
+            fig, ax = plt.subplots()
+        ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
+        for i, eR in enumerate(lenses.te):
+            ax.annotate(np.round(eR, 2), (lenses.x[i], lenses.y[i]))
+        ax.scatter(sources.x, sources.y, marker='.', color='blue', alpha=0.5, label='Sources')
+        if true_lenses is not None:
+            ax.scatter(true_lenses.x, true_lenses.y, marker='x', color='green', label='True Lenses')
+        if legend:
+            ax.legend(loc='upper right')
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        if xmax is not None:
+            ax.set_xlim(-xmax, xmax)
+            ax.set_ylim(-xmax, xmax)
+        ax.set_aspect('equal')
+        ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
+
+
+    # Arrange a plot with 6 subplots in 2 rows
+    fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle('Lensing Reconstruction Pipeline', fontsize=16)
+
+    use_flags = [True, True, False]  # Use all signals
+
+    # Step 1: Generate initial list of lenses from source guesses
+    lenses = sources.generate_initial_guess()
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
+
+    # Step 2: Optimize guesses with local minimization
+    lenses.optimize_lens_positions(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
+
+
+    # Step 3: Filter out lenses that are too far from the source population
+    lenses.filter_lens_positions(sources, xmax, threshold_distance=5)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
+
+
+    # Step 5: Merge lenses that are too close to each other
+    ns = len(sources.x) / (2 * xmax)**2
+    merger_threshold = 1/np.sqrt(ns)
+    lenses.merge_close_lenses(merger_threshold=10)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Merging', ax=axarr[1,0], legend=False)
+
+
+    # Step 4: Iterative elimination
+    lenses.iterative_elimination(sources, reducedchi2, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Iterative Elimination', ax=axarr[1,1], legend=False)
+
+
+    # Step 6: Final minimization
+    lenses.full_minimization(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
+
+
+    # Save and show the plot
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
+    plt.savefig('Images/MDARK/pipeline_test.png')
+    plt.show()

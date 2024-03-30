@@ -132,7 +132,7 @@ class Lens:
         # Filter out lenses that are too close to sources or too far from the center
         distances_to_sources = np.sqrt((self.x - sources.x)**2 + (self.y - sources.y)**2)
         too_close_to_sources = distances_to_sources < threshold_distance
-        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 2 * xmax
+        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1 * xmax
         zero_te_indices = np.abs(self.te) < 10**-3
 
         valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
@@ -140,6 +140,16 @@ class Lens:
 
 
     def merge_close_lenses(self, merger_threshold=5):
+
+        def perform_merger(i, j):
+            # Given two lenses, merge them and place the new lens at the weighted average position
+            # and with the average Einstein radius of the pair
+            weight_i, weight_j = np.abs(self.te[i]), np.abs(self.te[j]) # Weights must be positive
+            self.x[i] = (self.x[i]*weight_i + self.x[j]*weight_j) / (weight_i + weight_j)
+            self.y[i] = (self.y[i]*weight_i + self.y[j]*weight_j) / (weight_i + weight_j)
+            self.te[i] = (weight_i + weight_j) / 2
+            self.x, self.y, self.te, self.chi2 = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j), np.delete(self.chi2, j)
+
         #Merge lenses that are too close to each other
         i = 0
         while i < len(self.x):
@@ -148,11 +158,7 @@ class Lens:
                 # If they are too close, merge them
                 distance = np.sqrt((self.x[i] - self.x[j])**2 + (self.y[i] - self.y[j])**2)
                 if distance < merger_threshold:
-                    weight_i, weight_j = self.te[i], self.te[j]
-                    self.x[i] = (self.x[i]*weight_i + self.x[j]*weight_j) / (weight_i + weight_j)
-                    self.y[i] = (self.y[i]*weight_i + self.y[j]*weight_j) / (weight_i + weight_j)
-                    self.te[i] = (weight_i + weight_j) / 2
-                    self.x, self.y, self.te, self.chi2 = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j), np.delete(self.chi2, j)
+                    perform_merger(i, j)
                     break
             else:
                 i += 1
@@ -224,7 +230,7 @@ class Lens:
 # Chi^2 functions
 # ------------------------------
 
-def eR_penalty_function(eR, limit=20.0, lambda_penalty_upper=10.0):
+def eR_penalty_function(eR, limit=20.0, lambda_penalty_upper=1000.0):
     # Soft limits - allow the Einstein radius to be negative
     if np.abs(eR) > limit:
         return lambda_penalty_upper * (np.abs(eR) - limit) ** 2
@@ -354,11 +360,6 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     print_step_info(flags, "After Filtering:", lenses, reducedchi2)
 
-    # Choose the 'lens_floor' lenses which gives the best reduced chi^2 value
-    lenses.iterative_elimination(sources, reducedchi2, use_flags)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    print_step_info(flags, "After Iterative Elimination:", lenses, reducedchi2)
-
     # Merge lenses that are too close to each other
     ns = len(sources.x) / (2 * xmax)**2
     merger_threshold = (1 / np.sqrt(ns)) * 0.5
@@ -368,6 +369,12 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     lenses.merge_close_lenses(merger_threshold=merger_threshold) #This is a placeholder value
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     print_step_info(flags, "After Merging:", lenses, reducedchi2)
+
+    # Choose the 'lens_floor' lenses which gives the best reduced chi^2 value
+    lenses.iterative_elimination(sources, reducedchi2, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    print_step_info(flags, "After Iterative Elimination:", lenses, reducedchi2)
+
 
     # Perform a final local minimization on the remaining lenses
     # NOTE - if the number of lenses is too large, this step can take a long time
