@@ -27,6 +27,13 @@ def print_progress_bar(iteration, total, prefix='', suffix='',
         
 
 def project_onto_principal_axis(x, y, z):
+    """Projects a set of 3D points onto the plane formed by the first two principal eigenvectors."""
+
+    # Sanity checks
+    assert len(x) == len(y) == len(z), "The x, y, and z arrays must have the same length."
+    assert x.ndim == y.ndim == z.ndim == 1, "The x, y, and z arrays must be 1D."
+    assert len(x) > 1, "At least two points are required."
+
     # Combine the x, y, z coordinates into a single matrix
     points = np.vstack((x, y, z)).T
 
@@ -161,7 +168,6 @@ def mass_sheet_transformation(kappa, k):
 
 def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5,lens_type='SIS'):
     #Create sources for a lensing system and apply the lensing signal
-
     #Create the sources - require that they be distributed sphericaly
     if randompos == True:
         r = xmax*np.sqrt(np.random.random(ns))

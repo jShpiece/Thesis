@@ -466,7 +466,7 @@ def choose_ID(z, mass_range, substructure_range):
         return None
 
 
-def build_lensing_field(halos, z):
+def build_lensing_field(halos, z, Nsource = None):
     '''
     Given a set of halos, run the analysis
     This involves the following steps
@@ -502,8 +502,8 @@ def build_lensing_field(halos, z):
 
     largest_halo = np.argmax(lenses.mass)
     centroid = [lenses.x[largest_halo], lenses.y[largest_halo]]
-    lenses.x -= centroid[0] + np.random.uniform(-10, 10)
-    lenses.y -= centroid[1] + np.random.uniform(-10, 10)
+    lenses.x -= centroid[0] + np.random.uniform(-20, 20)
+    lenses.y -= centroid[1] + np.random.uniform(-20, 20)
 
     xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
     
@@ -515,8 +515,15 @@ def build_lensing_field(halos, z):
     # to be the maximum extent of the lenses
 
     # Generate a set of background galaxies
+    '''
     ns = 0.01
-    Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
+    if Nsource is None:
+        Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
+        print('Using {} sources'.format(Nsource))
+    else:
+        Nsource = Nsource
+        print('Using user-defined number of sources: {}'.format(Nsource))
+    '''
 
     sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
 
@@ -882,26 +889,171 @@ def build_mass_correlation_plot_errors(file_name, plot_name):
 
 
 def goodness_of_fit_test(ID):
-    # Given a cluster ID, run the pipeline with the best signal combination
-    # and plot the results
+    # Given a cluster ID, run the pipeline for many different source numbers, 
+    # recording the chi2 value and mass estimate for each run
+
     z = 0.194
+    signal_choices = [
+        [True, True, True],
+        [True, True, False],
+        [False, True, True],
+        [True, False, True]
+    ]
+
+    labels = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
+
     halos = find_halos(ID, z)
-    halos, sources, xmax = build_lensing_field(halos, z)
 
-    # Run the pipeline with the best signal combination
-    candidate_lenses, chi2 = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True])
+    Nsource_low = 100
+    Nsource_high = 1000
+    Nsources = np.logspace(np.log10(Nsource_low), np.log10(Nsource_high), 20).astype(int)
+    chi2_values = []
+    mass_values = []
 
-    # Plot the results
-    fig, ax = plt.subplots()
-    _plot_results(xmax, halos, sources, None, chi2, 'Goodness of Fit Test', ax=ax, legend=False)
+    halos, sources, xmax = build_lensing_field(halos, z, Nsource=Nsources[0])
+
+    for Nsource in Nsources:
+        # I don't need to recreate the halos each time, just the sources
+        sources = utils.createSources(halos, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
+        for signal_choice in signal_choices:
+            candidate_lenses, chi2 = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
+            mass = compute_masses(candidate_lenses, z, xmax)
+            chi2_values.append(chi2)
+            mass_values.append(mass)
+    
+    # There will be 4 chi2 and mass values for each source number
+    chi2_values = np.array(chi2_values).reshape(-1, 4)
+    mass_values = np.array(mass_values).reshape(-1, 4)
+
+    # Save this data to a file
+    with open('Data/MDARK_Test/Goodness_of_Fit_{}.csv'.format(ID), 'w') as f:
+        f.write('Nsources, chi2_all_signals, chi2_gamma_F, chi2_F_G, chi2_gamma_G, mass_all_signals, mass_gamma_F, mass_F_G, mass_gamma_G\n')
+        for i in range(len(Nsources)):
+            f.write('{}, {}, {}, {}, {}, {}, {}, {}, {}\n'.format(Nsources[i], chi2_values[i, 0], chi2_values[i, 1], chi2_values[i, 2], chi2_values[i, 3], mass_values[i, 0], mass_values[i, 1], mass_values[i, 2], mass_values[i, 3]))
+
+    # Create a plot of chi2 values and mass values
+    fig, ax = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
+    # plot the chi2 values, remembering their shape
+    for i in range(4):
+        ax[0].plot(Nsources, chi2_values[:, i], marker='o', label='{}'.format(labels[i]))
+    ax[0].set_xlabel('Number of Sources')
+    ax[0].set_ylabel(r'$\chi^2$')
+    ax[0].set_title(r'$\chi^2$ vs Number of Sources for Cluster ID {}'.format(ID))
+    ax[0].set_yscale('log')
+    ax[0].legend()
+
+    for i in range(4):
+        ax[1].plot(Nsources, np.abs(mass_values[:, i]), marker='o', label='{}'.format(labels[i]))
+    ax[1].set_xlabel('Number of Sources')
+    ax[1].set_ylabel(r'$M_{\odot}$')
+    ax[1].set_yscale('log')
+    ax[1].axhline(np.sum(true_mass), color='black', linestyle='--', label='True Mass')
+    ax[1].set_title(r'Mass Estimate vs Number of Sources for Cluster ID {}'.format(ID))
+    ax[1].legend()
+
     fig.tight_layout()
+    plt.savefig('Images/MDARK/Goodness_of_Fit/{}.png'.format(ID))
+    plt.close
+
+
+def GOF_file_reader(IDs):
+    # Given a list of IDs, read in the goodness of fit data
+    # and return the chi2 values and mass values
+    chi2_values = []
+    mass_values = []
+
+    for ID in IDs:
+        file = 'Data/MDARK_Test/Goodness_of_Fit/Goodness_of_Fit_{}.csv'.format(ID)
+        data = pd.read_csv(file)
+        chi2_values.append(data[[' chi2_all_signals', ' chi2_gamma_F', ' chi2_F_G', ' chi2_gamma_G']].values)
+        mass_values.append(data[[' mass_all_signals', ' mass_gamma_F', ' mass_F_G', ' mass_gamma_G']].values)
+
+    return chi2_values, mass_values
+
+
+def GOF_correlation_coefficient(test_number):
+    ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
+    IDs = pd.read_csv(ID_file)['ID'].values
+    true_masses = pd.read_csv(ID_file)[' Mass'].values
+
+    Nsource_low = 100
+    Nsource_high = 1000
+    Nsources = np.logspace(np.log10(Nsource_low), np.log10(Nsource_high), 20).astype(int)
+    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
+
+    correlation_all_signals = []
+    correlation_gamma_f = []
+    correlation_f_g = []
+    correlation_gamma_g = []
+
+    for Nsource in Nsources:
+        true_mass = []
+        mass_all_signals = []
+        mass_gamma_f = []
+        mass_f_g = []
+        mass_gamma_g = []
+
+        for ID in IDs:
+            file = 'Data/MDARK_Test/Goodness_of_Fit/Goodness_of_Fit_{}.csv'.format(ID)
+            data = pd.read_csv(file)
+            ID_data = pd.read_csv(ID_file)
+            true_mass.append(ID_data[ID_data['ID'] == ID][' Mass'].values[0])
+
+            mass_all_signals.append(data[data['Nsources'] == Nsource][' mass_all_signals'].values[0])
+            mass_gamma_f.append(data[data['Nsources'] == Nsource][' mass_gamma_F'].values[0])
+            mass_f_g.append(data[data['Nsources'] == Nsource][' mass_F_G'].values[0])
+            mass_gamma_g.append(data[data['Nsources'] == Nsource][' mass_gamma_G'].values[0])
+        
+
+        correlation_all_signals.append(np.corrcoef(true_mass, mass_all_signals)[0, 1])
+        correlation_gamma_f.append(np.corrcoef(true_mass, mass_gamma_f)[0, 1])
+        correlation_f_g.append(np.corrcoef(true_mass, mass_f_g)[0, 1])
+        correlation_gamma_g.append(np.corrcoef(true_mass, mass_gamma_g)[0, 1])
+
+    # Plot the correlation coefficients
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+
+    correlations = [correlation_all_signals, correlation_gamma_f, correlation_f_g, correlation_gamma_g]
+    for i in range(4):
+        ax[i].plot(Nsources, correlations[i], marker='o')
+        ax[i].set_xlabel('Number of Sources')
+        ax[i].set_ylabel('Correlation Coefficient')
+        ax[i].set_title('{}'.format(signals[i]))
+
+    fig.tight_layout()
+    fig.savefig('Images/MDARK/Correlation_Coefficients_{}.png'.format(test_number))
     plt.show()
 
+
 if __name__ == '__main__':
-    # goodness_of_fit_test(11480284401)
+    # Redo the plots for the goodness of fit tests
+    test_number = 9
+    ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
+    IDs = pd.read_csv(ID_file)['ID'].values
+    Nsources = np.logspace(np.log10(100), np.log10(1000), 20).astype(int)
+    labels = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
 
-    # raise ValueError('Pipeline testing complete')
+    good_fits = 0
+    total_fits = 0
+    goodness_criteria = 5
 
+    for ID in IDs:
+        chi2_values, mass_values = GOF_file_reader([ID])
+        true_mass = pd.read_csv(ID_file)[pd.read_csv(ID_file)['ID'] == ID][' Mass'].values[0]
+
+        # There will be 4 chi2 and mass values for each source number
+        chi2_values = np.array(chi2_values).reshape(-1, 4)
+        chi2_values = chi2_values.flatten()
+
+        # Count the number of good fits
+        good_fits += np.sum(chi2_values < goodness_criteria)
+        total_fits += len(chi2_values)
+
+    
+    print('Fraction of good fits: {}'.format(good_fits / total_fits))
+
+    raise ValueError('Pipeline testing complete')
 
     zs = [0.194, 0.221, 0.248, 0.276]
     start = time.time()
