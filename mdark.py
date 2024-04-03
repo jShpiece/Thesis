@@ -895,6 +895,7 @@ def goodness_of_fit_test(ID):
     labels = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
 
     halos = find_halos(ID, z)
+    true_mass = np.sum(halos.mass)
 
     Nsource_low = 100
     Nsource_high = 1000
@@ -1027,13 +1028,13 @@ if __name__ == '__main__':
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
-    
     # run_test_parallel(ID_file, result_file, zs[0], 1)
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     # build_mass_correlation_plot_errors(result_file, plot_name)
     
-    # read in the chi2 scores from test9
+    # read in the chi2 scores from test10
+    '''
     chi2_scores = []
     with open('Data/MDARK_Test/Test{}/chi2_scores_{}.csv'.format(test_number,test_number), 'r') as f:
         lines = f.readlines()
@@ -1056,14 +1057,13 @@ if __name__ == '__main__':
     plt.show()  
 
     raise ValueError('Pipeline testing complete')
-        
-    # raise ValueError('Pipeline testing complete')
+    '''
 
     # I'd like to examine the actual quality of these tests
     # Lets stick with test 7, choose a random cluster from the ID file, and run the pipeline
     # We don't need to save anything - I want to directly examine the results
 
-    ID_file = 'Data/MDARK_Test/Test7/ID_file_7.csv'
+    ID_file = 'Data/MDARK_Test/Test10/ID_file_10.csv'
     ID_data = pd.read_csv(ID_file)
     ID = ID_data['ID'].sample(n=1).values[0]
     halos = find_halos(int(ID), zs[0])
@@ -1081,9 +1081,9 @@ if __name__ == '__main__':
     plt.legend()
     plt.xlabel('x')
     plt.ylabel('y')
+    plt.gca().set_aspect('equal')
     plt.title('True Lenses and Sources: ID {}'.format(ID))
     plt.show()
-
 
     def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=None, legend=True):
         """Private helper function to plot the results of lensing reconstruction."""
@@ -1094,7 +1094,9 @@ if __name__ == '__main__':
             ax.annotate(np.round(eR, 2), (lenses.x[i], lenses.y[i]))
         ax.scatter(sources.x, sources.y, marker='.', color='blue', alpha=0.5, label='Sources')
         if true_lenses is not None:
-            ax.scatter(true_lenses.x, true_lenses.y, marker='x', color='green', label='True Lenses')
+            log_masses = np.log10(true_lenses.mass)
+            size_scale = (log_masses - min(log_masses)) / (max(log_masses) - min(log_masses)) * 100
+            ax.scatter(true_lenses.x, true_lenses.y, marker='o', alpha=0.5, color='green', label='True Lenses', s=size_scale)
         if legend:
             ax.legend(loc='upper right')
         ax.set_xlabel('x')
@@ -1110,7 +1112,7 @@ if __name__ == '__main__':
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
     fig.suptitle('Lensing Reconstruction Pipeline', fontsize=16)
 
-    use_flags = [True, True, False]  # Use all signals
+    use_flags = [True, True, True]  # Use all signals
 
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess()
@@ -1122,12 +1124,10 @@ if __name__ == '__main__':
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
 
-
     # Step 3: Filter out lenses that are too far from the source population
     lenses.filter_lens_positions(sources, xmax, threshold_distance=5)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
-
 
     # Step 5: Merge lenses that are too close to each other
     ns = len(sources.x) / (2 * xmax)**2
@@ -1136,18 +1136,15 @@ if __name__ == '__main__':
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Merging', ax=axarr[1,0], legend=False)
 
-
     # Step 4: Iterative elimination
     lenses.iterative_elimination(sources, reducedchi2, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Iterative Elimination', ax=axarr[1,1], legend=False)
 
-
     # Step 6: Final minimization
     lenses.full_minimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
-
 
     # Save and show the plot
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
