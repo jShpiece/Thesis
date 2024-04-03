@@ -515,16 +515,8 @@ def build_lensing_field(halos, z, Nsource = None):
     # to be the maximum extent of the lenses
 
     # Generate a set of background galaxies
-    '''
     ns = 0.01
-    if Nsource is None:
-        Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-        print('Using {} sources'.format(Nsource))
-    else:
-        Nsource = Nsource
-        print('Using user-defined number of sources: {}'.format(Nsource))
-    '''
-
+    Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
     sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
 
     return lenses, sources, xmax
@@ -726,10 +718,9 @@ def run_single_test(args):
         sources.g1 += np.random.normal(0, 0.02, Nsource)
         sources.g2 += np.random.normal(0, 0.02, Nsource)
 
-
         for signal_choice in signal_choices:
             candidate_lenses, chi2 = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
-
+            '''
             if chi2 > 5:
                 print('Chi2 score above 5 for ID {}'.format(ID))
                 mass = 0
@@ -737,8 +728,10 @@ def run_single_test(args):
             else:
                 mass = compute_masses(candidate_lenses, z, xmax)
                 candidate_num = len(candidate_lenses.x)
-            
-            
+            '''
+            mass = compute_masses(candidate_lenses, z, xmax)
+            candidate_num = len(candidate_lenses.x)
+
             chi_scores.append(chi2)
             masses.append(mass)
             candidate_number.append(candidate_num)
@@ -809,7 +802,7 @@ def run_test_parallel(ID_file, result_file, z, N_test):
     tasks = [(ID, z, N_test, signal_choices) for ID in IDs]
 
     # Process pool
-    with Pool(processes=30) as pool:
+    with Pool() as pool:
         results = pool.map(run_single_test, tasks)
     
     # Extract the results and chi2 scores
@@ -817,7 +810,6 @@ def run_test_parallel(ID_file, result_file, z, N_test):
     
     # Turn the results into a list of strings
     results = [','.join([ID] + [str(val) for val in result]) + '\n' for ID, result in zip(IDs, results)]
-
 
     # Write results to file
     with open(result_file, 'w') as f:
@@ -848,7 +840,7 @@ def build_mass_correlation_plot_errors(file_name, plot_name):
     ax = ax.flatten()
 
     for i in range(4):
-        mass_values = mean_masses[:, i]
+        mass_values = np.abs(mean_masses[:, i])
         mass_errors = std_masses[:, i]
 
         # Remove NaN values
@@ -882,7 +874,7 @@ def build_mass_correlation_plot_errors(file_name, plot_name):
         ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
         ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, mass_values)[0, 1]))
 
-    fig.suptitle('Mass Correlation without "Bad Fits"')
+    fig.suptitle('Mass Correlation')
     fig.tight_layout()
     fig.savefig(plot_name)
     # plt.show()
@@ -1027,75 +1019,44 @@ def GOF_correlation_coefficient(test_number):
 
 
 if __name__ == '__main__':
-    # Redo the plots for the goodness of fit tests
-    test_number = 9
-    ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
-    IDs = pd.read_csv(ID_file)['ID'].values
-    Nsources = np.logspace(np.log10(100), np.log10(1000), 20).astype(int)
-    labels = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
-
-    good_fits = 0
-    total_fits = 0
-    goodness_criteria = 5
-
-    for ID in IDs:
-        chi2_values, mass_values = GOF_file_reader([ID])
-        true_mass = pd.read_csv(ID_file)[pd.read_csv(ID_file)['ID'] == ID][' Mass'].values[0]
-
-        # There will be 4 chi2 and mass values for each source number
-        chi2_values = np.array(chi2_values).reshape(-1, 4)
-        chi2_values = chi2_values.flatten()
-
-        # Count the number of good fits
-        good_fits += np.sum(chi2_values < goodness_criteria)
-        total_fits += len(chi2_values)
-
-    
-    print('Fraction of good fits: {}'.format(good_fits / total_fits))
-
-    raise ValueError('Pipeline testing complete')
-
     zs = [0.194, 0.221, 0.248, 0.276]
     start = time.time()
     file = 'MDARK/Halos_0.194.MDARK'
-    test_number = 9
+    test_number = 10
     ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
 
     
-    # run_test_parallel(ID_file, result_file, zs[0], 30)
+    # run_test_parallel(ID_file, result_file, zs[0], 1)
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     # build_mass_correlation_plot_errors(result_file, plot_name)
     
-    
     # read in the chi2 scores from test9
     chi2_scores = []
-    with open('Data/MDARK_Test/Test9/chi2_scores_9.csv', 'r') as f:
+    with open('Data/MDARK_Test/Test{}/chi2_scores_{}.csv'.format(test_number,test_number), 'r') as f:
         lines = f.readlines()
         for line in lines:
             chi2_scores.append(float(line))
     
-    good_fit = 5
-    print('Mean chi2 score: {}'.format(np.mean(chi2_scores)))
-    print('Median chi2 score: {}'.format(np.median(chi2_scores)))
-    print('Standard deviation of chi2 scores: {}'.format(np.std(chi2_scores)))
-    print('Number of chi2 scores above 5: {}'.format(np.sum(np.array(chi2_scores) > good_fit)))
-    print('Fraction of "good" fits: {}'.format(np.sum(np.array(chi2_scores) < good_fit) / len(chi2_scores)))
+    good_score = 5
+    print('Number of "good" chi2 scores: {}'.format(np.sum(np.array(chi2_scores) < good_score)))
+    print('Fraction of "good" chi2 scores: {}'.format(np.sum(np.array(chi2_scores) < good_score) / len(chi2_scores)))
+    
+    fig, ax = plt.subplots()
+    # Throw out anything above 1000
+    chi2_scores = np.array(chi2_scores)
+    chi2_scores = chi2_scores[chi2_scores < 1000]
+    fancy_hist(chi2_scores, bins='freedman', ax=ax, color='black', histtype='step', label='Chi2 Scores')
+    ax.vlines(good_score, 0, 100, color='red', linestyle='--', label='Test Threshold: {}'.format(good_score))
+    ax.vlines(np.median(chi2_scores), 0, 100, color='blue', linestyle='--', label='Median: {:.2f}'.format(np.median(chi2_scores)))
+    ax.legend()
+    ax.set_yscale('log')
+    plt.show()  
 
     raise ValueError('Pipeline testing complete')
-    
-    # Plot the chi2 scores
-    fig, ax = plt.subplots()
-    fancy_hist(chi2_scores, bins='freedman', histtype='step', ax=ax)
-    ax.set_xlabel(r'$\chi^2$')
-    ax.set_ylabel('Frequency')
-    ax.set_title(r'$\chi^2$ Distribution for Test 9')
-    fig.tight_layout()
-    fig.savefig('Images/MDARK/chi2_distribution_9.png')
-    plt.show()
-    
+        
     # raise ValueError('Pipeline testing complete')
 
     # I'd like to examine the actual quality of these tests
