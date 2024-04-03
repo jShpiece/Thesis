@@ -1030,7 +1030,7 @@ if __name__ == '__main__':
 
     # run_test_parallel(ID_file, result_file, zs[0], 1)
     stop = time.time()
-    print('Time taken: {}'.format(stop - start))
+    # print('Time taken: {}'.format(stop - start))
     # build_mass_correlation_plot_errors(result_file, plot_name)
     
     # read in the chi2 scores from test10
@@ -1068,22 +1068,7 @@ if __name__ == '__main__':
     ID = ID_data['ID'].sample(n=1).values[0]
     halos = find_halos(int(ID), zs[0])
     halos, sources, xmax = build_lensing_field(halos, zs[0])
-    # Lets save the sources to a file, so that we can re-run the pipeline with the same sources
-    make_catalogue(sources, 'Data/MDARK_Test/Test7/{}_sources.csv'.format(ID))
-    # And lets save the halos
-    with open('Data/MDARK_Test/Test7/{}_halos.pkl'.format(ID), 'wb') as f:
-        pickle.dump(halos, f)
-    # Now we can run the pipeline and examine the results
 
-    plt.figure()
-    plt.scatter(halos.x, halos.y, color='red', label='True Lenses')
-    plt.scatter(sources.x, sources.y, color='blue', label='{} Sources'.format(len(sources.x)), alpha=0.5)
-    plt.legend()
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.gca().set_aspect('equal')
-    plt.title('True Lenses and Sources: ID {}'.format(ID))
-    plt.show()
 
     def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=None, legend=True):
         """Private helper function to plot the results of lensing reconstruction."""
@@ -1110,7 +1095,6 @@ if __name__ == '__main__':
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle('Lensing Reconstruction Pipeline', fontsize=16)
 
     use_flags = [True, True, True]  # Use all signals
 
@@ -1146,7 +1130,14 @@ if __name__ == '__main__':
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
 
+    # Compute mass
+    extent = [-xmax, xmax, -xmax, xmax]
+    _, _, kappa = utils.calculate_kappa(lenses, extent, 5)
+    mass = utils.calculate_mass(kappa, zs[0], 0.5, 1)
+
     # Save and show the plot
+    fig.suptitle('Lensing Reconstruction of Cluster ID {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(ID, np.sum(halos.mass), mass))
+
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
-    plt.savefig('Images/MDARK/pipeline_test.png')
+    plt.savefig('Images/MDARK/pipeline_visualization/ID_{}.png'.format(ID))
     plt.show()

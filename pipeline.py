@@ -281,7 +281,7 @@ def calc_raw_chi2(sources, lenses, use_flags):
     for eR in lenses.te:
         penalty += eR_penalty_function(eR)
     
-    return chi2 + penalty
+    return chi2 #+ penalty
 
 
 # ------------------------------
