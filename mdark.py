@@ -720,15 +720,7 @@ def run_single_test(args):
 
         for signal_choice in signal_choices:
             candidate_lenses, chi2 = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
-            '''
-            if chi2 > 5:
-                print('Chi2 score above 5 for ID {}'.format(ID))
-                mass = 0
-                candidate_num = 0
-            else:
-                mass = compute_masses(candidate_lenses, z, xmax)
-                candidate_num = len(candidate_lenses.x)
-            '''
+
             mass = compute_masses(candidate_lenses, z, xmax)
             candidate_num = len(candidate_lenses.x)
 
@@ -754,21 +746,6 @@ def run_single_test(args):
     candidate_numbers_2 = all_candidate_numbers[:, 1]
     candidate_numbers_3 = all_candidate_numbers[:, 2]
     candidate_numbers_4 = all_candidate_numbers[:, 3]
-
-    zeros_1 = masses_1 == 0
-    zeros_2 = masses_2 == 0
-    zeros_3 = masses_3 == 0
-    zeros_4 = masses_4 == 0
-
-    masses_1 = masses_1[~zeros_1]
-    masses_2 = masses_2[~zeros_2]
-    masses_3 = masses_3[~zeros_3]
-    masses_4 = masses_4[~zeros_4]
-
-    candidate_numbers_1 = candidate_numbers_1[~zeros_1]
-    candidate_numbers_2 = candidate_numbers_2[~zeros_2]
-    candidate_numbers_3 = candidate_numbers_3[~zeros_3]
-    candidate_numbers_4 = candidate_numbers_4[~zeros_4]
     
     mean_masses = [np.mean(masses_1), np.mean(masses_2), np.mean(masses_3), np.mean(masses_4)]
     std_masses = [np.std(masses_1), np.std(masses_2), np.std(masses_3), np.std(masses_4)]
@@ -807,6 +784,7 @@ def run_test_parallel(ID_file, result_file, z, N_test):
     
     # Extract the results and chi2 scores
     results, chi2_scores = zip(*results)
+    print(chi2_scores)
     
     # Turn the results into a list of strings
     results = [','.join([ID] + [str(val) for val in result]) + '\n' for ID, result in zip(IDs, results)]
@@ -1019,6 +997,89 @@ def GOF_correlation_coefficient(test_number):
     plt.show()
 
 
+def analyze_chi2_file(chi_2_file, result_file):
+    # Given a file with chi2 values, analyze the data
+    # and return the number of "good" fits
+    chi2_scores = []
+    with open(chi_2_file, 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            chi2_scores.append(float(line))
+    
+    # Now, let's organize this into a couple of different sets
+    # There are 4 chi2 scores for each cluster, based on signal combination
+    # We would like to look at the distribution of chi2 scores
+    # based on the cluster associated with them, and the signal combination
+            
+    signal_choices = [
+        'All Signals',
+        'Shear and Flexion',
+        'Flexion and G-Flexion',
+        'Shear and G-Flexion'
+    ]
+
+    all_signals_chi2 = []
+    gamma_f_chi2 = []
+    f_g_chi2 = []
+    gamma_g_chi2 = []
+
+    for i in range(0, len(chi2_scores), 4):
+        all_signals_chi2.append(chi2_scores[i])
+        gamma_f_chi2.append(chi2_scores[i+1])
+        f_g_chi2.append(chi2_scores[i+2])
+        gamma_g_chi2.append(chi2_scores[i+3])
+    
+    # Additionally, look at the chi2 for each cluster (keep all signal combinations)
+    cluster_chi2 = []
+    for i in range(0, len(chi2_scores), 4):
+        cluster_chi2.append(chi2_scores[i:i+4])
+    
+    # Now plot these distributions
+        
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+
+    signal_chi2 = [all_signals_chi2, gamma_f_chi2, f_g_chi2, gamma_g_chi2]
+
+    for i in range(4):
+        # Remove outliers
+        signal_chi2[i] = np.array(signal_chi2[i])
+        # signal_chi2[i] = signal_chi2[i][signal_chi2[i] < 100]
+        fancy_hist(signal_chi2[i], bins=1000, ax=ax[i], color='black', histtype='step', label='Median = {}'.format(np.median(signal_chi2[i])))
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+        ax[i].set_xlabel(r'$\chi^2$')
+        ax[i].set_ylabel('Number of Clusters')
+        # ax[i].set_xlim([0, 100])
+        ax[i].vlines(5, 0, 100, color='red', linestyle='--', label='Good Fit Threshold: 5')
+        ax[i].legend()
+        ax[i].set_title('{}'.format(signal_choices[i]) + ' Chi2 Distribution \n' + r'{}% of Clusters have $\chi^2$ < 5'.format(np.sum(np.array(signal_chi2[i]) < 5) / len(signal_chi2[i]) * 100))
+    
+    fig.tight_layout()
+    plt.savefig('Images/MDARK/Chi2_Distributions_Signal.png')
+
+    true_masses = pd.read_csv(result_file)[' True Mass'].values
+    # Now, let's look at the distribution of chi2 scores for each cluster
+    # Just do this as a scatter plot (need 4 cluster_nums per chi2), ie [1,1,1,1,2,2,2,2,...]
+    true_masses = np.repeat(true_masses, 4)
+    # Associate each signal with a color
+    colors = ['red', 'blue', 'green', 'purple']
+    colors = colors * 30
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    fig.suptitle(r'$\chi^2$ Scores for Each Cluster')
+    ax.scatter(true_masses, chi2_scores, color=colors)
+    ax.hlines(5, 1e13, 1e15, color='red', linestyle='--', label='Good Fit Threshold: 5')
+    ax.set_xlabel('Cluster Mass [M_sun]')
+    ax.set_ylabel(r'$\chi^2$')
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    # Create a legend for the colors
+    handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, label=signal) for color, signal in zip(colors, signal_choices)]
+    ax.legend(handles=handles, title='Signal Combination')
+    plt.savefig('Images/MDARK/Chi2_Scores_Cluster.png')
+    plt.show()
+
+
 if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
     start = time.time()
@@ -1026,29 +1087,36 @@ if __name__ == '__main__':
     test_number = 10
     ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
-    plot_name = 'Images/MDARK/mass_correlation_{}.png'.format(test_number)
+    plot_name = 'Images/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
+    chi2_file = 'Data/MDARK_Test/Test{}/chi2_scores_{}.csv'.format(test_number, test_number)
+
+    analyze_chi2_file(chi2_file, result_file)
+    raise ValueError('Pipeline testing complete')
 
     # run_test_parallel(ID_file, result_file, zs[0], 1)
     stop = time.time()
-    # print('Time taken: {}'.format(stop - start))
+    print('Time taken: {}'.format(stop - start))
     # build_mass_correlation_plot_errors(result_file, plot_name)
+
+    # raise ValueError('Pipeline testing complete')
     
     # read in the chi2 scores from test10
-    '''
+    
     chi2_scores = []
-    with open('Data/MDARK_Test/Test{}/chi2_scores_{}.csv'.format(test_number,test_number), 'r') as f:
+    with open(chi2_file, 'r') as f:
         lines = f.readlines()
         for line in lines:
             chi2_scores.append(float(line))
     
     good_score = 5
+    print('Total number of tests: {}'.format(len(chi2_scores)))
     print('Number of "good" chi2 scores: {}'.format(np.sum(np.array(chi2_scores) < good_score)))
     print('Fraction of "good" chi2 scores: {}'.format(np.sum(np.array(chi2_scores) < good_score) / len(chi2_scores)))
     
     fig, ax = plt.subplots()
     # Throw out anything above 1000
     chi2_scores = np.array(chi2_scores)
-    chi2_scores = chi2_scores[chi2_scores < 1000]
+    #chi2_scores = chi2_scores[chi2_scores < 100]
     fancy_hist(chi2_scores, bins='freedman', ax=ax, color='black', histtype='step', label='Chi2 Scores')
     ax.vlines(good_score, 0, 100, color='red', linestyle='--', label='Test Threshold: {}'.format(good_score))
     ax.vlines(np.median(chi2_scores), 0, 100, color='blue', linestyle='--', label='Median: {:.2f}'.format(np.median(chi2_scores)))
@@ -1057,7 +1125,7 @@ if __name__ == '__main__':
     plt.show()  
 
     raise ValueError('Pipeline testing complete')
-    '''
+    
 
     # I'd like to examine the actual quality of these tests
     # Lets stick with test 7, choose a random cluster from the ID file, and run the pipeline
@@ -1113,14 +1181,14 @@ if __name__ == '__main__':
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
 
-    # Step 5: Merge lenses that are too close to each other
-    ns = len(sources.x) / (2 * xmax)**2
+    # Step 4: Merge lenses that are too close to each other
+    ns = len(sources.x) / (np.pi * xmax**2)
     merger_threshold = 1/np.sqrt(ns)
-    lenses.merge_close_lenses(merger_threshold=10)
+    lenses.merge_close_lenses(merger_threshold=merger_threshold)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Merging', ax=axarr[1,0], legend=False)
 
-    # Step 4: Iterative elimination
+    # Step 5: Iterative elimination
     lenses.iterative_elimination(sources, reducedchi2, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Iterative Elimination', ax=axarr[1,1], legend=False)
