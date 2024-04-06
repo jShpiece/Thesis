@@ -9,6 +9,7 @@ from astropy.cosmology import Planck15 as cosmo
 import pickle
 from multiprocessing import Pool
 import time
+import os
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
@@ -243,6 +244,10 @@ class Halo:
         return g1, g2
 
 
+# --------------------------------------------
+# File Management Functions
+# --------------------------------------------
+
 def fix_file(z):
     # Fix the key files
     # THIS HAS BEEN COMPLETED - IT SHOULD NOT BE RUN AGAIN
@@ -298,6 +303,25 @@ def chunk_data(file):
     chunks = pd.read_csv(file, dtype=data_types, chunksize=chunk_size)
     return chunks
 
+
+def GOF_file_reader(IDs):
+    # Given a list of IDs, read in the goodness of fit data
+    # and return the chi2 values and mass values
+    chi2_values = []
+    mass_values = []
+
+    for ID in IDs:
+        file = 'Data/MDARK_Test/Goodness_of_Fit/Goodness_of_Fit_{}.csv'.format(ID)
+        data = pd.read_csv(file)
+        chi2_values.append(data[[' chi2_all_signals', ' chi2_gamma_F', ' chi2_F_G', ' chi2_gamma_G']].values)
+        mass_values.append(data[[' mass_all_signals', ' mass_gamma_F', ' mass_F_G', ' mass_gamma_G']].values)
+
+    return chi2_values, mass_values
+
+
+# --------------------------------------------
+# Plotting Functions
+# --------------------------------------------
 
 def plot_cluster_properties(z):
     # For a key file, read in every cluster and plot the distribution of 
@@ -365,6 +389,124 @@ def plot_cluster_properties(z):
     ax.set_title(r'$Multidark: z = {}$'.format(z))
     fig.tight_layout()
     fig.savefig('Images/M_frac_dist_{}.png'.format(z))
+
+
+def build_mass_correlation_plot(file_name, plot_name):
+    # Open the results file and read in the data
+    results = pd.read_csv(file_name)
+    # Get the mass and true mass
+    true_mass = results[' True Mass'].values
+    mass = results[' Mass_all_signals'].values
+    mass_gamma_f = results[' Mass_gamma_F'].values
+    mass_f_g = results[' Mass_F_G'].values
+    mass_gamma_g = results[' Mass_gamma_G'].values
+    masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
+    # True mass is in units of M_sun / h - convert others to the same units
+    masses = [mass / h for mass in masses]
+    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
+
+    '''
+    # Remove outliers
+    outliers = (mass > 1e15) | (mass < 1e12)
+    mass = mass[~outliers]
+    true_mass = true_mass[~outliers]
+    '''
+    # Plot the results for each signal combination
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+    for i in range(4):
+        # true_mass_temp = true_mass[masses[i] > 0]
+        # masses[i] = masses[i][masses[i] > 0]
+        true_mass_temp = true_mass
+        masses[i] = np.abs(masses[i])
+        if masses[i].min() == 0:
+            true_mass_temp = true_mass_temp[masses[i] > 0]
+            masses[i] = masses[i][masses[i] > 0]
+
+        ax[i].scatter(true_mass_temp, masses[i], s=10, color='black')
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+        # Add a line of best fit
+        x = np.linspace(1e13, 1e15, 100)
+        try:
+            # Remove any mass values that are zero
+            # true_mass = true_mass[masses[i] > 0]
+            # masses[i] = masses[i][masses[i] > 0]
+            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(masses[i]), 1)
+            ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
+        except:
+            print('RuntimeWarning: Skipping line of best fit')
+            continue
+        # Plot the line of best fit and an agreement line
+        ax[i].plot(x, x, color='blue', label='Agreement Line', linestyle='--') # Agreement line - use a different linestyle because the paper won't be in color
+        ax[i].legend()
+        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
+        ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
+        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, masses[i])[0, 1]))
+
+    fig.tight_layout()
+    fig.savefig(plot_name)
+    plt.show()
+
+
+def build_mass_correlation_plot_errors(file_name, plot_name):
+    # Open the results file and read in the data
+    results = pd.read_csv(file_name)
+    # Get the mass and true mass
+    true_mass = results[' True Mass'].values
+    mean_masses = results[[' Mean Mass_all_signals', ' Mean Mass_gamma_F', ' Mean Mass_F_G', ' Mean Mass_gamma_G']].values
+    std_masses = results[[' Std Mass_all_signals', ' Std Mass_gamma_F', ' Std Mass_F_G', ' Std Mass_gamma_G']].values
+    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
+
+    # Plot the results for each signal combination
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+
+    for i in range(4):
+        mass_values = np.abs(mean_masses[:, i])
+        mass_errors = std_masses[:, i]
+
+        # Remove NaN values
+        nan_values = np.isnan(mass_values)
+        true_mass_temp = true_mass[~nan_values]
+        mass_values = mass_values[~nan_values]
+        mass_errors = mass_errors[~nan_values]
+
+
+        '''
+        if mean_masses_temp.min() == 0:
+            true_mass_temp = true_mass_temp[mean_masses_temp > 0]
+            mean_masses_temp = mean_masses_temp[mean_masses_temp > 0]
+            std_masses_temp = std_masses_temp[mean_masses_temp > 0]
+        '''
+        ax[i].errorbar(true_mass_temp, mass_values, yerr=mass_errors, fmt='o', color='black')
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+        # Add a line of best fit
+        x = np.linspace(1e13, 1e15, 100)
+        try:
+            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(mass_values), 1)
+            ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
+        except:
+            print('RuntimeWarning: Skipping line of best fit')
+            continue
+        # Plot the line of best fit and an agreement line
+        ax[i].plot(x, x, color='blue', label='Agreement Line', linestyle='--') # Agreement line - use a different linestyle because the paper won't be in color
+        ax[i].legend()
+        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
+        ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
+        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, mass_values)[0, 1]))
+
+    fig.suptitle('Mass Correlation')
+    fig.tight_layout()
+    fig.savefig(plot_name)
+    # plt.show()
+
+
+
+# --------------------------------------------
+# MDARK Processing Functions
+# --------------------------------------------
 
 
 def count_clusters(z):
@@ -465,6 +607,10 @@ def choose_ID(z, mass_range, substructure_range):
     else:
         return None
 
+
+# --------------------------------------------
+# Testing Functions
+# --------------------------------------------
 
 def build_lensing_field(halos, z, Nsource = None):
     '''
@@ -568,19 +714,6 @@ def make_catalogue(sources, name):
     f.close()
 
 
-def compute_masses(candidate_lenses, z, xmax):
-    # Given the results of the pipeline, process the results
-    # We can directly compare the input lenses to the candidate lenses
-    # We can also compare the true mass from the halos to the inferred mass
-    # from the candidate lenses
-
-    # Get the true mass of the system
-    extent = [-xmax, xmax, -xmax, xmax]
-    _,_,kappa = utils.calculate_kappa(candidate_lenses, extent, 5)
-    mass = utils.calculate_mass(kappa, z, 0.5, 1)
-    return mass
-
-
 def run_test(ID_file, result_file, z):
     IDs = []
     # Load the list of IDs - this is a csv file
@@ -635,64 +768,6 @@ def run_test(ID_file, result_file, z):
     print('Done!')
 
 
-def build_mass_correlation_plot(file_name, plot_name):
-    # Open the results file and read in the data
-    results = pd.read_csv(file_name)
-    # Get the mass and true mass
-    true_mass = results[' True Mass'].values
-    mass = results[' Mass_all_signals'].values
-    mass_gamma_f = results[' Mass_gamma_F'].values
-    mass_f_g = results[' Mass_F_G'].values
-    mass_gamma_g = results[' Mass_gamma_G'].values
-    masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
-    # True mass is in units of M_sun / h - convert others to the same units
-    masses = [mass / h for mass in masses]
-    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
-
-    '''
-    # Remove outliers
-    outliers = (mass > 1e15) | (mass < 1e12)
-    mass = mass[~outliers]
-    true_mass = true_mass[~outliers]
-    '''
-    # Plot the results for each signal combination
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    ax = ax.flatten()
-    for i in range(4):
-        # true_mass_temp = true_mass[masses[i] > 0]
-        # masses[i] = masses[i][masses[i] > 0]
-        true_mass_temp = true_mass
-        masses[i] = np.abs(masses[i])
-        if masses[i].min() == 0:
-            true_mass_temp = true_mass_temp[masses[i] > 0]
-            masses[i] = masses[i][masses[i] > 0]
-
-        ax[i].scatter(true_mass_temp, masses[i], s=10, color='black')
-        ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
-        # Add a line of best fit
-        x = np.linspace(1e13, 1e15, 100)
-        try:
-            # Remove any mass values that are zero
-            # true_mass = true_mass[masses[i] > 0]
-            # masses[i] = masses[i][masses[i] > 0]
-            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(masses[i]), 1)
-            ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
-        except:
-            print('RuntimeWarning: Skipping line of best fit')
-            continue
-        # Plot the line of best fit and an agreement line
-        ax[i].plot(x, x, color='blue', label='Agreement Line', linestyle='--') # Agreement line - use a different linestyle because the paper won't be in color
-        ax[i].legend()
-        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
-        ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, masses[i])[0, 1]))
-
-    fig.tight_layout()
-    fig.savefig(plot_name)
-    plt.show()
-
-
 def run_single_test(args):
     ID, z, N_test, signal_choices = args
     # Run the pipeline for a single cluster, with a given set of signal choices
@@ -705,21 +780,33 @@ def run_single_test(args):
     halos, sources, xmax = build_lensing_field(halos, z)
     chi_scores = []
 
+    xs = sources.x
+    ys = sources.y
+
+    noiseless_sources = pipeline.Source(xs, ys, np.empty_like(xs), np.empty_like(xs), np.empty_like(xs), np.empty_like(xs), np.empty_like(xs), np.empty_like(xs), 0.1, 0.01, 0.02)
+    noiseless_sources.apply_NFW_lensing(halos, z, 0.5, xmax)
+
     for _ in range(N_test):
         masses = []
         candidate_number = []
 
-        # Vary the source noise for each test
-        Nsource = len(sources.x)
-        sources.e1 += np.random.normal(0, 0.1, Nsource)
-        sources.e2 += np.random.normal(0, 0.1, Nsource)
-        sources.f1 += np.random.normal(0, 0.01, Nsource)
-        sources.f2 += np.random.normal(0, 0.01, Nsource)
-        sources.g1 += np.random.normal(0, 0.02, Nsource)
-        sources.g2 += np.random.normal(0, 0.02, Nsource)
+        # Recreate the sources each time - keeping the positions the same, 
+        # But allowing the noises to change
+
+        seed = np.random.randint(0, 1000)
+        np.random.seed(seed)
+        noisy_sources = sources # Copy the sources
+
+        # Apply noise
+        noisy_sources.e1 += np.random.normal(0, 0.1, len(noisy_sources.x))
+        noisy_sources.e2 += np.random.normal(0, 0.1, len(noisy_sources.x))
+        noisy_sources.f1 += np.random.normal(0, 0.01, len(noisy_sources.x))
+        noisy_sources.f2 += np.random.normal(0, 0.01, len(noisy_sources.x))
+        noisy_sources.g1 += np.random.normal(0, 0.02, len(noisy_sources.x))
+        noisy_sources.g2 += np.random.normal(0, 0.02, len(noisy_sources.x))
 
         for signal_choice in signal_choices:
-            candidate_lenses, chi2 = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
+            candidate_lenses, chi2 = pipeline.fit_lensing_field(noisy_sources, xmax, flags=False, use_flags=signal_choice)
 
             mass = compute_masses(candidate_lenses, z, xmax)
             candidate_num = len(candidate_lenses.x)
@@ -767,7 +854,7 @@ def run_test_parallel(ID_file, result_file, z, N_test):
         for line in lines:
             ID = line.split(',')[0]
             IDs.append(ID)
-
+    
     signal_choices = [
         [True, True, True], 
         [True, True, False], 
@@ -784,10 +871,12 @@ def run_test_parallel(ID_file, result_file, z, N_test):
     
     # Extract the results and chi2 scores
     results, chi2_scores = zip(*results)
-    print(chi2_scores)
     
     # Turn the results into a list of strings
     results = [','.join([ID] + [str(val) for val in result]) + '\n' for ID, result in zip(IDs, results)]
+    # Turn the chi2 scores into a list of strings
+    chi2_scores = [','.join([ID] + [str(val) for val in chi2]) + '\n' for ID, chi2 in zip(IDs, chi2_scores)]
+
 
     # Write results to file
     with open(result_file, 'w') as f:
@@ -795,67 +884,28 @@ def run_test_parallel(ID_file, result_file, z, N_test):
         for result in results:
             f.write(result)
 
-    # Make the chi2 scores into a list
-    chi2_scores = [score for sublist in chi2_scores for score in sublist]
-
     # Save the chi2 scores to a file
     with open(result_file.replace('results', 'chi2_scores'), 'w') as f:
-        for score in chi2_scores:
-            f.write('{}\n'.format(score))
+        f.write('ID, chi2_all_signals, chi2_gamma_F, chi2_F_G, chi2_gamma_G\n')
+        for chi2 in chi2_scores:
+            f.write(chi2)
+        
 
+# --------------------------------------------
+# Data Processing Functions
+# --------------------------------------------
 
-def build_mass_correlation_plot_errors(file_name, plot_name):
-    # Open the results file and read in the data
-    results = pd.read_csv(file_name)
-    # Get the mass and true mass
-    true_mass = results[' True Mass'].values
-    mean_masses = results[[' Mean Mass_all_signals', ' Mean Mass_gamma_F', ' Mean Mass_F_G', ' Mean Mass_gamma_G']].values
-    std_masses = results[[' Std Mass_all_signals', ' Std Mass_gamma_F', ' Std Mass_F_G', ' Std Mass_gamma_G']].values
-    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
+def compute_masses(candidate_lenses, z, xmax):
+    # Given the results of the pipeline, process the results
+    # We can directly compare the input lenses to the candidate lenses
+    # We can also compare the true mass from the halos to the inferred mass
+    # from the candidate lenses
 
-    # Plot the results for each signal combination
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    ax = ax.flatten()
-
-    for i in range(4):
-        mass_values = np.abs(mean_masses[:, i])
-        mass_errors = std_masses[:, i]
-
-        # Remove NaN values
-        nan_values = np.isnan(mass_values)
-        true_mass_temp = true_mass[~nan_values]
-        mass_values = mass_values[~nan_values]
-        mass_errors = mass_errors[~nan_values]
-
-
-        '''
-        if mean_masses_temp.min() == 0:
-            true_mass_temp = true_mass_temp[mean_masses_temp > 0]
-            mean_masses_temp = mean_masses_temp[mean_masses_temp > 0]
-            std_masses_temp = std_masses_temp[mean_masses_temp > 0]
-        '''
-        ax[i].errorbar(true_mass_temp, mass_values, yerr=mass_errors, fmt='o', color='black')
-        ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
-        # Add a line of best fit
-        x = np.linspace(1e13, 1e15, 100)
-        try:
-            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(mass_values), 1)
-            ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
-        except:
-            print('RuntimeWarning: Skipping line of best fit')
-            continue
-        # Plot the line of best fit and an agreement line
-        ax[i].plot(x, x, color='blue', label='Agreement Line', linestyle='--') # Agreement line - use a different linestyle because the paper won't be in color
-        ax[i].legend()
-        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
-        ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, mass_values)[0, 1]))
-
-    fig.suptitle('Mass Correlation')
-    fig.tight_layout()
-    fig.savefig(plot_name)
-    # plt.show()
+    # Get the true mass of the system
+    extent = [-xmax, xmax, -xmax, xmax]
+    _,_,kappa = utils.calculate_kappa(candidate_lenses, extent, 5)
+    mass = utils.calculate_mass(kappa, z, 0.5, 1)
+    return mass
 
 
 def goodness_of_fit_test(ID):
@@ -927,21 +977,6 @@ def goodness_of_fit_test(ID):
     plt.close
 
 
-def GOF_file_reader(IDs):
-    # Given a list of IDs, read in the goodness of fit data
-    # and return the chi2 values and mass values
-    chi2_values = []
-    mass_values = []
-
-    for ID in IDs:
-        file = 'Data/MDARK_Test/Goodness_of_Fit/Goodness_of_Fit_{}.csv'.format(ID)
-        data = pd.read_csv(file)
-        chi2_values.append(data[[' chi2_all_signals', ' chi2_gamma_F', ' chi2_F_G', ' chi2_gamma_G']].values)
-        mass_values.append(data[[' mass_all_signals', ' mass_gamma_F', ' mass_F_G', ' mass_gamma_G']].values)
-
-    return chi2_values, mass_values
-
-
 def GOF_correlation_coefficient(test_number):
     ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     IDs = pd.read_csv(ID_file)['ID'].values
@@ -997,14 +1032,16 @@ def GOF_correlation_coefficient(test_number):
     plt.show()
 
 
-def analyze_chi2_file(chi_2_file, result_file):
+def analyze_chi2_file(chi_2_file, result_file, test_num):
     # Given a file with chi2 values, analyze the data
     # and return the number of "good" fits
     chi2_scores = []
     with open(chi_2_file, 'r') as f:
-        lines = f.readlines()
+        lines = f.readlines()[1:]
         for line in lines:
-            chi2_scores.append(float(line))
+            chi2 = line.split(',')[1:]
+            chi2 = [float(val) for val in chi2]
+            chi2_scores.extend(chi2)
     
     # Now, let's organize this into a couple of different sets
     # There are 4 chi2 scores for each cluster, based on signal combination
@@ -1023,11 +1060,14 @@ def analyze_chi2_file(chi_2_file, result_file):
     f_g_chi2 = []
     gamma_g_chi2 = []
 
+    # The chi2 scores are organized as [chi2_all_signals, chi2_gamma_f, chi2_f_g, chi2_gamma_g]
+    # This repeats in every row for the number of trials run for each cluster
     for i in range(0, len(chi2_scores), 4):
         all_signals_chi2.append(chi2_scores[i])
         gamma_f_chi2.append(chi2_scores[i+1])
         f_g_chi2.append(chi2_scores[i+2])
         gamma_g_chi2.append(chi2_scores[i+3])
+
     
     # Additionally, look at the chi2 for each cluster (keep all signal combinations)
     cluster_chi2 = []
@@ -1056,80 +1096,61 @@ def analyze_chi2_file(chi_2_file, result_file):
         ax[i].set_title('{}'.format(signal_choices[i]) + ' Chi2 Distribution \n' + r'{}% of Clusters have $\chi^2$ < 5'.format(np.sum(np.array(signal_chi2[i]) < 5) / len(signal_chi2[i]) * 100))
     
     fig.tight_layout()
-    plt.savefig('Images/MDARK/Chi2_Distributions_Signal.png')
+    plt.savefig('Images/MDARK/Chi2_Distributions_Signal_{}.png'.format(test_num))
 
     true_masses = pd.read_csv(result_file)[' True Mass'].values
     # Now, let's look at the distribution of chi2 scores for each cluster
     # Just do this as a scatter plot (need 4 cluster_nums per chi2), ie [1,1,1,1,2,2,2,2,...]
-    true_masses = np.repeat(true_masses, 4)
     # Associate each signal with a color
+    true_masses = np.repeat(true_masses, 30)
     colors = ['red', 'blue', 'green', 'purple']
-    colors = colors * 30
+    colors = colors * 5
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
     fig.suptitle(r'$\chi^2$ Scores for Each Cluster')
-    ax.scatter(true_masses, chi2_scores, color=colors)
+    for i in range(4):
+        ax.scatter(true_masses, signal_chi2[i], color=colors[i], alpha=0.5, s=5)
     ax.hlines(5, 1e13, 1e15, color='red', linestyle='--', label='Good Fit Threshold: 5')
-    ax.set_xlabel('Cluster Mass [M_sun]')
+    ax.set_xlabel(r'Cluster Mass $M_{\odot}$')
     ax.set_ylabel(r'$\chi^2$')
     ax.set_xscale('log')
     ax.set_yscale('log')
     # Create a legend for the colors
     handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, label=signal) for color, signal in zip(colors, signal_choices)]
     ax.legend(handles=handles, title='Signal Combination')
-    plt.savefig('Images/MDARK/Chi2_Scores_Cluster.png')
+    plt.savefig('Images/MDARK/Chi2_Scores_Cluster_{}.png'.format(test_num))
     plt.show()
 
+# --------------------------------------------
+# Main Functions
+# --------------------------------------------
 
 if __name__ == '__main__':
+    # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
+    z_chosen = zs[0]
     start = time.time()
-    file = 'MDARK/Halos_0.194.MDARK'
-    test_number = 10
+
+    test_number = 12
+    halos_file = 'MDARK/Halos_{}.MDARK'.format(z_chosen)
     ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
     plot_name = 'Images/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
     chi2_file = 'Data/MDARK_Test/Test{}/chi2_scores_{}.csv'.format(test_number, test_number)
 
-    analyze_chi2_file(chi2_file, result_file)
-    raise ValueError('Pipeline testing complete')
+    #Check that the ID file exists - if not, create the directory and build the test set
+    if not os.path.exists(ID_file):
+        os.makedirs('Data/MDARK_Test/Test{}'.format(test_number))
+        build_test_set(30, z_chosen, ID_file)
 
-    # run_test_parallel(ID_file, result_file, zs[0], 1)
+    # run_test_parallel(ID_file, result_file, z_chosen, 30)
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     # build_mass_correlation_plot_errors(result_file, plot_name)
+    analyze_chi2_file(chi2_file, result_file, test_number)
 
-    # raise ValueError('Pipeline testing complete')
-    
-    # read in the chi2 scores from test10
-    
-    chi2_scores = []
-    with open(chi2_file, 'r') as f:
-        lines = f.readlines()
-        for line in lines:
-            chi2_scores.append(float(line))
-    
-    good_score = 5
-    print('Total number of tests: {}'.format(len(chi2_scores)))
-    print('Number of "good" chi2 scores: {}'.format(np.sum(np.array(chi2_scores) < good_score)))
-    print('Fraction of "good" chi2 scores: {}'.format(np.sum(np.array(chi2_scores) < good_score) / len(chi2_scores)))
-    
-    fig, ax = plt.subplots()
-    # Throw out anything above 1000
-    chi2_scores = np.array(chi2_scores)
-    #chi2_scores = chi2_scores[chi2_scores < 100]
-    fancy_hist(chi2_scores, bins='freedman', ax=ax, color='black', histtype='step', label='Chi2 Scores')
-    ax.vlines(good_score, 0, 100, color='red', linestyle='--', label='Test Threshold: {}'.format(good_score))
-    ax.vlines(np.median(chi2_scores), 0, 100, color='blue', linestyle='--', label='Median: {:.2f}'.format(np.median(chi2_scores)))
-    ax.legend()
-    ax.set_yscale('log')
-    plt.show()  
-
-    raise ValueError('Pipeline testing complete')
-    
+    raise ValueError('Done!')
 
     # I'd like to examine the actual quality of these tests
-    # Lets stick with test 7, choose a random cluster from the ID file, and run the pipeline
-    # We don't need to save anything - I want to directly examine the results
 
     ID_file = 'Data/MDARK_Test/Test10/ID_file_10.csv'
     ID_data = pd.read_csv(ID_file)
