@@ -449,43 +449,59 @@ def build_mass_correlation_plot(file_name, plot_name):
     plt.show()
 
 
-def build_mass_correlation_plot_errors(file_name, plot_name):
-    # Open the results file and read in the data
-    results = pd.read_csv(file_name)
-    # Get the mass and true mass
-    true_mass = results[' True Mass'].values
-    mean_masses = results[[' Mean Mass_all_signals', ' Mean Mass_gamma_F', ' Mean Mass_F_G', ' Mean Mass_gamma_G']].values
-    std_masses = results[[' Std Mass_all_signals', ' Std Mass_gamma_F', ' Std Mass_F_G', ' Std Mass_gamma_G']].values
-    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
+def build_mass_correlation_plot_errors(test_dir, ID_file, plot_name):
+    IDs = []
+    true_mass = []
+    with open(ID_file, 'r') as f:
+        lines = f.readlines()[1:]
+        for line in lines:
+            ID = line.split(',')[0]
+            mass = line.split(',')[1]
+            IDs.append(ID)
+            true_mass.append(mass)
+
+    IDs = np.array(IDs)
+    mass_val = np.empty((len(IDs), 4))
+    mass_err = np.empty((len(IDs), 4))
+
+    for i, ID in enumerate(IDs):
+        mass_1 = []
+        mass_2 = []
+        mass_3 = []
+        mass_4 = []
+        with open(test_dir + str(ID) + '_data.csv', 'r') as f:
+            lines = f.readlines()[1:]
+            for line in lines:
+                mass_1.append(float(line.split(',')[1]))
+                mass_2.append(float(line.split(',')[2]))
+                mass_3.append(float(line.split(',')[3]))
+                mass_4.append(float(line.split(',')[4]))
+
+        mass_val[i, 0] = np.mean(mass_1)
+        mass_val[i, 1] = np.mean(mass_2)
+        mass_val[i, 2] = np.mean(mass_3)
+        mass_val[i, 3] = np.mean(mass_4)
+
+        mass_err[i, 0] = np.std(mass_1)
+        mass_err[i, 1] = np.std(mass_2)
+        mass_err[i, 2] = np.std(mass_3)
+        mass_err[i, 3] = np.std(mass_4)
 
     # Plot the results for each signal combination
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
     ax = ax.flatten()
 
     for i in range(4):
-        mass_values = np.abs(mean_masses[:, i])
-        mass_errors = std_masses[:, i]
+        mass = mass_val[:, i]
+        err = mass_err[:, i]
 
-        # Remove NaN values
-        nan_values = np.isnan(mass_values)
-        true_mass_temp = true_mass[~nan_values]
-        mass_values = mass_values[~nan_values]
-        mass_errors = mass_errors[~nan_values]
-
-
-        '''
-        if mean_masses_temp.min() == 0:
-            true_mass_temp = true_mass_temp[mean_masses_temp > 0]
-            mean_masses_temp = mean_masses_temp[mean_masses_temp > 0]
-            std_masses_temp = std_masses_temp[mean_masses_temp > 0]
-        '''
-        ax[i].errorbar(true_mass_temp, mass_values, yerr=mass_errors, fmt='o', color='black')
+        ax[i].errorbar(true_mass, mass, yerr=err, fmt='o', color='black')
         ax[i].set_xscale('log')
         ax[i].set_yscale('log')
         # Add a line of best fit
         x = np.linspace(1e13, 1e15, 100)
         try:
-            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(mass_values), 1)
+            m, b = np.polyfit(np.log10(true_mass), np.log10(mass), 1)
             ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
         except:
             print('RuntimeWarning: Skipping line of best fit')
@@ -769,84 +785,69 @@ def run_test(ID_file, result_file, z):
 
 
 def run_single_test(args):
-    ID, z, N_test, signal_choices = args
+    ID, z, N_test, signal_choices, result_dir = args
     # Run the pipeline for a single cluster, with a given set of signal choices
     # N_test times. Save the results to a file
 
-    all_masses = []
-    all_candidate_numbers = []
-
     halos = find_halos(int(ID), z)
     halos, sources, xmax = build_lensing_field(halos, z)
-    chi_scores = []
 
     xs = sources.x
     ys = sources.y
 
-    noiseless_sources = pipeline.Source(xs, ys, np.empty_like(xs), np.empty_like(xs), np.empty_like(xs), np.empty_like(xs), np.empty_like(xs), np.empty_like(xs), 0.1, 0.01, 0.02)
-    noiseless_sources.apply_NFW_lensing(halos, z, 0.5, xmax)
+    sig_s = np.ones(len(xs)) * 0.1
+    sig_f = np.ones(len(xs)) * 0.01
+    sig_g = np.ones(len(xs)) * 0.02
 
-    for _ in range(N_test):
-        masses = []
-        candidate_number = []
-
-        # Recreate the sources each time - keeping the positions the same, 
-        # But allowing the noises to change
-
-        seed = np.random.randint(0, 1000)
-        np.random.seed(seed)
-        noisy_sources = sources # Copy the sources
-
-        # Apply noise
-        noisy_sources.e1 += np.random.normal(0, 0.1, len(noisy_sources.x))
-        noisy_sources.e2 += np.random.normal(0, 0.1, len(noisy_sources.x))
-        noisy_sources.f1 += np.random.normal(0, 0.01, len(noisy_sources.x))
-        noisy_sources.f2 += np.random.normal(0, 0.01, len(noisy_sources.x))
-        noisy_sources.g1 += np.random.normal(0, 0.02, len(noisy_sources.x))
-        noisy_sources.g2 += np.random.normal(0, 0.02, len(noisy_sources.x))
-
-        for signal_choice in signal_choices:
-            candidate_lenses, chi2 = pipeline.fit_lensing_field(noisy_sources, xmax, flags=False, use_flags=signal_choice)
-
-            mass = compute_masses(candidate_lenses, z, xmax)
-            candidate_num = len(candidate_lenses.x)
-
-            chi_scores.append(chi2)
-            masses.append(mass)
-            candidate_number.append(candidate_num)
-
-        all_masses.append(masses)
-        all_candidate_numbers.append(candidate_number)
-        print('Finished test {} for ID {}'.format(_, ID))
-
-    # Calculate mean and standard deviation for each type of mass and candidate number
-    all_masses = np.array(all_masses)
-    all_candidate_numbers = np.array(all_candidate_numbers)
-
-    # This is crude, but not slow
-    masses_1 = all_masses[:, 0]
-    masses_2 = all_masses[:, 1]
-    masses_3 = all_masses[:, 2]
-    masses_4 = all_masses[:, 3]
-
-    candidate_numbers_1 = all_candidate_numbers[:, 0]
-    candidate_numbers_2 = all_candidate_numbers[:, 1]
-    candidate_numbers_3 = all_candidate_numbers[:, 2]
-    candidate_numbers_4 = all_candidate_numbers[:, 3]
+    with open(result_dir + '/{}_data.csv'.format(ID), 'w') as f:
+        f.write('Trial, Mass_all_signals, Mass_gamma_F, Mass_F_G, Mass_gamma_G, chi2_all_signals, chi2_gamma_F, chi2_F_G, chi2_gamma_G, Nfound_all_signals, Nfound_gamma_F, Nfound_F_G, Nfound_gamma_G\n')
     
-    mean_masses = [np.mean(masses_1), np.mean(masses_2), np.mean(masses_3), np.mean(masses_4)]
-    std_masses = [np.std(masses_1), np.std(masses_2), np.std(masses_3), np.std(masses_4)]
+        for i in range(N_test):
+            masses = []
+            candidate_number = []
+            chi_scores = []
 
-    mean_candidate_numbers = [np.mean(candidate_numbers_1), np.mean(candidate_numbers_2), np.mean(candidate_numbers_3), np.mean(candidate_numbers_4)]
-    std_candidate_numbers = [np.std(candidate_numbers_1), np.std(candidate_numbers_2), np.std(candidate_numbers_3), np.std(candidate_numbers_4)]
+            # Recreate the sources each time - keeping the positions the same, 
+            # But allowing the noises to change
 
-    # Now sort the results into a list, with the mean and std of each signal in order
-    results = [[np.sum(halos.mass), mean_masses[0], std_masses[0], mean_masses[1], std_masses[1], mean_masses[2], std_masses[2], mean_masses[3], std_masses[3], len(halos.mass), mean_candidate_numbers[0], std_candidate_numbers[0], mean_candidate_numbers[1], std_candidate_numbers[1], mean_candidate_numbers[2], std_candidate_numbers[2], mean_candidate_numbers[3], std_candidate_numbers[3]], chi_scores]
+            # Choose a random seed
+            np.random.seed(i)
+            noisy_sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
+            noisy_sources.apply_NFW_lensing(halos)
 
-    return results
+            print(noisy_sources.f1)
+
+            # Apply noise
+            noisy_sources.e1 += np.random.normal(0, 0.1, len(noisy_sources.x))
+            noisy_sources.e2 += np.random.normal(0, 0.1, len(noisy_sources.x))
+            noisy_sources.f1 += np.random.normal(0, 0.01, len(noisy_sources.x))
+            noisy_sources.f2 += np.random.normal(0, 0.01, len(noisy_sources.x))
+            noisy_sources.g1 += np.random.normal(0, 0.02, len(noisy_sources.x))
+            noisy_sources.g2 += np.random.normal(0, 0.02, len(noisy_sources.x))
+
+            print(noisy_sources.f1)
+            
+            for signal_choice in signal_choices:
+                candidate_lenses, chi2 = pipeline.fit_lensing_field(noisy_sources, xmax, flags=False, use_flags=signal_choice)
+
+                mass = compute_masses(candidate_lenses, z, xmax)
+                candidate_num = len(candidate_lenses.x)
+
+                chi_scores.append(chi2)
+                masses.append(mass)
+                candidate_number.append(candidate_num)
+
+            # Save the results to a file
+            results = [masses[0], masses[1], masses[2], masses[3], chi_scores[0], chi_scores[1], chi_scores[2], chi_scores[3], candidate_number[0], candidate_number[1], candidate_number[2], candidate_number[3]]
+            f.write('{} \n'.format(i))
+            print('Cluster ID: {} - Trial: {}'.format(ID, i))
+        
+        f.close()
+
+        return results
 
 
-def run_test_parallel(ID_file, result_file, z, N_test):
+def run_test_parallel(ID_file, result_dir, z, N_test):
     IDs = []
 
     with open(ID_file, 'r') as f:
@@ -854,6 +855,9 @@ def run_test_parallel(ID_file, result_file, z, N_test):
         for line in lines:
             ID = line.split(',')[0]
             IDs.append(ID)
+    
+    IDs = np.array(IDs)
+    IDs = IDs[0] # For testing purposes
     
     signal_choices = [
         [True, True, True], 
@@ -863,33 +867,14 @@ def run_test_parallel(ID_file, result_file, z, N_test):
     ]
 
     # Prepare the arguments for each task
-    tasks = [(ID, z, N_test, signal_choices) for ID in IDs]
+    tasks = [(ID, z, N_test, signal_choices, result_dir) for ID in IDs]
 
     # Process pool
     with Pool() as pool:
         results = pool.map(run_single_test, tasks)
-    
-    # Extract the results and chi2 scores
-    results, chi2_scores = zip(*results)
-    
-    # Turn the results into a list of strings
-    results = [','.join([ID] + [str(val) for val in result]) + '\n' for ID, result in zip(IDs, results)]
-    # Turn the chi2 scores into a list of strings
-    chi2_scores = [','.join([ID] + [str(val) for val in chi2]) + '\n' for ID, chi2 in zip(IDs, chi2_scores)]
 
+    return
 
-    # Write results to file
-    with open(result_file, 'w') as f:
-        f.write('ID, True Mass, Mean Mass_all_signals, Std Mass_all_signals, Mean Mass_gamma_F, Std Mass_gamma_F, Mean Mass_F_G, Std Mass_F_G, Mean Mass_gamma_G, Std Mass_gamma_G, N_halos, Mean Nfound_all_signals, Std Nfound_all_signals, Mean Nfound_gamma_F, Std Nfound_gamma_F, Mean Nfound_F_G, Std Nfound_F_G, Mean Nfound_gamma_G, Std Nfound_gamma_G\n')
-        for result in results:
-            f.write(result)
-
-    # Save the chi2 scores to a file
-    with open(result_file.replace('results', 'chi2_scores'), 'w') as f:
-        f.write('ID, chi2_all_signals, chi2_gamma_F, chi2_F_G, chi2_gamma_G\n')
-        for chi2 in chi2_scores:
-            f.write(chi2)
-        
 
 # --------------------------------------------
 # Data Processing Functions
@@ -1042,7 +1027,7 @@ def analyze_chi2_file(chi_2_file, result_file, test_num):
             chi2 = line.split(',')[1:]
             chi2 = [float(val) for val in chi2]
             chi2_scores.extend(chi2)
-    
+        
     # Now, let's organize this into a couple of different sets
     # There are 4 chi2 scores for each cluster, based on signal combination
     # We would like to look at the distribution of chi2 scores
@@ -1069,11 +1054,6 @@ def analyze_chi2_file(chi_2_file, result_file, test_num):
         gamma_g_chi2.append(chi2_scores[i+3])
 
     
-    # Additionally, look at the chi2 for each cluster (keep all signal combinations)
-    cluster_chi2 = []
-    for i in range(0, len(chi2_scores), 4):
-        cluster_chi2.append(chi2_scores[i:i+4])
-    
     # Now plot these distributions
         
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
@@ -1093,7 +1073,7 @@ def analyze_chi2_file(chi_2_file, result_file, test_num):
         # ax[i].set_xlim([0, 100])
         ax[i].vlines(5, 0, 100, color='red', linestyle='--', label='Good Fit Threshold: 5')
         ax[i].legend()
-        ax[i].set_title('{}'.format(signal_choices[i]) + ' Chi2 Distribution \n' + r'{}% of Clusters have $\chi^2$ < 5'.format(np.sum(np.array(signal_chi2[i]) < 5) / len(signal_chi2[i]) * 100))
+        ax[i].set_title('{}'.format(signal_choices[i]) + ' Chi2 Distribution \n' + r'{}% of fits have $\chi^2$ < 5'.format(np.round(np.sum(np.array(signal_chi2[i]) < 5) / len(signal_chi2[i]) * 100, 2)))
     
     fig.tight_layout()
     plt.savefig('Images/MDARK/Chi2_Distributions_Signal_{}.png'.format(test_num))
@@ -1102,7 +1082,7 @@ def analyze_chi2_file(chi_2_file, result_file, test_num):
     # Now, let's look at the distribution of chi2 scores for each cluster
     # Just do this as a scatter plot (need 4 cluster_nums per chi2), ie [1,1,1,1,2,2,2,2,...]
     # Associate each signal with a color
-    true_masses = np.repeat(true_masses, 30)
+    true_masses = np.repeat(true_masses, 10)
     colors = ['red', 'blue', 'green', 'purple']
     colors = colors * 5
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
@@ -1130,23 +1110,24 @@ if __name__ == '__main__':
     z_chosen = zs[0]
     start = time.time()
 
-    test_number = 12
+    test_number = 13
+    test_dir = 'Data/MDARK_Test/Test{}'.format(test_number)
     halos_file = 'MDARK/Halos_{}.MDARK'.format(z_chosen)
-    ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
-    result_file = 'Data/MDARK_Test/Test{}/results_{}.csv'.format(test_number, test_number)
+    ID_file = test_dir + '/ID_file_{}.csv'.format(test_number)
+    result_file = test_dir + '/results_{}.csv'.format(test_number)
     plot_name = 'Images/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
-    chi2_file = 'Data/MDARK_Test/Test{}/chi2_scores_{}.csv'.format(test_number, test_number)
+    chi2_file = test_dir + '/chi2_{}.csv'.format(test_number)
 
     #Check that the ID file exists - if not, create the directory and build the test set
     if not os.path.exists(ID_file):
         os.makedirs('Data/MDARK_Test/Test{}'.format(test_number))
         build_test_set(30, z_chosen, ID_file)
 
-    # run_test_parallel(ID_file, result_file, z_chosen, 30)
+    run_test_parallel(ID_file, test_dir, z_chosen, 5)
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
-    # build_mass_correlation_plot_errors(result_file, plot_name)
-    analyze_chi2_file(chi2_file, result_file, test_number)
+    build_mass_correlation_plot_errors(test_dir, plot_name)
+    # analyze_chi2_file(chi2_file, result_file, test_number)
 
     raise ValueError('Done!')
 
@@ -1157,7 +1138,6 @@ if __name__ == '__main__':
     ID = ID_data['ID'].sample(n=1).values[0]
     halos = find_halos(int(ID), zs[0])
     halos, sources, xmax = build_lensing_field(halos, zs[0])
-
 
     def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=None, legend=True):
         """Private helper function to plot the results of lensing reconstruction."""
