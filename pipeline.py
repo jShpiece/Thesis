@@ -220,9 +220,9 @@ class Lens:
         # And return the reduced chi^2 value of the set of lenses
         for i in range(len(self.x)):
             one_lens = Lens(self.x[i], self.y[i], self.te[i], 0)
-            self.chi2[i] = calc_raw_chi2(sources, one_lens, use_flags)
+            self.chi2[i] = calculate_chi_squared(sources, one_lens, use_flags)
         dof = calc_degrees_of_freedom(sources, self, use_flags)
-        total_chi2 = calc_raw_chi2(sources, self, use_flags) 
+        total_chi2 = calculate_chi_squared(sources, self, use_flags) 
         return total_chi2 / dof
 
 
@@ -248,40 +248,56 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
     return dof
 
 
-def calc_raw_chi2(sources, lenses, use_flags):
-    # Compute the raw chi^2 value for a given set of sources and lenses
-    # Determine which lensing signals to use, based on the use_flags
-    use_shear = use_flags[0]
-    use_flexion = use_flags[1]
-    use_g_flexion = use_flags[2]
-    # The source clone object represents the sources after the lensing effects of our 'test' lenses
+def calculate_chi_squared(sources, lenses, flags) -> float:
+    """
+    Calculate the chi-squared statistic for the deviation of lensed source properties from their original values,
+    considering specified lensing effects and adding penalties for certain lens properties.
+
+    Parameters:
+    - sources (Source): An object containing source properties and their uncertainties.
+    - lenses (Lenses): An object representing the test lenses which affect the source properties.
+    - flags (list of bool): Flags indicating which lensing effects to include [use_shear, use_flexion, use_g_flexion].
+
+    Returns:
+    - float: The total chi-squared value including penalties.
+    """
+
+    # Unpack flags for clarity
+    use_shear, use_flexion, use_g_flexion = flags
+
+    # Initialize a clone of sources with zeroed lensing signals
     source_clone = Source(
-        sources.x, sources.y, np.zeros_like(sources.e1), np.zeros_like(sources.e2), 
-        np.zeros_like(sources.f1), np.zeros_like(sources.f2), np.zeros_like(sources.g1), np.zeros_like(sources.g2), 
-        sources.sigs, sources.sigf, sources.sigg
-        )
-    source_clone.apply_SIS_lensing(lenses) 
-    
-    # Now we compare the lensing signals on our source_clone object to the original sources
-    chi1e = ((source_clone.e1 - sources.e1) / sources.sigs) ** 2
-    chi2e = ((source_clone.e2 - sources.e2) / sources.sigs) ** 2
-    chi1f = ((source_clone.f1 - sources.f1) / sources.sigf) ** 2
-    chi2f = ((source_clone.f2 - sources.f2) / sources.sigf) ** 2
-    chi1g = ((source_clone.g1 - sources.g1) / sources.sigg) ** 2
-    chi2g = ((source_clone.g2 - sources.g2) / sources.sigg) ** 2
+        x=sources.x, y=sources.y,
+        e1=np.zeros_like(sources.e1), e2=np.zeros_like(sources.e2),
+        f1=np.zeros_like(sources.f1), f2=np.zeros_like(sources.f2),
+        g1=np.zeros_like(sources.g1), g2=np.zeros_like(sources.g2),
+        sigs=sources.sigs, sigf=sources.sigf, sigg=sources.sigg
+    )
 
-    # Assemble chi^2 values by signal type, applying the use_flags
-    shear_chi2 = (chi1e + chi2e) * use_shear #Check whether this run is using shear
-    flexion_chi2 = (chi1f + chi2f) * use_flexion #Check whether this run is using flexion
-    g_flexion_chi2 = (chi1g + chi2g) * use_g_flexion #Check whether this run is using g_flexion
-    chi2 = np.sum(shear_chi2 + flexion_chi2 + g_flexion_chi2) 
+    # Apply lensing effects to the cloned source
+    source_clone.apply_SIS_lensing(lenses)
 
-    penalty = 0
-    
-    for eR in lenses.te:
-        penalty += eR_penalty_function(eR)
-    
-    return chi2 #+ penalty
+    # Calculate chi-squared for each lensing signal component
+    chi_squared_components = {
+        'shear': ((source_clone.e1 - sources.e1) ** 2 + (source_clone.e2 - sources.e2) ** 2) / sources.sigs**2,
+        'flexion': ((source_clone.f1 - sources.f1) ** 2 + (source_clone.f2 - sources.f2) ** 2) / sources.sigf**2,
+        'g_flexion': ((source_clone.g1 - sources.g1) ** 2 + (source_clone.g2 - sources.g2) ** 2) / sources.sigg**2
+    }
+
+    # Sum the chi-squared values, considering only the enabled lensing effects
+    total_chi_squared = 0
+    if use_shear:
+        total_chi_squared += np.sum(chi_squared_components['shear'])
+    if use_flexion:
+        total_chi_squared += np.sum(chi_squared_components['flexion'])
+    if use_g_flexion:
+        total_chi_squared += np.sum(chi_squared_components['g_flexion'])
+
+    # Calculate and add penalties for the lenses
+    penalty = sum(eR_penalty_function(eR) for eR in lenses.te)
+
+    # Return the total chi-squared including penalties
+    return total_chi_squared + penalty
 
 
 # ------------------------------
@@ -384,4 +400,9 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
         print_step_info(flags, "After Final Minimization:", lenses, reducedchi2)
 
+    # No matter what signal combination was used, return a chi2 using all signals
+    # This is because the final fit should be the best possible fit
+
+    reducedchi2 = lenses.update_chi2_values(sources, [True, True, True])
+    
     return lenses, reducedchi2

@@ -10,6 +10,7 @@ import pickle
 from multiprocessing import Pool
 import time
 import os
+import matplotlib as mpl
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
@@ -503,7 +504,7 @@ def build_mass_correlation_plot_errors(ID_file, results_file, plot_name):
         ax[i].legend()
         ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
         ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass, mass_values)[0, 1]))
+        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass, mass)[0, 1]))
 
     fig.suptitle('Mass Correlation')
     fig.tight_layout()
@@ -511,6 +512,76 @@ def build_mass_correlation_plot_errors(ID_file, results_file, plot_name):
     # plt.show()
 
 
+def build_chi2_plot(file_name, ID_file, test_number):
+    IDs = []
+    true_mass = []
+    with open(ID_file, 'r') as f:
+        lines = f.readlines()[1:]
+        for line in lines:
+            ID = line.split(',')[0]
+            mass = line.split(',')[1]
+            IDs.append(int(ID))
+            true_mass.append(float(mass))
+    
+    # Open the results file and read in the data
+    results = pd.read_csv(file_name)
+    trial_IDs = results['ID'].values
+    # Get the mass values
+    mass_all_signals = results[' Mass_all_signals'].values
+    mass_gamma_f = results[' Mass_gamma_F'].values
+    mass_f_g = results[' Mass_F_G'].values
+    mass_gamma_g = results[' Mass_gamma_G'].values
+    mass_values = [mass_all_signals, mass_gamma_f, mass_f_g, mass_gamma_g]
+    # Get the chi2 values
+    chi2_all_signals = results[' Chi2_all_signals'].values
+    chi2_gamma_f = results[' Chi2_gamma_F'].values
+    chi2_f_g = results[' Chi2_F_G'].values
+    chi2_gamma_g = results[' Chi2_gamma_G'].values
+    chi2_values = [chi2_all_signals, chi2_gamma_f, chi2_f_g, chi2_gamma_g]
+    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
+
+    # Now get the true mass for each cluster
+    true_mass_trials = []
+    for ID in trial_IDs:
+        # Get the mass where ID matches the ID in the ID file
+        true_mass_trials.append(true_mass[IDs.index(ID)])
+
+    # Plot the results for each signal combination
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+    for i in range(4):
+        ax[i].scatter(true_mass_trials, chi2_values[i], s=10, color='black')
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
+        ax[i].set_ylabel(r'$\chi^2$')
+        ax[i].set_title('Signal Combination: {}'.format(signals[i]))
+    
+    fig.tight_layout()
+    fig.savefig('Images/chi2_plot_{}.png'.format(test_number))
+
+    # Now, plot chi2 against the 'correlation' between the true mass and the inferred mass
+    # This tells us the relationship between a good fit and the accuracy of the mass
+
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+
+    
+    for i in range(4):
+        # Set alpha to be 0.5 to make the points semi-transparent
+        # UNLESS the chi2 value is less than 5, in which case set alpha to 1
+        ax[i].scatter(mass_values[i] / true_mass_trials, chi2_values[i], s=10, color='black')
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+        ax[i].set_xlabel(r'$M_{\rm inferred} / M_{\rm true}$')
+        ax[i].set_ylabel(r'$\chi^2$')
+        ax[i].set_title('Signal Combination: {}'.format(signals[i]))
+    
+
+    fig.tight_layout()
+    fig.savefig('Images/mass_correlation_chi2_{}.png'.format(test_number))
+
+    plt.show()
 
 # --------------------------------------------
 # MDARK Processing Functions
@@ -651,13 +722,13 @@ def build_lensing_field(halos, z, Nsource = None):
     # Center the lenses at (0, 0)
     # This is a necessary step for the pipeline
     # Let the centroid be the location of the most massive halo
-    # Offset by a small amount, so that we are looking at the
-    # center of the cluster, but not directly at the most massive halo
+    # This will be where we expect to see the most light, which
+    # means it will be where observations are centered
 
     largest_halo = np.argmax(lenses.mass)
     centroid = [lenses.x[largest_halo], lenses.y[largest_halo]]
-    lenses.x -= centroid[0] + np.random.uniform(-20, 20)
-    lenses.y -= centroid[1] + np.random.uniform(-20, 20)
+    lenses.x -= centroid[0] 
+    lenses.y -= centroid[1] 
 
     xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
     
@@ -1022,84 +1093,6 @@ def GOF_correlation_coefficient(test_number):
     plt.show()
 
 
-def analyze_chi2_file(ID_file, result_file, test_num):
-    # Given a result file, analyze the chi2 values
-    # Read in the chi2 values
-    data = pd.read_csv(result_file)
-    ID_data = pd.read_csv(ID_file)
-
-    IDs_from_file = ID_data['ID'].values
-    IDs_from_data = data['ID'].values
-    true_mass = ID_data[' Mass'].values
-
-    # Create a list, called mass
-    # This should have the same length as the chi2 values, and contain the true mass of the cluster
-    # This will allow us to plot the chi2 values as a function of mass
-    mass = []
-
-    for ID in IDs_from_data:
-        mass.append(true_mass[IDs_from_file == ID])
-    
-    all_signals_chi2 = data[' Chi2_all_signals'].values
-    gamma_f_chi2 = data[' Chi2_gamma_F'].values
-    f_g_chi2 = data[' Chi2_F_G'].values
-    gamma_g_chi2 = data[' Chi2_gamma_G'].values
-            
-    signal_choices = [
-        'All Signals',
-        'Shear and Flexion',
-        'Flexion and G-Flexion',
-        'Shear and G-Flexion'
-    ]
-
-    # Now plot these distributions
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    ax = ax.flatten()
-
-    signal_chi2 = [all_signals_chi2, gamma_f_chi2, f_g_chi2, gamma_g_chi2]
-
-    for i in range(4):
-        # Remove outliers
-        signal_chi2[i] = np.array(signal_chi2[i])
-        # signal_chi2[i] = signal_chi2[i][signal_chi2[i] < 100]
-        fancy_hist(signal_chi2[i], bins=1000, ax=ax[i], color='black', histtype='step', label='Median = {}'.format(np.median(signal_chi2[i])))
-        ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
-        ax[i].set_xlabel(r'$\chi^2$')
-        ax[i].set_ylabel('Number of Clusters')
-        # ax[i].set_xlim([0, 100])
-        ax[i].vlines(5, 0, 100, color='red', linestyle='--', label='Good Fit Threshold: 5')
-        ax[i].legend()
-        ax[i].set_title('{}'.format(signal_choices[i]) + ' Chi2 Distribution \n' + r'{}% of fits have $\chi^2$ < 5'.format(np.round(np.sum(np.array(signal_chi2[i]) < 5) / len(signal_chi2[i]) * 100, 2)))
-    
-    fig.tight_layout()
-    plt.savefig('Images/MDARK/Chi2_Distributions_Signal_{}.png'.format(test_num))
-
-    # Now, let's look at the distribution of chi2 scores for each cluster
-    # Each ID will have appear multiple times in the dataset - plot every chi2 score
-    # Plot as a function of mass (scatter plot)
-    # Distinguish the different signals with different colors
-    # Also plot the chi2 threshold
-
-    fig, ax = plt.subplots(figsize=(10, 10))
-    colors = ['red', 'blue', 'green', 'purple']
-    for i in range(4):
-        ax.scatter(mass, signal_chi2[i], color = colors[i], alpha=0.5)
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    ax.set_xlabel(r'$M_{200} [M_{\odot}]$')
-    ax.set_ylabel(r'$\chi^2$')
-    ax.set_title('Chi2 vs Mass for all Clusters')
-    # Add a line for the chi2 threshold
-    ax.hlines(5, np.min(mass), np.max(mass), color='black', linestyle='--', label='Good Fit Threshold: 5')
-    # Explain the color to signal mapping in the legend
-    handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, label=signal) for color, signal in zip(colors, signal_choices)]
-    ax.legend(handles=handles, title='Signal Combination')
-    fig.tight_layout()
-    plt.savefig('Images/MDARK/Chi2_vs_Mass_{}.png'.format(test_num))
-    plt.show()
-
-
 # --------------------------------------------
 # Main Functions
 # --------------------------------------------
@@ -1116,28 +1109,21 @@ if __name__ == '__main__':
     ID_file = test_dir + '/ID_file_{}.csv'.format(test_number)
     result_file = test_dir + '/results_{}.csv'.format(test_number)
     plot_name = 'Images/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
-    chi2_file = test_dir + '/chi2_{}.csv'.format(test_number)
 
     #Check that the ID file exists - if not, create the directory and build the test set
     if not os.path.exists(ID_file):
         os.makedirs('Data/MDARK_Test/Test{}'.format(test_number))
         build_test_set(30, z_chosen, ID_file)
 
-    run_test_parallel(ID_file, result_file, z_chosen, 10)
+    # run_test_parallel(ID_file, result_file, z_chosen, 1)
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
-    build_mass_correlation_plot_errors(ID_file, result_file, plot_name)
-    analyze_chi2_file(ID_file, result_file, test_number)
+    # build_mass_correlation_plot_errors(ID_file, result_file, plot_name)
+    # build_chi2_plot(result_file, ID_file, test_number)
 
-    raise ValueError('Done!')
+    # raise ValueError('Done!')
 
     # I'd like to examine the actual quality of these tests
-
-    ID_file = 'Data/MDARK_Test/Test10/ID_file_10.csv'
-    ID_data = pd.read_csv(ID_file)
-    ID = ID_data['ID'].sample(n=1).values[0]
-    halos = find_halos(int(ID), zs[0])
-    halos, sources, xmax = build_lensing_field(halos, zs[0])
 
     def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=None, legend=True):
         """Private helper function to plot the results of lensing reconstruction."""
@@ -1159,8 +1145,16 @@ if __name__ == '__main__':
             ax.set_xlim(-xmax, xmax)
             ax.set_ylim(-xmax, xmax)
         ax.set_aspect('equal')
-        ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
+        if title is not None:
+            ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
 
+    ID_file = 'Data/MDARK_Test/Test13/ID_file_13.csv'
+    # Choose a random cluster ID from the ID file
+    IDs = pd.read_csv(ID_file)['ID'].values
+    ID = np.random.choice(IDs)
+
+    halos = find_halos(int(ID), zs[0])
+    halos, sources, xmax = build_lensing_field(halos, zs[0])
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
@@ -1183,6 +1177,7 @@ if __name__ == '__main__':
     _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
 
     # Step 4: Merge lenses that are too close to each other
+    start = time.time()
     ns = len(sources.x) / (np.pi * xmax**2)
     merger_threshold = 1/np.sqrt(ns)
     lenses.merge_close_lenses(merger_threshold=merger_threshold)
@@ -1209,4 +1204,38 @@ if __name__ == '__main__':
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
     plt.savefig('Images/MDARK/pipeline_visualization/ID_{}.png'.format(ID))
+    # plt.show()
+
+    # Now lets create a lens object that perfectly matches the true lenses
+    source_redshift = 1
+    distance_lens = cosmo.angular_diameter_distance(zs[0]).to(u.meter)
+    distance_source = cosmo.angular_diameter_distance(source_redshift).to(u.meter)
+    distance_lens_source = cosmo.angular_diameter_distance_z1z2(zs[0], source_redshift).to(u.meter)
+    distance_lens = distance_lens.value
+    distance_source = distance_source.value
+    distance_lens_source = distance_lens_source.value
+
+    rho_c = cosmo.critical_density(zs[0]).to(u.kg / u.m**3)
+    rho_c = rho_c.value
+    true_eR = ((2 * np.pi * G) / c**2) * (distance_lens_source / distance_source) * (800 * np.pi * rho_c / 3)**(1/3) * (halos.mass * M_solar)**(2/3)
+    # Convert to arcseconds from radians
+    true_eR = true_eR * 206265
+    print('True Einstein Radii: {}'.format(true_eR))
+    
+    perfect_lens_fit = pipeline.Lens(halos.x, halos.y, true_eR, np.zeros_like(true_eR))
+    perfect_lens_fit.update_chi2_values(sources, use_flags)
+    reducedchi2 = perfect_lens_fit.update_chi2_values(sources, use_flags)
+    print('Reduced chi2 for perfect fit: {}'.format(reducedchi2))
+    # Plot the perfect fit
+    fig, ax = plt.subplots()
+    _plot_results(xmax, perfect_lens_fit, sources, halos, reducedchi2, None, ax=ax)
+
+    # Get the mass of the perfect fit
+    extent = [-xmax, xmax, -xmax, xmax]
+    _, _, kappa = utils.calculate_kappa(perfect_lens_fit, extent, 5)
+    mass = utils.calculate_mass(kappa, zs[0], 0.5, 1)
+    
+    plt.suptitle('chi2 = {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(reducedchi2, np.sum(halos.mass), mass))
+    plt.savefig('Images/MDARK/pipeline_visualization/Perfect_Fit_{}.png'.format(ID))
+
     plt.show()
