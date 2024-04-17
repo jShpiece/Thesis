@@ -45,34 +45,51 @@ class Source:
 
 
     def apply_SIS_lensing(self, lenses):
-        # Apply the lensing effects of a set of lenses to the sources
-        # Model the lenses as Singular Isothermal Spheres (SIS)
-        # Then the primary parameter is the Einstein radii of the lenses
+        """
+        Apply the lensing effects to the source using the Singular Isothermal Sphere (SIS) model. 
+        This model primarily utilizes the Einstein radii of each lens to determine its effect.
 
-        if type(lenses.x) is not np.ndarray:
-            lenses.x = np.array([lenses.x])
-            lenses.y = np.array([lenses.y])
-            lenses.te = np.array([lenses.te])
+        Parameters:
+        - lenses: An object containing the lens properties (x, y, Einstein radii 'te').
+                Expected to be arrays but can handle single values.
+        """
+        
+        # Convert lens properties to numpy arrays of at least one dimension, ensuring floating point type
+        lenses.x = np.array(lenses.x, ndmin=1, dtype=float)
+        lenses.y = np.array(lenses.y, ndmin=1, dtype=float)
+        lenses.te = np.array(lenses.te, ndmin=1, dtype=float)
 
-        for i in range(len(lenses.x)):
-            dx = self.x - lenses.x[i]
-            dy = self.y - lenses.y[i]
+        # Ensure the source properties are also of float type to handle the results of division and multiplication
+        self.e1 = self.e1.astype(float)
+        self.e2 = self.e2.astype(float)
+        self.f1 = self.f1.astype(float)
+        self.f2 = self.f2.astype(float)
+        self.g1 = self.g1.astype(float)
+        self.g2 = self.g2.astype(float)
+        
+        # Iterate over each lens to apply its effect
+        for lens_x, lens_y, einstein_radius in zip(lenses.x, lenses.y, lenses.te):
+            # Compute displacement from lens to source
+            dx = self.x - lens_x
+            dy = self.y - lens_y
             r = np.sqrt(dx**2 + dy**2)
+            
+            # Calculate trigonometric terms needed for lensing equations
+            cos_phi = dx / r
+            sin_phi = dy / r
+            cos2phi = cos_phi * cos_phi - sin_phi * sin_phi
+            sin2phi = 2 * cos_phi * sin_phi
+            cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
+            sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
+            
+            # Apply SIS lensing effects for ellipticity (e1, e2), flexion (f1, f2), and g-flexion (g1, g2)
+            self.e1 += -einstein_radius / (2 * r) * cos2phi
+            self.e2 += -einstein_radius / (2 * r) * sin2phi
+            self.f1 += -dx * einstein_radius / (2 * r**3)
+            self.f2 += -dy * einstein_radius / (2 * r**3)
+            self.g1 += (3 * einstein_radius) / (2 * r**2) * cos3phi
+            self.g2 += (3 * einstein_radius) / (2 * r**2) * sin3phi
 
-            cosphi = dx/r
-            sinphi = dy/r
-            cos2phi = cosphi*cosphi-sinphi*sinphi
-            sin2phi = 2*cosphi*sinphi
-            cos3phi = cosphi*cosphi*cosphi - 3*cosphi*sinphi*sinphi
-            sin3phi = 3*cosphi*cosphi*sinphi - sinphi*sinphi*sinphi
-
-            self.e1 += -lenses.te[i] / (2*r) * cos2phi
-            self.e2 += -lenses.te[i] / (2*r) * sin2phi
-            self.f1 += -dx*lenses.te[i] / (2*r*r*r)
-            self.f2 += -dy*lenses.te[i] / (2*r*r*r)
-            self.g1 += (3*lenses.te[i]) / (2*r*r) * cos3phi
-            self.g2 += (3*lenses.te[i]) / (2*r*r) * sin3phi
-    
     
     def apply_NFW_lensing(self, halos):
         # Apply the lensing effects of a set of halos to the sources
@@ -82,6 +99,14 @@ class Source:
         gamma1, gamma2 = halos.calc_shear_signal(self.x, self.y)
         flex1, flex2 = halos.calc_F_signal(self.x, self.y)
         gflex1, gflex2 = halos.calc_G_signal(self.x, self.y)
+
+        # Ensure the source properties are also of float type to handle the results of division and multiplication
+        self.e1 = self.e1.astype(float)
+        self.e2 = self.e2.astype(float)
+        self.f1 = self.f1.astype(float)
+        self.f2 = self.f2.astype(float)
+        self.g1 = self.g1.astype(float)
+        self.g2 = self.g2.astype(float)
 
         self.e1 += gamma1
         self.e2 += gamma2
@@ -316,7 +341,7 @@ def print_step_info(flags,message,lenses,reducedchi2):
 def chi2wrapper(guess, params):
     # Wrapper function for chi2 to allow for minimization for a single lens object
     lenses = Lens(guess[0], guess[1], guess[2], [0])
-    return calc_raw_chi2(params[0],lenses, params[1])
+    return calculate_chi_squared(params[0],lenses, params[1])
 
 
 def chi2wrapper2(guess, params):
@@ -326,7 +351,7 @@ def chi2wrapper2(guess, params):
     lenses = Lens(params[0], params[1], guess, np.empty_like(params[0]))
     dof = calc_degrees_of_freedom(params[2], lenses, params[3])
     # Return the reduced chi^2 value - 1, to be minimized
-    return np.abs(calc_raw_chi2(params[2],lenses, params[3]) / dof - 1)
+    return np.abs(calculate_chi_squared(params[2],lenses, params[3]) / dof - 1)
 
 
 # ------------------------------

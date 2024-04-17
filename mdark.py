@@ -10,7 +10,6 @@ import pickle
 from multiprocessing import Pool
 import time
 import os
-import matplotlib as mpl
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
@@ -24,6 +23,7 @@ c = 3 * 10**8 # Speed of light in m/s
 G = 6.674 * 10**-11 # Gravitational constant in m^3/kg/s^2
 h = 0.7 # Hubble constant
 M_solar = 1.989 * 10**30 # Solar mass in kg
+z_source = 0.8 # Redshift of the source galaxies
 
 
 class Halo:
@@ -81,7 +81,6 @@ class Halo:
         r200, r200_arcsec = self.calc_R200()
         rs = r200 / self.c # In meters
 
-        z_source = 0.5
         # z_source gives the redshift of the source galaxies, redshift of the lens is self.redshift
         # Compute the angular diameter distances
         Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
@@ -108,12 +107,14 @@ class Halo:
                 term_2[val] = radial_term_2(x[val])
 
             shear_mag = kappa_s * term_2
-            phi = np.empty(len(dx))
-            for j in range(len(dx)):
-                phi[j] = np.arctan2(dy[j], dx[j])
 
-            shear_1[i] += np.sum(shear_mag * np.cos(2 * phi))
-            shear_2[i] += np.sum(shear_mag * np.sin(2 * phi))
+            cos_phi = dx / r
+            sin_phi = dy / r
+            cos2phi = cos_phi * cos_phi - sin_phi * sin_phi
+            sin2phi = 2 * cos_phi * sin_phi
+
+            shear_1[i] += np.sum(shear_mag * cos2phi)
+            shear_2[i] += np.sum(shear_mag * sin2phi)
 
         return shear_1, shear_2
 
@@ -129,13 +130,13 @@ class Halo:
                 # This is a special case, unlikely to occur in practice
                 sol = 1 - np.pi / 2
             elif x > 1:
-                sol = 1 - 2 / np.sqrt(x**2 - 1) * np.arctan(np.sqrt((x - 1) / (1 + x)))
+                sol = 1 - 2 / np.sqrt(x**2 - 1) * np.arctan(np.sqrt((x - 1) / (x + 1)))
             return sol
 
         def radial_term_3(x):
             # Compute the radial term - this is called h(x) in theory
             if x < 1:
-                sol = 1/x - (2 * x) / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
+                sol = (2 * x) / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x))) - 1 / x
             elif x == 1:
                 sol = 1 / 3
             elif x > 1:
@@ -145,7 +146,6 @@ class Halo:
         r200, r200_arcsec = self.calc_R200()
         rs = r200 / self.c # In meters
 
-        z_source = 0.5
         # z_source gives the redshift of the source galaxies, redshift of the lens is self.redshift
         # Compute the angular diameter distances
         Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
@@ -166,9 +166,6 @@ class Halo:
             dx = xs[i] - self.x
             dy = ys[i] - self.y
             r = (dx**2 + dy**2)**0.5
-            phi = np.empty(len(dx))
-            for j in range(len(dx)):
-                phi[j] = np.arctan2(dy[j], dx[j])
 
             x = r / (r200_arcsec / self.c) # In arcseconds
             term_1 = np.zeros(len(r))
@@ -179,8 +176,8 @@ class Halo:
 
             F_mag = (-2 * F_s / (x**2 - 1)**2) * (2 * x * term_1 - term_3) # In units of inverse radians
             F_mag /= 206265 # Convert to inverse arcseconds
-            f1[i] += np.sum(F_mag * np.cos(phi))
-            f2[i] += np.sum(F_mag * np.sin(phi))
+            f1[i] += np.sum(F_mag * dx / r)
+            f2[i] += np.sum(F_mag * dy / r)
 
         return f1, f2
 
@@ -202,7 +199,6 @@ class Halo:
         r200, r200_arcsec = self.calc_R200()
         rs = r200 / self.c
 
-        z_source = 0.5
         # z_source gives the redshift of the source galaxies, redshift of the lens is self.redshift
         # Compute the angular diameter distances
         Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
@@ -223,14 +219,18 @@ class Halo:
             dx = xs[i] - self.x
             dy = ys[i] - self.y
             r = (dx**2 + dy**2)**0.5
-            phi = np.empty(len(dx))
-            for j in range(len(dx)):
-                phi[j] = np.arctan2(dy[j], dx[j])
 
             x = r / (r200_arcsec / self.c)
             term_4 = np.zeros(len(r))
             for val in range(len(x)):
                 term_4[val] = radial_term_4(x[val])
+
+            cos_phi = dx / r
+            sin_phi = dy / r
+            cos2phi = cos_phi * cos_phi - sin_phi * sin_phi
+            sin2phi = 2 * cos_phi * sin_phi
+            cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
+            sin3phi = 3 * cos_phi * sin2phi - sin_phi * cos2phi
 
             log_term = np.empty(len(x))
             for val in range(len(x)):
@@ -239,8 +239,8 @@ class Halo:
             
             G_mag = 2 * F_s * (log_term + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)
             G_mag /= 206265 # Convert to inverse arcseconds 
-            g1[i] += np.sum(G_mag * np.cos(3 * phi))
-            g2[i] += np.sum(G_mag * np.sin(3 * phi))
+            g1[i] += np.sum(G_mag * cos3phi)
+            g2[i] += np.sum(G_mag * sin3phi)
         
         return g1, g2
 
@@ -717,7 +717,7 @@ def build_lensing_field(halos, z, Nsource = None):
     halos.x = x
     halos.y = y
 
-    lenses = halos # Placeholder for the lenses
+    # lenses = halos # Placeholder for the lenses
 
     # Center the lenses at (0, 0)
     # This is a necessary step for the pipeline
@@ -725,10 +725,26 @@ def build_lensing_field(halos, z, Nsource = None):
     # This will be where we expect to see the most light, which
     # means it will be where observations are centered
 
-    largest_halo = np.argmax(lenses.mass)
-    centroid = [lenses.x[largest_halo], lenses.y[largest_halo]]
-    lenses.x -= centroid[0] 
-    lenses.y -= centroid[1] 
+    largest_halo = np.argmax(halos.mass)
+    centroid = [halos.x[largest_halo], halos.y[largest_halo]]
+    # lenses.x -= centroid[0] 
+    # lenses.y -= centroid[1] 
+    
+    source_redshift = 0.8
+    distance_lens = cosmo.angular_diameter_distance(zs[0]).to(u.meter)
+    distance_source = cosmo.angular_diameter_distance(source_redshift).to(u.meter)
+    distance_lens_source = cosmo.angular_diameter_distance_z1z2(zs[0], source_redshift).to(u.meter)
+    distance_lens = distance_lens.value
+    distance_source = distance_source.value
+    distance_lens_source = distance_lens_source.value
+
+    rho_c = cosmo.critical_density(zs[0]).to(u.kg / u.m**3)
+    rho_c = rho_c.value
+    true_eR = ((2 * np.pi * G) / c**2) * (distance_lens_source / distance_source) * (800 * np.pi * rho_c / 3)**(1/3) * (halos.mass * M_solar)**(2/3)
+    # Convert to arcseconds from radians
+    true_eR = true_eR * 206265
+
+    lenses = pipeline.Lens(halos.x - centroid[0], halos.y - centroid[1], true_eR, 0)
 
     xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
     
@@ -742,7 +758,7 @@ def build_lensing_field(halos, z, Nsource = None):
     # Generate a set of background galaxies
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
+    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='SIS')
 
     return lenses, sources, xmax
 
@@ -1098,6 +1114,74 @@ def GOF_correlation_coefficient(test_number):
 # --------------------------------------------
 
 if __name__ == '__main__':
+    '''
+    xl = np.array([10])
+    yl = np.array([0])
+    mass = 1e14
+    concentration = 5
+
+    halo = Halo(xl, yl, 0, concentration, mass, 0.194)
+
+    source_redshift = 0.5
+    distance_lens = cosmo.angular_diameter_distance(0.194).to(u.meter)
+    distance_source = cosmo.angular_diameter_distance(source_redshift).to(u.meter)
+    distance_lens_source = cosmo.angular_diameter_distance_z1z2(0.194, source_redshift).to(u.meter)
+    distance_lens = distance_lens.value
+    distance_source = distance_source.value
+    distance_lens_source = distance_lens_source.value
+
+    rho_c = cosmo.critical_density(0.194).to(u.kg / u.m**3)
+    rho_c = rho_c.value
+    true_eR = ((2 * np.pi * G) / c**2) * (distance_lens_source / distance_source) * (800 * np.pi * rho_c / 3)**(1/3) * (mass * M_solar)**(2/3)
+    # Convert to arcseconds from radians
+    true_eR = true_eR * 206265
+
+    lens = pipeline.Lens(xl, yl, true_eR, [0])
+
+    xs = [0]
+    ys = [0]
+
+    source_sis = pipeline.Source(xs, ys, 
+                                np.zeros_like(xs), np.zeros_like(xs), 
+                                np.zeros_like(xs), np.zeros_like(xs), 
+                                np.zeros_like(xs), np.zeros_like(xs), 
+                                np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
+    source_nfw = pipeline.Source(xs, ys,
+                                np.zeros_like(xs), np.zeros_like(xs),
+                                np.zeros_like(xs), np.zeros_like(xs),
+                                np.zeros_like(xs), np.zeros_like(xs),
+                                np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
+    source_sis.apply_SIS_lensing(lens)
+    source_nfw.apply_NFW_lensing(halo)
+
+    print(source_sis.e1, source_nfw.e1)
+    print(source_sis.f1, source_nfw.f1)
+    print(source_sis.g1, source_nfw.g1)
+
+    # Compare the signals
+    fig, ax = plt.subplots(1, 3, figsize=(10, 5))
+    ax[0].scatter(source_sis.e1, source_sis.e2, color='red', label='SIS')
+    ax[0].scatter(source_nfw.e1, source_nfw.e2, color='blue', label='NFW')
+    ax[0].set_xlabel('e1')
+    ax[0].set_ylabel('e2')
+    ax[0].legend()
+
+    ax[1].scatter(source_sis.f1, source_sis.f2, color='red', label='SIS')
+    ax[1].scatter(source_nfw.f1, source_nfw.f2, color='blue', label='NFW')
+    ax[1].set_xlabel('f1')
+    ax[1].set_ylabel('f2')
+    ax[1].legend()
+
+    ax[2].scatter(source_sis.g1, source_sis.g2, color='red', label='SIS')
+    ax[2].scatter(source_nfw.g1, source_nfw.g2, color='blue', label='NFW')
+    ax[2].set_xlabel('g1')
+    ax[2].set_ylabel('g2')
+    ax[2].legend()
+
+    fig.tight_layout()
+    plt.show()
+    '''
+
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
     z_chosen = zs[0]
@@ -1154,7 +1238,7 @@ if __name__ == '__main__':
     ID = np.random.choice(IDs)
 
     halos = find_halos(int(ID), zs[0])
-    halos, sources, xmax = build_lensing_field(halos, zs[0])
+    lenses, sources, xmax = build_lensing_field(halos, zs[0])
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
@@ -1207,7 +1291,7 @@ if __name__ == '__main__':
     # plt.show()
 
     # Now lets create a lens object that perfectly matches the true lenses
-    source_redshift = 1
+    source_redshift = 0.8
     distance_lens = cosmo.angular_diameter_distance(zs[0]).to(u.meter)
     distance_source = cosmo.angular_diameter_distance(source_redshift).to(u.meter)
     distance_lens_source = cosmo.angular_diameter_distance_z1z2(zs[0], source_redshift).to(u.meter)
