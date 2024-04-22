@@ -37,11 +37,10 @@ class Halo:
     
 
     def calc_R200(self):
-        z = self.redshift
-        rho_c = cosmo.critical_density(z).to(u.kg / u.m**3).value
+        rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
         R200 = (3 / (800 * np.pi) * (self.mass * M_solar / rho_c))**(1/3) # In meters
         # Convert to arcseconds
-        R200_arcsec = (R200 / cosmo.angular_diameter_distance(z).to(u.meter).value) * 206265
+        R200_arcsec = (R200 / cosmo.angular_diameter_distance(self.redshift).to(u.meter).value) * 206265
         return R200, R200_arcsec
 
 
@@ -50,6 +49,14 @@ class Halo:
         delta_c = (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - self.concentration / (1 + self.concentration))
         return delta_c
 
+
+    def calc_corresponding_einstein_radius(self, source_redshift):
+        # Compute the Einstein radius for a given source redshift
+        Ds = cosmo.angular_diameter_distance(source_redshift).to(u.meter).value
+        Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, source_redshift).to(u.meter).value
+        eR = (2 * np.pi * G / c**2) * (Dls / Ds) * (800 * np.pi * self.mass * M_solar / (3))**(1/3) * (self.mass)**(2/3)
+        eR = eR * 206265 # Convert to arcseconds
+        return eR
 
     def calc_shear_signal(self, xs, ys):
         # Compute the NFW shear signal at a given position (xs, ys), for the entire set of halos
@@ -110,7 +117,6 @@ class Halo:
 
             shear_1[i] -= np.sum(shear_mag * cos2phi)
             shear_2[i] -= np.sum(shear_mag * sin2phi)
-        
 
         return shear_1, shear_2
 
@@ -142,7 +148,6 @@ class Halo:
         r200, r200_arcsec = self.calc_R200()
         rs = r200 / self.concentration # In meters
 
-        # z_source gives the redshift of the source galaxies, redshift of the lens is self.redshift
         # Compute the angular diameter distances
         Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
         Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
@@ -155,10 +160,12 @@ class Halo:
         kappa_s = rho_s * rs / sigma_c
         F_s = kappa_s * Dl / rs
 
+        # Initialize flexion signals
         f1 = np.zeros(len(xs))
         f2 = np.zeros(len(xs))
 
         for i in range(len(xs)):
+            # Compute flexion signal at each position
             dx = xs[i] - self.x
             dy = ys[i] - self.y
             r = (dx**2 + dy**2)**0.5
@@ -172,6 +179,7 @@ class Halo:
 
             F_mag = (-2 * F_s / (x**2 - 1)**2) * (2 * x * term_1 - term_3) # In units of inverse radians
             F_mag /= 206265 # Convert to inverse arcseconds
+
             f1[i] += np.sum(F_mag * dx / r)
             f2[i] += np.sum(F_mag * dy / r)
 
@@ -195,7 +203,6 @@ class Halo:
         r200, r200_arcsec = self.calc_R200()
         rs = r200 / self.concentration
 
-        # z_source gives the redshift of the source galaxies, redshift of the lens is self.redshift
         # Compute the angular diameter distances
         Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
         Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
@@ -226,15 +233,16 @@ class Halo:
             cos2phi = cos_phi * cos_phi - sin_phi * sin_phi
             sin2phi = 2 * cos_phi * sin_phi
             cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
-            sin3phi = 3 * cos_phi * sin2phi - sin_phi * cos2phi
+            sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
 
             log_term = np.empty(len(x))
             for val in range(len(x)):
                 # Quick hack to avoid error in log term
-                log_term[val] = 8 / x[val]**3 * np.log(x[val] / 2)
+                log_term[val] = (8 / x[val]**3) * np.log(x[val] / 2)
             
             G_mag = 2 * F_s * (log_term + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)
             G_mag /= 206265 # Convert to inverse arcseconds 
+
             g1[i] += np.sum(G_mag * cos3phi)
             g2[i] += np.sum(G_mag * sin3phi)
         
@@ -606,47 +614,37 @@ def count_clusters(z):
     print('Number of clusters with mass > 10^15 M_sun: {}'.format(count3))
 
 
-def find_halos(ID, z):
-    # Given a cluster ID, locate the cluster in the data
-    # and return the relevant information
-    # This needs to be fast 
-
-    file = dir + 'Halos_{}.MDARK'.format(z)
-    # Find all the halos with the given ID
-
-    # Create an empty DataFrame to store the results
-    filtered_data = pd.DataFrame()
-
-    # Read the CSV file in chunks
-    for chunk in pd.read_csv(file, chunksize=10000):
-        # Filter the chunk for the specified ObjectID
-        filtered_chunk = chunk[chunk['MainHaloID'] == ID]
-        filtered_data = pd.concat([filtered_data, filtered_chunk])
-
-    # Now we have the correct objects, we can return the relevant information
-    xhalo = filtered_data['x'].values
-    yhalo = filtered_data['y'].values
-    zhalo = filtered_data['z'].values
-    chalo = filtered_data['concentration_NFW'].values
-    masshalo = filtered_data['HaloMass'].values
-    halo_type = filtered_data['GalaxyType'].values
-
-    # Remove any halos of type 2 - these are 'orphan' halos that could not be properly tracked
-    xhalo = xhalo[halo_type != 2]
-    yhalo = yhalo[halo_type != 2]
-    zhalo = zhalo[halo_type != 2]
-    chalo = chalo[halo_type != 2]
-    masshalo = masshalo[halo_type != 2]
-
-    # Set these to be numpy arrays
-    xhalo = np.array(xhalo)
-    yhalo = np.array(yhalo)
-    zhalo = np.array(zhalo)
-    chalo = np.array(chalo)
-    masshalo = np.array(masshalo)
-
-    halos = Halo(xhalo, yhalo, zhalo, chalo, masshalo, z)
-
+def find_halos(ids, z):
+    # Read a large data file and filter rows based on multiple IDs, creating a separate Halo object for each ID
+    
+    file_path = f'{dir}Halos_{z}.MDARK'  # Construct the file path
+    cols_to_use = ['MainHaloID', 'x', 'y', 'z', 'concentration_NFW', 'HaloMass', 'GalaxyType']
+    
+    # Read the file in chunks, filtering by IDs
+    iterator = pd.read_csv(file_path, chunksize=10000, usecols=cols_to_use)
+    
+    # Dictionary to hold Halo objects, keyed by ID
+    halos = {}
+    
+    for chunk in iterator:
+        for id in ids:
+            # Filter the chunk for the current ID and exclude type 2 halos
+            relevant_data = chunk[(chunk['MainHaloID'] == id) & (chunk['GalaxyType'] != 2)]
+            
+            if relevant_data.empty:
+                print(f'No data found for ID {id}')
+                continue
+            
+            # Prepare data for the Halo object
+            xhalo = relevant_data['x'].to_numpy()
+            yhalo = relevant_data['y'].to_numpy()
+            zhalo = relevant_data['z'].to_numpy()
+            chalo = relevant_data['concentration_NFW'].to_numpy()
+            masshalo = relevant_data['HaloMass'].to_numpy()
+            
+            # Create a Halo object and add it to the dictionary
+            halos[id] = Halo(xhalo, yhalo, zhalo, chalo, masshalo, z)
+    
     return halos
 
 
@@ -789,60 +787,6 @@ def make_catalogue(sources, name):
     f.close()
 
 
-def run_test(ID_file, result_file, z):
-    IDs = []
-    # Load the list of IDs - this is a csv file
-    with open(ID_file, 'r') as f:
-        lines = f.readlines() # Read the lines
-        # Skip the first line
-        lines = lines[1:] 
-        for line in lines:
-            ID = line.split(',')[0]
-            IDs.append(ID)
-
-    # Create a CSV file to hold the results
-    with open(result_file, 'w') as f:
-        f.write('ID, True Mass, Mass_all_signals, Mass_gamma_F, Mass_F_G, Mass_gamma_G, N_halos, Nfound_all_signals, Nfound_gamma_F, Nfound_F_G, Nfound_gamma_G\n')
-    f.close()
-
-    use_all_signals = [True, True, True] # Use all signals
-    shear_flex = [True, True, False] # Use shear and flexion
-    all_flex = [False, True, True] # Use flexion and g-flexion
-    global_signals = [True, False, True] # Use shear and g-flexion (global signals)
-    signal_choices = [use_all_signals, shear_flex, all_flex, global_signals]
-
-    for ID in IDs:
-        label = 'Data/MDARK_Test/{}_test'.format(ID)
-
-        halos = find_halos(int(ID), z)
-        true_mass = np.sum(halos.mass)
-
-        halos, sources, xmax = build_lensing_field(halos, z)
-        masses = []
-        candidate_number = []
-
-        for signal_choice in signal_choices:
-            # Run the pipeline with each possible choice of signals
-            candidate_lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
-            mass = compute_masses(candidate_lenses, z) # Compute the mass of the resulting system
-            masses.append(mass)
-            candidate_number.append(len(candidate_lenses.x))
-
-        # Save the results to a file
-        with open(result_file, 'a') as f:
-            f.write('{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}\n'.format(ID, true_mass, masses[0], masses[1], masses[2], masses[3], len(halos.mass), candidate_number[0], candidate_number[1], candidate_number[2], candidate_number[3]))
-        # Save the sources - these can be passed off to other pipelines for comparison
-        make_catalogue(sources, label+'_sources.csv')
-
-        # Also save the lenses - use pickle to save these objects
-        with open(label+'_halos.pkl', 'wb') as f:
-            pickle.dump(halos, f)
-        with open(label+'_candidate_lenses.pkl', 'wb') as f:
-            pickle.dump(candidate_lenses, f)
-
-    print('Done!')
-
-
 def run_single_test(args):
     ID, z, signal_choices, halos, sources, xmax = args
     # Run the pipeline for a single cluster, with a given set of signal choices
@@ -909,28 +853,29 @@ def run_test_parallel(ID_file, result_file, z, N_test):
         [True, False, True]
     ]
 
-    # Load the halos and sources
-    halo_objects = []
-    source_objects = []
-    xmax_values = []
+    # Build halos
+    halos = find_halos(IDs, z) # halos is a dictionary of Halo objects, keyed by ID
+    source_catalogue = {} # Dictionary to hold the source catalogues
+    xmax_values = [] # List to hold the maximum extent of each field
+
     for ID in IDs:
-        halo = find_halos(ID, z)
-        halo, source, xmax = build_lensing_field(halo, z)
+        # Build the lenses and sources
+        halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
 
         # Create a new source object, without noise
-        xs = source.x
-        ys = source.y
+        xs = sources.x
+        ys = sources.y
         clean_source = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
-        clean_source.apply_NFW_lensing(halo)
+        clean_source.apply_NFW_lensing(halos[ID])
 
-        halo_objects.append(halo)
-        source_objects.append(clean_source)
+        source_catalogue[ID] = clean_source
         xmax_values.append(xmax)
+
     
     print('Halo and Source objects loaded...')
 
     # Prepare the arguments for each task
-    tasks = [(ID, z, signal_choices, halo_objects[i], source_objects[i], xmax_values[i]) for i, ID in enumerate(IDs)]
+    tasks = [(ID, z, signal_choices, halos[ID], source_catalogue[ID], xmax_values[i]) for i, ID in enumerate(IDs)]
     # Repeat each task N_test times
     tasks = [task for task in tasks for _ in range(N_test)]
 
@@ -963,130 +908,6 @@ def compute_masses(candidate_lenses, z, xmax):
     _,_,kappa = utils.calculate_kappa(candidate_lenses, extent, 5)
     mass = utils.calculate_mass(kappa, z, 0.5, 1)
     return mass
-
-
-def goodness_of_fit_test(ID):
-    # Given a cluster ID, run the pipeline for many different source numbers, 
-    # recording the chi2 value and mass estimate for each run
-
-    z = 0.194
-    signal_choices = [
-        [True, True, True],
-        [True, True, False],
-        [False, True, True],
-        [True, False, True]
-    ]
-
-    labels = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
-
-    halos = find_halos(ID, z)
-    true_mass = np.sum(halos.mass)
-
-    Nsource_low = 100
-    Nsource_high = 1000
-    Nsources = np.logspace(np.log10(Nsource_low), np.log10(Nsource_high), 20).astype(int)
-    chi2_values = []
-    mass_values = []
-
-    halos, sources, xmax = build_lensing_field(halos, z, Nsource=Nsources[0])
-
-    for Nsource in Nsources:
-        # I don't need to recreate the halos each time, just the sources
-        sources = utils.createSources(halos, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
-        for signal_choice in signal_choices:
-            candidate_lenses, chi2 = pipeline.fit_lensing_field(sources, xmax, flags=False, use_flags=signal_choice)
-            mass = compute_masses(candidate_lenses, z, xmax)
-            chi2_values.append(chi2)
-            mass_values.append(mass)
-    
-    # There will be 4 chi2 and mass values for each source number
-    chi2_values = np.array(chi2_values).reshape(-1, 4)
-    mass_values = np.array(mass_values).reshape(-1, 4)
-
-    # Save this data to a file
-    with open('Data/MDARK_Test/Goodness_of_Fit_{}.csv'.format(ID), 'w') as f:
-        f.write('Nsources, chi2_all_signals, chi2_gamma_F, chi2_F_G, chi2_gamma_G, mass_all_signals, mass_gamma_F, mass_F_G, mass_gamma_G\n')
-        for i in range(len(Nsources)):
-            f.write('{}, {}, {}, {}, {}, {}, {}, {}, {}\n'.format(Nsources[i], chi2_values[i, 0], chi2_values[i, 1], chi2_values[i, 2], chi2_values[i, 3], mass_values[i, 0], mass_values[i, 1], mass_values[i, 2], mass_values[i, 3]))
-
-    # Create a plot of chi2 values and mass values
-    fig, ax = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
-    # plot the chi2 values, remembering their shape
-    for i in range(4):
-        ax[0].plot(Nsources, chi2_values[:, i], marker='o', label='{}'.format(labels[i]))
-    ax[0].set_xlabel('Number of Sources')
-    ax[0].set_ylabel(r'$\chi^2$')
-    ax[0].set_title(r'$\chi^2$ vs Number of Sources for Cluster ID {}'.format(ID))
-    ax[0].set_yscale('log')
-    ax[0].legend()
-
-    for i in range(4):
-        ax[1].plot(Nsources, np.abs(mass_values[:, i]), marker='o', label='{}'.format(labels[i]))
-    ax[1].set_xlabel('Number of Sources')
-    ax[1].set_ylabel(r'$M_{\odot}$')
-    ax[1].set_yscale('log')
-    ax[1].axhline(np.sum(true_mass), color='black', linestyle='--', label='True Mass')
-    ax[1].set_title(r'Mass Estimate vs Number of Sources for Cluster ID {}'.format(ID))
-    ax[1].legend()
-
-    fig.tight_layout()
-    plt.savefig('Images/MDARK/Goodness_of_Fit/{}.png'.format(ID))
-    plt.close
-
-
-def GOF_correlation_coefficient(test_number):
-    ID_file = 'Data/MDARK_Test/Test{}/ID_file_{}.csv'.format(test_number, test_number)
-    IDs = pd.read_csv(ID_file)['ID'].values
-    true_masses = pd.read_csv(ID_file)[' Mass'].values
-
-    Nsource_low = 100
-    Nsource_high = 1000
-    Nsources = np.logspace(np.log10(Nsource_low), np.log10(Nsource_high), 20).astype(int)
-    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
-
-    correlation_all_signals = []
-    correlation_gamma_f = []
-    correlation_f_g = []
-    correlation_gamma_g = []
-
-    for Nsource in Nsources:
-        true_mass = []
-        mass_all_signals = []
-        mass_gamma_f = []
-        mass_f_g = []
-        mass_gamma_g = []
-
-        for ID in IDs:
-            file = 'Data/MDARK_Test/Goodness_of_Fit/Goodness_of_Fit_{}.csv'.format(ID)
-            data = pd.read_csv(file)
-            ID_data = pd.read_csv(ID_file)
-            true_mass.append(ID_data[ID_data['ID'] == ID][' Mass'].values[0])
-
-            mass_all_signals.append(data[data['Nsources'] == Nsource][' mass_all_signals'].values[0])
-            mass_gamma_f.append(data[data['Nsources'] == Nsource][' mass_gamma_F'].values[0])
-            mass_f_g.append(data[data['Nsources'] == Nsource][' mass_F_G'].values[0])
-            mass_gamma_g.append(data[data['Nsources'] == Nsource][' mass_gamma_G'].values[0])
-        
-
-        correlation_all_signals.append(np.corrcoef(true_mass, mass_all_signals)[0, 1])
-        correlation_gamma_f.append(np.corrcoef(true_mass, mass_gamma_f)[0, 1])
-        correlation_f_g.append(np.corrcoef(true_mass, mass_f_g)[0, 1])
-        correlation_gamma_g.append(np.corrcoef(true_mass, mass_gamma_g)[0, 1])
-
-    # Plot the correlation coefficients
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    ax = ax.flatten()
-
-    correlations = [correlation_all_signals, correlation_gamma_f, correlation_f_g, correlation_gamma_g]
-    for i in range(4):
-        ax[i].plot(Nsources, correlations[i], marker='o')
-        ax[i].set_xlabel('Number of Sources')
-        ax[i].set_ylabel('Correlation Coefficient')
-        ax[i].set_title('{}'.format(signals[i]))
-
-    fig.tight_layout()
-    fig.savefig('Images/MDARK/Correlation_Coefficients_{}.png'.format(test_number))
-    plt.show()
 
 
 # --------------------------------------------
@@ -1149,10 +970,11 @@ if __name__ == '__main__':
     IDs = pd.read_csv(ID_file)['ID'].values
     # ID = np.random.choice(IDs)
 
+    halos = find_halos(int(ID), zs[0])
+
     for ID in IDs:
         # Load the halos
-        halos = find_halos(int(ID), zs[0])
-        lenses, sources, xmax = build_lensing_field(halos, zs[0])
+        lenses, sources, xmax = build_lensing_field(halos[ID], zs[0])
 
         # Arrange a plot with 6 subplots in 2 rows
         fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
@@ -1162,17 +984,17 @@ if __name__ == '__main__':
         # Step 1: Generate initial list of lenses from source guesses
         lenses = sources.generate_initial_guess()
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
+        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Initial Guesses', ax=axarr[0,0])
 
         # Step 2: Optimize guesses with local minimization
         lenses.optimize_lens_positions(sources, use_flags)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
+        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
 
         # Step 3: Filter out lenses that are too far from the source population
         lenses.filter_lens_positions(sources, xmax, threshold_distance=5)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
+        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
 
         # Step 4: Merge lenses that are too close to each other
         start = time.time()
@@ -1180,17 +1002,17 @@ if __name__ == '__main__':
         merger_threshold = 1/np.sqrt(ns)
         lenses.merge_close_lenses(merger_threshold=merger_threshold)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Merging', ax=axarr[1,0], legend=False)
+        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Merging', ax=axarr[1,0], legend=False)
 
         # Step 5: Iterative elimination
         lenses.iterative_elimination(sources, reducedchi2, use_flags)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Iterative Elimination', ax=axarr[1,1], legend=False)
+        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Iterative Elimination', ax=axarr[1,1], legend=False)
 
         # Step 6: Final minimization
         lenses.full_minimization(sources, use_flags)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
+        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
 
         # Compute mass
         extent = [-xmax, xmax, -xmax, xmax]
