@@ -401,21 +401,17 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     print_step_info(flags, "After Filtering:", lenses, reducedchi2)
 
-    # Merge lenses that are too close to each other
-    ns = len(sources.x) / (2 * xmax)**2
-    merger_threshold = (1 / np.sqrt(ns)) * 0.5
-    # If the merger threshold is too small, set it to 1
-    if merger_threshold < 1:
-        merger_threshold = 1
-    lenses.merge_close_lenses(merger_threshold=merger_threshold) #This is a placeholder value
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    print_step_info(flags, "After Merging:", lenses, reducedchi2)
-
     # Choose the 'lens_floor' lenses which gives the best reduced chi^2 value
     lenses.iterative_elimination(sources, reducedchi2, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     print_step_info(flags, "After Iterative Elimination:", lenses, reducedchi2)
 
+    # Merge lenses that are too close to each other
+    ns = len(sources.x) / (2 * xmax)**2
+    merger_threshold = (1 / np.sqrt(ns)) 
+    lenses.merge_close_lenses(merger_threshold=merger_threshold) #This is a placeholder value
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    print_step_info(flags, "After Merging:", lenses, reducedchi2)
 
     # Perform a final local minimization on the remaining lenses
     # NOTE - if the number of lenses is too large, this step can take a long time

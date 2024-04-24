@@ -54,9 +54,11 @@ class Halo:
         # Compute the Einstein radius for a given source redshift
         Ds = cosmo.angular_diameter_distance(source_redshift).to(u.meter).value
         Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, source_redshift).to(u.meter).value
-        eR = (2 * np.pi * G / c**2) * (Dls / Ds) * (800 * np.pi * self.mass * M_solar / (3))**(1/3) * (self.mass)**(2/3)
-        eR = eR * 206265 # Convert to arcseconds
+        rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
+        eR = (2 * np.pi * G / c**2) * (Dls / Ds) * (800 * np.pi * rho_c / 3)**(1/3) * (self.mass * M_solar)**(2/3)
+        eR *= 206265 # Convert to arcseconds
         return eR
+
 
     def calc_shear_signal(self, xs, ys):
         # Compute the NFW shear signal at a given position (xs, ys), for the entire set of halos
@@ -480,7 +482,7 @@ def build_mass_correlation_plot_errors(ID_file, results_file, plot_name):
         mass_values = []
         for j in range(4):
             mass_values.append(results[results['ID'] == int(IDs[i])][mass_columns[j]].values)
-        mass_values = np.array(mass_values)
+        mass_values = np.abs(np.array(mass_values))
         mass_val[i] = np.mean(mass_values, axis=1)
         mass_err[i] = np.std(mass_values, axis=1)
 
@@ -556,7 +558,7 @@ def build_chi2_plot(file_name, ID_file, test_number):
     for i in range(4):
         ax[i].scatter(true_mass_trials, chi2_values[i], s=10, color='black')
         ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
+        #ax[i].set_yscale('log')
         ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
         ax[i].set_ylabel(r'$\chi^2$')
         ax[i].set_title('Signal Combination: {}'.format(signals[i]))
@@ -576,7 +578,7 @@ def build_chi2_plot(file_name, ID_file, test_number):
         # UNLESS the chi2 value is less than 5, in which case set alpha to 1
         ax[i].scatter(mass_values[i] / true_mass_trials, chi2_values[i], s=10, color='black')
         ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
+        #ax[i].set_yscale('log')
         ax[i].set_xlabel(r'$M_{\rm inferred} / M_{\rm true}$')
         ax[i].set_ylabel(r'$\chi^2$')
         ax[i].set_title('Signal Combination: {}'.format(signals[i]))
@@ -615,36 +617,41 @@ def count_clusters(z):
 
 
 def find_halos(ids, z):
-    # Read a large data file and filter rows based on multiple IDs, creating a separate Halo object for each ID
+    # Read a large data file and filter rows based on multiple IDs, 
+    # creating a separate Halo object for each ID
     
     file_path = f'{dir}Halos_{z}.MDARK'  # Construct the file path
     cols_to_use = ['MainHaloID', 'x', 'y', 'z', 'concentration_NFW', 'HaloMass', 'GalaxyType']
     
-    # Read the file in chunks, filtering by IDs
+    # Dictionary to hold accumulated data for each ID
+    data_accumulator = {id: [] for id in ids}
+    
+    # Read the file in chunks
     iterator = pd.read_csv(file_path, chunksize=10000, usecols=cols_to_use)
+    for chunk in iterator:
+        filtered_chunk = chunk[chunk['MainHaloID'].isin(ids) & (chunk['GalaxyType'] != 2)]
+        for id in ids:
+            # Accumulate data for each ID
+            data_accumulator[id].append(filtered_chunk[filtered_chunk['MainHaloID'] == id])
     
     # Dictionary to hold Halo objects, keyed by ID
     halos = {}
     
-    for chunk in iterator:
-        for id in ids:
-            # Filter the chunk for the current ID and exclude type 2 halos
-            relevant_data = chunk[(chunk['MainHaloID'] == id) & (chunk['GalaxyType'] != 2)]
+    # Create Halo objects after all chunks have been processed
+    for id, data_list in data_accumulator.items():
+        if data_list:
+            complete_data = pd.concat(data_list)
+            xhalo = complete_data['x'].to_numpy()
+            yhalo = complete_data['y'].to_numpy()
+            zhalo = complete_data['z'].to_numpy()
+            chalo = complete_data['concentration_NFW'].to_numpy()
+            masshalo = complete_data['HaloMass'].to_numpy()
             
-            if relevant_data.empty:
-                print(f'No data found for ID {id}')
-                continue
-            
-            # Prepare data for the Halo object
-            xhalo = relevant_data['x'].to_numpy()
-            yhalo = relevant_data['y'].to_numpy()
-            zhalo = relevant_data['z'].to_numpy()
-            chalo = relevant_data['concentration_NFW'].to_numpy()
-            masshalo = relevant_data['HaloMass'].to_numpy()
-            
-            # Create a Halo object and add it to the dictionary
+            # Create and store the Halo object
             halos[id] = Halo(xhalo, yhalo, zhalo, chalo, masshalo, z)
-    
+        else:
+            print(f'No data found for ID {id}')
+
     return halos
 
 
@@ -835,7 +842,7 @@ def run_single_test(args):
     return results
 
 
-def run_test_parallel(ID_file, result_file, z, N_test):
+def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
     IDs = []
 
     with open(ID_file, 'r') as f:
@@ -866,7 +873,14 @@ def run_test_parallel(ID_file, result_file, z, N_test):
         xs = sources.x
         ys = sources.y
         clean_source = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
-        clean_source.apply_NFW_lensing(halos[ID])
+        if lensing_type == 'NFW':
+            clean_source.apply_NFW_lensing(halos[ID])
+        elif lensing_type == 'SIS':
+            tE = halos[ID].calc_corresponding_einstein_radius(z_source)
+            lens = pipeline.Lens(halos[ID].x, halos[ID].y, tE, 0)
+            clean_source.apply_SIS_lensing(lens)
+        else:
+            raise ValueError('Invalid lensing type specified')
 
         source_catalogue[ID] = clean_source
         xmax_values.append(xmax)
@@ -919,6 +933,7 @@ if __name__ == '__main__':
     zs = [0.194, 0.221, 0.248, 0.276]
     z_chosen = zs[0]
     start = time.time()
+    Ntrials = 1 # Number of trials to run for each cluster in the test set
 
     test_number = 13
     test_dir = 'Data/MDARK_Test/Test{}'.format(test_number)
@@ -932,11 +947,11 @@ if __name__ == '__main__':
         os.makedirs('Data/MDARK_Test/Test{}'.format(test_number))
         build_test_set(30, z_chosen, ID_file)
 
-    # run_test_parallel(ID_file, result_file, z_chosen, 1)
+    run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
-    # build_mass_correlation_plot_errors(ID_file, result_file, plot_name)
-    # build_chi2_plot(result_file, ID_file, test_number)
+    build_mass_correlation_plot_errors(ID_file, result_file, plot_name)
+    build_chi2_plot(result_file, ID_file, test_number)
 
     # raise ValueError('Done!')
 
@@ -968,13 +983,23 @@ if __name__ == '__main__':
     ID_file = 'Data/MDARK_Test/Test13/ID_file_13.csv'
     # Choose a random cluster ID from the ID file
     IDs = pd.read_csv(ID_file)['ID'].values
+    # Make sure the IDs are integers
+    IDs = [int(ID) for ID in IDs]
+    # Grab the first five
+    # IDs = IDs[:5]
     # ID = np.random.choice(IDs)
 
-    halos = find_halos(int(ID), zs[0])
+    start = time.time()
+
+    halos = find_halos(IDs, zs[0])
+
+    stop = time.time()
+    print('Time taken to load halos: {}'.format(stop - start))
 
     for ID in IDs:
         # Load the halos
-        lenses, sources, xmax = build_lensing_field(halos[ID], zs[0])
+        halo = halos[ID]
+        lenses, sources, xmax = build_lensing_field(halo, zs[0])
 
         # Arrange a plot with 6 subplots in 2 rows
         fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
@@ -984,35 +1009,35 @@ if __name__ == '__main__':
         # Step 1: Generate initial list of lenses from source guesses
         lenses = sources.generate_initial_guess()
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Initial Guesses', ax=axarr[0,0])
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
 
         # Step 2: Optimize guesses with local minimization
         lenses.optimize_lens_positions(sources, use_flags)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
 
         # Step 3: Filter out lenses that are too far from the source population
-        lenses.filter_lens_positions(sources, xmax, threshold_distance=5)
+        lenses.filter_lens_positions(sources, xmax)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
 
         # Step 4: Merge lenses that are too close to each other
         start = time.time()
         ns = len(sources.x) / (np.pi * xmax**2)
-        merger_threshold = 1/np.sqrt(ns)
+        merger_threshold = (1/np.sqrt(ns)) * 0.5
         lenses.merge_close_lenses(merger_threshold=merger_threshold)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Merging', ax=axarr[1,0], legend=False)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Merging', ax=axarr[1,0], legend=False)
 
         # Step 5: Iterative elimination
         lenses.iterative_elimination(sources, reducedchi2, use_flags)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Iterative Elimination', ax=axarr[1,1], legend=False)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Iterative Elimination', ax=axarr[1,1], legend=False)
 
         # Step 6: Final minimization
         lenses.full_minimization(sources, use_flags)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(xmax, lenses, sources, halos[ID], reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
 
         # Compute mass
         extent = [-xmax, xmax, -xmax, xmax]
@@ -1020,41 +1045,31 @@ if __name__ == '__main__':
         mass = utils.calculate_mass(kappa, zs[0], 0.5, 1)
 
         # Save and show the plot
-        fig.suptitle('Lensing Reconstruction of Cluster ID {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(ID, np.sum(halos.mass), mass))
+        fig.suptitle('Lensing Reconstruction of Cluster ID {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(ID, np.sum(halo.mass), mass))
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
         plt.savefig('Images/MDARK/pipeline_visualization/ID_{}.png'.format(ID))
         # plt.show()
 
         # Now lets create a lens object that perfectly matches the true lenses
-        source_redshift = 0.5
-        distance_lens = cosmo.angular_diameter_distance(zs[0]).to(u.meter)
-        distance_source = cosmo.angular_diameter_distance(source_redshift).to(u.meter)
-        distance_lens_source = cosmo.angular_diameter_distance_z1z2(zs[0], source_redshift).to(u.meter)
-        distance_lens = distance_lens.value
-        distance_source = distance_source.value
-        distance_lens_source = distance_lens_source.value
-
-        rho_c = cosmo.critical_density(zs[0]).to(u.kg / u.m**3)
-        rho_c = rho_c.value
-        true_eR = ((2 * np.pi * G) / c**2) * (distance_lens_source / distance_source) * (800 * np.pi * rho_c / 3)**(1/3) * (halos.mass * M_solar)**(2/3)
-        # Convert to arcseconds from radians
-        true_eR = true_eR * 206265 
-        print('True Einstein Radii: {}'.format(true_eR))
-        
-        perfect_lens_fit = pipeline.Lens(halos.x, halos.y, true_eR, np.zeros_like(true_eR))
+        true_eR = halo.calc_corresponding_einstein_radius(z_source)
+        perfect_lens_fit = pipeline.Lens(halo.x, halo.y, true_eR, np.zeros_like(true_eR))
+        # Update the chi2 values - if the fit is perfect, the reduced chi2 should be 1
         perfect_lens_fit.update_chi2_values(sources, use_flags)
         reducedchi2 = perfect_lens_fit.update_chi2_values(sources, use_flags)
         print('Reduced chi2 for perfect fit: {}'.format(reducedchi2))
+
         # Plot the perfect fit
         fig, ax = plt.subplots()
-        _plot_results(xmax, perfect_lens_fit, sources, halos, reducedchi2, None, ax=ax)
+        _plot_results(xmax, perfect_lens_fit, sources, halo, reducedchi2, None, ax=ax)
 
         # Get the mass of the perfect fit
         extent = [-xmax, xmax, -xmax, xmax]
         _, _, kappa = utils.calculate_kappa(perfect_lens_fit, extent, 5)
         mass = utils.calculate_mass(kappa, zs[0], 0.5, 1)
         
-        plt.suptitle('chi2 = {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(reducedchi2, np.sum(halos.mass), mass))
+        plt.suptitle('chi2 = {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(reducedchi2, np.sum(halo.mass), mass))
         plt.savefig('Images/MDARK/pipeline_visualization/Perfect_Fit_{}.png'.format(ID))
+        plt.close()
+        # plt.show()
 

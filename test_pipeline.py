@@ -257,14 +257,7 @@ def accuracy_tests(use_shear, use_flexion, use_g_flexion):
         print('Finished test with', nlens, 'lenses')
 
 
-
-
-if __name__ == '__main__':
-    Nlens = 2
-    Nsource = 100
-    xmax = 50
-    use_flags = [True, True, True]
-
+def accuracy_assessment():
     lenses = utils.createLenses(nlens=Nlens, randompos=False, xmax=xmax)
     sources = utils.createSources(lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg=sigg, randompos=True, xmax=xmax)
     candidate_lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax=xmax, flags=True, use_flags=use_flags)
@@ -283,15 +276,6 @@ if __name__ == '__main__':
     # Compare the strengths of the lenses
     true_strength = lenses.te
     pred_strength = candidate_lenses.te
-
-    # Assess the quality of the match
-    # Match lenses to candidate lenses based on distance
-    # If they are within a certain distance, and the strengths
-    # are similar, then we have a match
-
-    # Also, we aren't going to use a confusion matrix, because 
-    # we don't have a binary classification problem
-    # We have a regression problem
 
     # Lets get started. First, match the lenses to the candidate lenses
     true_positives = 0
@@ -330,4 +314,58 @@ if __name__ == '__main__':
     plt.xlim(-xmax, xmax)
     plt.ylim(-xmax, xmax)
     plt.legend()
+    plt.show()
+
+
+
+if __name__ == '__main__':
+    Nlens = 5
+    xmax = 150
+    ns = 0.01
+    Nsource = int(ns * (2 * xmax)**2)
+    use_flags = [True, True, True]
+
+    # Setup lensing and source configurations
+    true_lenses = utils.createLenses(nlens=Nlens, randompos=True, xmax=xmax)
+    sources = utils.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax, lens_type='SIS')
+
+    # Arrange a plot with 6 subplots in 2 rows
+    fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle('Lensing Reconstruction Pipeline', fontsize=16)
+
+    # Step 1: Generate initial list of lenses from source guesses
+    lenses = sources.generate_initial_guess()
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
+
+    # Step 2: Optimize guesses with local minimization
+    lenses.optimize_lens_positions(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
+
+    # Step 3: Filter out lenses that are too far from the source population
+    lenses.filter_lens_positions(sources, xmax)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
+
+    # Step 4: Iterative elimination
+    lenses.iterative_elimination(sources, reducedchi2, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Iterative Elimination', ax=axarr[1,0], legend=False)
+
+    # Step 5: Merge lenses that are too close to each other
+    ns = Nsource / (2 * xmax)**2
+    merger_threshold = 1/np.sqrt(ns) 
+    lenses.merge_close_lenses(merger_threshold=merger_threshold)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Merging', ax=axarr[1,1], legend=False)
+
+    # Step 6: Final minimization
+    lenses.full_minimization(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
+
+    # Save and show the plot
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
+    plt.savefig('Images//tests//breakdown_{}_lens_{}_source.png'.format(Nlens, Nsource))
     plt.show()
