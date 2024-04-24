@@ -111,7 +111,8 @@ def calculate_kappa(lenses, extent, smoothing_scale) -> tuple:
         kappa += lenses.te[k] / (2 * r)
     
     # Smooth the convergence map with a gaussian kernel (use an external function)
-    kappa = scipy.ndimage.gaussian_filter(kappa, sigma=smoothing_scale)
+    if smoothing_scale:
+        kappa = scipy.ndimage.gaussian_filter(kappa, sigma=smoothing_scale)
     return X, Y, kappa
 
 
@@ -144,13 +145,12 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
         for j in range(kappa_array.shape[1]):
             distance_map[i, j] = np.sqrt((i - central_pixel)**2 + (j - central_pixel)**2)
     
-    # Find the mass which lies within 1 Mpc of the center of the map
-    # Convert 1 Mpc to radians, at the relevant distance
-    one_mpc_rad = (500 * u.kpc).to(u.meter) / D_l
+    # Find the mass which lies within 200 kpc of the center of the map
+    r_map = (200 * u.kpc).to(u.meter) / D_l
     # Converge the radius to pixels
-    one_mpc_rad /= pixel_scale_rad
+    r_map /= pixel_scale_rad
     # Find the pixels that lie inside this radius (measured from the center of the map)
-    pixels_within_radius = distance_map <= one_mpc_rad
+    pixels_within_radius = distance_map <= r_map
     # Calculate the mass within this radius
     total_mass = np.sum(kappa_array[pixels_within_radius]) * Sigma_crit * area_per_pixel
     total_mass_solar = (total_mass).to(u.M_sun).value * h # Give all masses in units of h^-1 M_sun

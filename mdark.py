@@ -21,7 +21,7 @@ plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentat
 # Physical constants
 c = 3 * 10**8 # Speed of light in m/s
 G = 6.674 * 10**-11 # Gravitational constant in m^3/kg/s^2
-h = 0.7 # Hubble constant
+h = 0.677 # Hubble constant
 M_solar = 1.989 * 10**30 # Solar mass in kg
 z_source = 0.8 # Redshift of the source galaxies
 
@@ -57,6 +57,9 @@ class Halo:
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
         eR = (2 * np.pi * G / c**2) * (Dls / Ds) * (800 * np.pi * rho_c / 3)**(1/3) * (self.mass * M_solar)**(2/3)
         eR *= 206265 # Convert to arcseconds
+        # Return the Einstein radius - make sure its an array
+        if np.isscalar(eR):
+            eR = np.array([eR])
         return eR
 
 
@@ -482,7 +485,7 @@ def build_mass_correlation_plot_errors(ID_file, results_file, plot_name):
         mass_values = []
         for j in range(4):
             mass_values.append(results[results['ID'] == int(IDs[i])][mass_columns[j]].values)
-        mass_values = np.abs(np.array(mass_values))
+        mass_values = (np.abs(np.array(mass_values)) ** (3/2)) * 10**-6
         mass_val[i] = np.mean(mass_values, axis=1)
         mass_err[i] = np.std(mass_values, axis=1)
 
@@ -929,6 +932,41 @@ def compute_masses(candidate_lenses, z, xmax):
 # --------------------------------------------
 
 if __name__ == '__main__':
+    '''
+    xl = [0]
+    yl = [0]
+    zl = [0]
+    minimum_mass = 1e12
+    maximum_mass = 1e15
+    true_mass = np.logspace(np.log10(minimum_mass), np.log10(maximum_mass), 100)
+    recovered_mass = np.zeros_like(true_mass)
+    concentration = 7
+    xmax = 150
+    extent = [-xmax, xmax, -xmax, xmax]
+
+    for i,mass in enumerate(true_mass):
+        halo = Halo(xl, yl, zl, concentration, mass, 0.35)
+        eR = halo.calc_corresponding_einstein_radius(z_source)
+        lens = pipeline.Lens(xl,yl,eR,0)
+
+        _,_,kappa = utils.calculate_kappa(lens,extent,5)
+        recovered_mass[i] = utils.calculate_mass(kappa,0.35,z_source,1)
+    
+    plt.figure()
+    plt.plot(true_mass,recovered_mass**(3/2) * 10**-6, linestyle='-', color='black', label = 'Recovered Mass: m = {:.2e}'.format(np.polyfit(np.log10(true_mass),np.log10(recovered_mass),1)[0]))
+    plt.plot(true_mass,true_mass, linestyle='--', color='blue', label = 'Agreement Line')
+    plt.xlabel('True Mass')
+    plt.ylabel('Recovered Mass')
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.legend()
+    plt.show()
+    '''
+        
+
+
+    # raise ValueError('Done')
+
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
     z_chosen = zs[0]
@@ -947,7 +985,7 @@ if __name__ == '__main__':
         os.makedirs('Data/MDARK_Test/Test{}'.format(test_number))
         build_test_set(30, z_chosen, ID_file)
 
-    run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
+    #run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     build_mass_correlation_plot_errors(ID_file, result_file, plot_name)
