@@ -255,7 +255,7 @@ class Lens:
 # Chi^2 functions
 # ------------------------------
 
-def eR_penalty_function(eR, limit=20.0, lambda_penalty_upper=1000.0):
+def eR_penalty_function(eR, limit=40.0, lambda_penalty_upper=1000.0):
     # Soft limits - allow the Einstein radius to be negative
     if np.abs(eR) > limit:
         return lambda_penalty_upper * (np.abs(eR) - limit) ** 2

@@ -7,14 +7,15 @@ from astropy.visualization import hist as fancyhist
 from multiprocessing import Pool
 from functools import partial
 import sklearn.metrics
+import mdark
 
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
 # Define default noise parameters
-sigs = 0.1
-sigf = 0.01
-sigg = 0.02
+sigs = 0.1 
+sigf = 0.01 
+sigg = 0.02 
 
 
 # ------------------------
@@ -317,17 +318,29 @@ def accuracy_assessment():
     plt.show()
 
 
-
 if __name__ == '__main__':
-    Nlens = 5
+    Nlens = 20
     xmax = 150
     ns = 0.01
     Nsource = int(ns * (2 * xmax)**2)
     use_flags = [True, True, True]
 
     # Setup lensing and source configurations
-    true_lenses = utils.createLenses(nlens=Nlens, randompos=True, xmax=xmax)
-    sources = utils.createSources(true_lenses, ns=Nsource, sigf=sigf, sigs=sigs, randompos=True, xmax=xmax, lens_type='SIS')
+    # true_lenses = utils.createLenses(nlens=Nlens, randompos=True, xmax=xmax)
+    ID = [11400399088]
+    z = 0.194
+    halos = mdark.find_halos(ID, z)
+    # The halos object is a dictionary, keyed by the ID of the halo
+    # We only have one halo, so we can extract it by taking the first key
+    halo = halos[ID[0]]
+    halo, _, xmax = mdark.build_lensing_field(halo, z, Nsource)
+
+    eR = halo.calc_corresponding_einstein_radius(0.8)
+    print('Einstein Radius:', eR)
+    # eR /= eR
+    true_lenses = pipeline.Lens(halo.x, halo.y, eR, np.ones(len(halo.x)))
+    # Recreate the sources object with the new lensing field
+    sources = utils.createSources(true_lenses, ns=Nsource, sigs=sigs, sigf=sigf, sigg=sigg, randompos=True, xmax=xmax)
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10))

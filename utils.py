@@ -201,8 +201,11 @@ def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5
 
 def createLenses(nlens=1,randompos=True,xmax=10,strength_choice='identical'):
     if randompos == True:
-        xlarr = -xmax + 2*xmax*np.random.random(nlens)
-        ylarr = -xmax + 2*xmax*np.random.random(nlens)
+        r = xmax*np.sqrt(np.random.random(nlens))
+        phi = 2*np.pi*np.random.random(nlens)  
+        xlarr = r*np.cos(phi)
+        ylarr = r*np.sin(phi)
+
     else: #Uniformly spaced lenses
         xlarr = -xmax + 2*xmax*(np.arange(nlens)+0.5)/(nlens)
         ylarr = np.zeros(nlens)
