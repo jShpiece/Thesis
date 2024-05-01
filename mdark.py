@@ -63,6 +63,13 @@ class Halo:
         if np.isscalar(eR):
             eR = np.array([eR])
         return eR
+    
+
+    def calculate_concentration(self):
+        # Compute the concentration parameter for each halo
+        # This is done with the Duffy et al. (2008) relation
+        # This relation is valid for 0 < z < 2
+        self.concentration = 5.71 * (self.mass / (2 * 10**12))**(-0.084) * (1 + self.redshift)**(-0.47)
 
 
     def calc_shear_signal(self, xs, ys):
@@ -254,6 +261,121 @@ class Halo:
             g2[i] += np.sum(G_mag * sin3phi)
         
         return g1, g2
+
+
+    def optimize_lens_positions(self, sources, use_flags):
+        # Given a set of initial guesses for lens positions, find the optimal lens positions
+        # via local minimization
+        max_attempts = 1
+        for i in range(len(self.x)):
+            one_source = pipeline.Source(sources.x[i], sources.y[i], 
+                                sources.e1[i], sources.e2[i], 
+                                sources.f1[i], sources.f2[i], 
+                                sources.g1[i], sources.g2[i],
+                                sources.sigs[i], sources.sigf[i], sources.sigg[i])
+            guess = [self.x[i], self.y[i], self.te[i]] # Class is already initialized with initial guesses
+            best_result = None
+            best_params = guess
+            for _ in range(max_attempts):
+                result = opt.minimize(
+                    pipeline.chi2wrapper, guess, args=([one_source, use_flags]), 
+                    method='Nelder-Mead', 
+                    tol=1e-8, 
+                    options={'maxiter': 500}
+                )
+
+                if best_result is None or result.fun < best_result.fun:
+                    best_result = result
+                    best_params = result.x
+
+            self.x[i], self.y[i], self.te[i] = best_params[0], best_params[1], best_params[2]
+
+
+    def filter_lens_positions(self, sources, xmax, threshold_distance=0.1):
+        # Filter out halos that are too close to sources or too far from the center
+        distances_to_sources = np.sqrt((self.x - sources.x)**2 + (self.y - sources.y)**2)
+        too_close_to_sources = distances_to_sources < threshold_distance
+        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1 * xmax
+        zero_te_indices = np.abs(self.mass) < 10**10
+
+        valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
+        self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
+
+
+    def merge_close_lenses(self, merger_threshold=5):
+
+        def perform_merger(i, j):
+            # Given two lenses, merge them and place the new lens at the weighted average position
+            # and with the average Einstein radius of the pair
+            weight_i, weight_j = np.abs(self.te[i]), np.abs(self.te[j]) # Weights must be positive
+            self.x[i] = (self.x[i]*weight_i + self.x[j]*weight_j) / (weight_i + weight_j)
+            self.y[i] = (self.y[i]*weight_i + self.y[j]*weight_j) / (weight_i + weight_j)
+            self.te[i] = (weight_i + weight_j) / 2
+            self.x, self.y, self.te, self.chi2 = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j), np.delete(self.chi2, j)
+
+        #Merge lenses that are too close to each other
+        i = 0
+        while i < len(self.x):
+            for j in range(i+1, len(self.x)):
+                # Check every pair of lenses
+                # If they are too close, merge them
+                distance = np.sqrt((self.x[i] - self.x[j])**2 + (self.y[i] - self.y[j])**2)
+                if distance < merger_threshold:
+                    perform_merger(i, j)
+                    break
+            else:
+                i += 1
+    
+
+    def select_lowest_chi2(self, lens_floor=1):
+        # Function that enables the iterative elimination of lenses
+        # Select the 'lens_floor' lenses with the lowest chi^2 values
+        
+        # Sort the lenses by chi^2 value
+        sorted_indices = np.argsort(self.chi2)
+        self.x, self.y, self.te, self.chi2 = self.x[sorted_indices], self.y[sorted_indices], self.te[sorted_indices], self.chi2[sorted_indices]
+
+        # Select the 'lens_floor' lenses with the lowest chi^2 values
+        if len(self.x) > lens_floor:
+            self.x, self.y, self.te, self.chi2 = self.x[:lens_floor], self.y[:lens_floor], self.te[:lens_floor], self.chi2[:lens_floor]
+
+
+    def iterative_elimination(self, sources, reducedchi2, use_flags):
+        # Iteratively eliminate lenses that do not improve the chi^2 value
+        lens_floors = np.arange(1, len(self.x) + 1)
+        best_dist = np.abs(reducedchi2 - 1)
+        best_lenses = self
+        for lens_floor in lens_floors:
+            # Clone the lenses object
+            test_lenses = pipeline.Lens(self.x, self.y, self.te, self.chi2)
+            test_lenses.select_lowest_chi2(lens_floor=lens_floor)
+            reducedchi2 = test_lenses.update_chi2_values(sources, use_flags)
+            new_dist = np.abs(reducedchi2 - 1)
+            if new_dist < best_dist:
+                best_dist = new_dist
+                best_lenses = test_lenses
+        # Update the lenses object with the best set of lenses
+        self.x, self.y, self.te, self.chi2 = best_lenses.x, best_lenses.y, best_lenses.te, best_lenses.chi2
+
+
+    def full_minimization(self, sources, use_flags):
+        guess = self.te
+        params = [self.x, self.y, sources, use_flags]
+        max_attempts = 5  # Number of optimization attempts with different initial guesses
+        best_result = None
+        best_params = guess
+
+        for _ in range(max_attempts):
+            result = opt.minimize(
+                pipeline.chi2wrapper2, guess, args=params,
+                method='Powell',  
+                tol=1e-8,  
+                options={'maxiter': 1000}
+            )
+            if best_result is None or result.fun < best_result.fun:
+                best_result = result
+                best_params = result.x
+        self.te = best_params
 
 
 # --------------------------------------------
@@ -1052,8 +1174,53 @@ def visualize_fits(ID_file, lensing_type='NFW'):
 
 
 if __name__ == '__main__':
+    xl = np.array([0])
+    yl = np.array([0])
+    zl = np.array([0])
+    cl = np.array([7.2])
+    ml = np.array([1e12])
+    halo = Halo(xl, yl, zl, cl, ml, 0.3)
+
+    x = np.linspace(-10, 10, 200)
+    shear1, shear2 = halo.calc_shear_signal(x, np.zeros_like(x))
+    flexion1, flexion2 = halo.calc_F_signal(x, np.zeros_like(x))
+    gflexion1, gflexion2 = halo.calc_G_signal(x, np.zeros_like(x))
+
+    _, R200 = halo.calc_R200()
+    rs = R200 / halo.concentration
+
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
+    ax[0].plot(x, shear1, label='Shear 1')
+    ax[0].vlines([-rs, rs], ymin=shear1.min(), ymax=shear1.max(), color='red', linestyle='--', label='Scale Radius')
+    ax[0].set_title('Shear')
+    ax[0].set_ylim(-0.05, 0.05)
+    ax[0].legend()
+
+    ax[1].plot(x, flexion1, label='Flexion 1')
+    ax[1].vlines([-rs, rs], ymin=flexion1.min(), ymax=flexion1.max(), color='red', linestyle='--', label='Scale Radius')
+    ax[1].set_title('Flexion')
+    ax[1].legend()
+
+    ax[2].plot(x, gflexion1, label='G-Flexion 1')
+    ax[2].vlines([-rs, rs], ymin=gflexion1.min(), ymax=gflexion1.max(), color='red', linestyle='--', label='Scale Radius')
+    ax[2].set_title('G-Flexion')
+    ax[2].legend()
+
+    halo.calculate_concentration()
+    print('Concentration: {}'.format(halo.concentration))
+    shear1, shear2 = halo.calc_shear_signal(x, np.zeros_like(x))
+    flexion1, flexion2 = halo.calc_F_signal(x, np.zeros_like(x))
+    gflexion1, gflexion2 = halo.calc_G_signal(x, np.zeros_like(x))
+
+    ax[0].plot(x, shear1, label='Shear 1 - New Concentration')
+    ax[1].plot(x, flexion1, label='Flexion 1 - New Concentration')
+    ax[2].plot(x, gflexion1, label='G-Flexion 1 - New Concentration')
+
+    plt.show()
+
+
     # visualize_fits('Data/MDARK_Test/Test14/ID_file_14.csv', lensing_type='SIS')
-    # raise ValueError('This script is not meant to be run as a standalone script')
+    raise ValueError('This script is not meant to be run as a standalone script')
 
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
