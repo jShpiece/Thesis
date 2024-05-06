@@ -319,6 +319,9 @@ def accuracy_assessment():
 
 
 if __name__ == '__main__':
+    visualize_examples(True, True, True)
+
+    raise NotImplementedError('This script is not meant to be run directly. Please run the test_pipeline.py script instead.')
     Nlens = 20
     xmax = 150
     ns = 0.01

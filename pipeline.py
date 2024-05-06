@@ -10,17 +10,18 @@ class Source:
     # and ellipticity (e1, e2), flexion (f1, f2), and g_flexion (g1, g2) signals
     # as well as the standard deviations of these signals (sigs, sigf, sigg)
     def __init__(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
-        self.x = x
-        self.y = y
-        self.e1 = e1
-        self.e2 = e2
-        self.f1 = f1
-        self.f2 = f2
-        self.g1 = g1
-        self.g2 = g2
-        self.sigs = sigs
-        self.sigf = sigf
-        self.sigg = sigg
+        # Make sure all inputs are numpy arrays
+        self.x = np.atleast_1d(x)
+        self.y = np.atleast_1d(y)
+        self.e1 = np.atleast_1d(e1)
+        self.e2 = np.atleast_1d(e2)
+        self.f1 = np.atleast_1d(f1)
+        self.f2 = np.atleast_1d(f2)
+        self.g1 = np.atleast_1d(g1)
+        self.g2 = np.atleast_1d(g2)
+        self.sigs = np.atleast_1d(sigs)
+        self.sigf = np.atleast_1d(sigf)
+        self.sigg = np.atleast_1d(sigg)
 
 
     def filter_sources(self, a, max_flexion=0.5):
@@ -33,15 +34,20 @@ class Source:
         return valid_indices
 
 
-    def generate_initial_guess(self):
+    def generate_initial_guess(self, lens_type='SIS'):
         # Generate initial guesses for possible lens positions based on the source ellipticity and flexion
         phi = np.arctan2(self.f2, self.f1)
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
         r = gamma / flexion # A characteristic distance from the source
-        te = 2 * gamma * r # The Einstein radius of the lens
 
-        return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
+        if lens_type == 'SIS':
+            te = 2 * gamma * r # The Einstein radius of the lens
+            return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
+        elif lens_type == 'NFW':
+            mass = 1e14 # Placeholder mass
+            concentration = 5 # Placeholder concentration
+            return r, mass, concentration
 
 
     def apply_SIS_lensing(self, lenses):
@@ -155,7 +161,9 @@ class Lens:
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=0.1):
         # Filter out lenses that are too close to sources or too far from the center
-        distances_to_sources = np.sqrt((self.x - sources.x)**2 + (self.y - sources.y)**2)
+
+        # Calculate the distances between each lens and each source
+        distances_to_sources = np.sqrt((self.x[:, None] - sources.x)**2 + (self.y[:, None] - sources.y)**2)
         too_close_to_sources = distances_to_sources < threshold_distance
         too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1 * xmax
         zero_te_indices = np.abs(self.te) < 10**-3
@@ -273,7 +281,7 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
     return dof
 
 
-def calculate_chi_squared(sources, lenses, flags) -> float:
+def calculate_chi_squared(sources, lenses, flags, lensing='SIS') -> float:
     """
     Calculate the chi-squared statistic for the deviation of lensed source properties from their original values,
     considering specified lensing effects and adding penalties for certain lens properties.
@@ -300,7 +308,10 @@ def calculate_chi_squared(sources, lenses, flags) -> float:
     )
 
     # Apply lensing effects to the cloned source
-    source_clone.apply_SIS_lensing(lenses)
+    if lensing == 'SIS':
+        source_clone.apply_SIS_lensing(lenses)
+    elif lensing == 'NFW':
+        source_clone.apply_NFW_lensing(lenses)
 
     # Calculate chi-squared for each lensing signal component
     chi_squared_components = {
@@ -319,7 +330,10 @@ def calculate_chi_squared(sources, lenses, flags) -> float:
         total_chi_squared += np.sum(chi_squared_components['g_flexion'])
 
     # Calculate and add penalties for the lenses
-    penalty = sum(eR_penalty_function(eR) for eR in lenses.te)
+    if lensing == 'SIS':
+        penalty = sum(eR_penalty_function(eR) for eR in lenses.te)
+    elif lensing == 'NFW':
+        penalty = 0
 
     # Return the total chi-squared including penalties
     return total_chi_squared + penalty

@@ -10,6 +10,7 @@ import pickle
 from multiprocessing import Pool
 import time
 import os
+import scipy.optimize as opt
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
@@ -27,14 +28,58 @@ z_source = 0.8 # Redshift of the source galaxies
 
 
 class Halo:
-    def __init__(self, x, y, z, concentration, mass, redshift):
-        self.x = x
-        self.y = y
-        self.z = z
-        self.concentration = concentration
-        self.mass = mass
-        self.redshift = redshift
-    
+    def __init__(self, x, y, z, concentration, mass, redshift, chi2):
+        # Initialize the halo object with the given parameters
+        self.x = np.atleast_1d(x)
+        self.y = np.atleast_1d(y)
+        self.z = np.atleast_1d(z)
+        self.concentration = np.atleast_1d(concentration)
+        self.mass = np.atleast_1d(np.abs(mass)) # Masses must be positive
+        self.redshift = redshift # Redshift of the cluster, assumed to be the same for all halos
+        self.chi2 = np.atleast_1d(chi2)
+
+    # --------------------------------------------
+    # Halo Calculation Functions
+    # --------------------------------------------
+
+    def project_to_2D(self):
+        """
+        Projects a set of 3D points onto the plane formed by the first two principal eigenvectors.
+        This will shift from our halos being in object 3D space to being in a projected 2D space.
+        """
+
+        # Sanity checks
+        assert len(self.x) == len(self.y) == len(self.z), "The x, y, and z arrays must have the same length."
+        assert self.x.ndim == self.y.ndim == self.z.ndim == 1, "The x, y, and z arrays must be 1D."
+        assert len(self.x) > 1, "At least two points are required."
+
+        # Combine the x, y, z coordinates into a single matrix
+        points = np.vstack((self.x, self.y, self.z)).T
+
+        # Calculate the covariance matrix
+        cov_matrix = np.cov(points, rowvar=False)
+
+        # Compute the eigenvectors and eigenvalues
+        eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
+
+        # Sort the eigenvectors by eigenvalues in descending order
+        idx = eigenvalues.argsort()[::-1]
+        eigenvectors = eigenvectors[:, idx]
+
+        # Project the points onto the plane formed by the first two principal eigenvectors
+        projected_points = np.dot(points, eigenvectors[:, :2])
+
+        x = projected_points[:, 0]
+        y = projected_points[:, 1]
+        # Make sure these are arrays
+        if np.isscalar(x):
+            x = np.array([x])
+        if np.isscalar(y):
+            y = np.array([y])
+
+        self.x, self.y = x, y
+        self.z = np.zeros(len(self.x)) # Set the z values to zero now that we are in 2D
+
 
     def calc_R200(self):
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
@@ -46,24 +91,18 @@ class Halo:
 
     def calc_delta_c(self):
         # Compute the characteristic density contrast for each halo
-        delta_c = (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - self.concentration / (1 + self.concentration))
-        return delta_c
+        return (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - self.concentration / (1 + self.concentration))
 
 
     def calc_corresponding_einstein_radius(self, source_redshift):
         # Compute the Einstein radius for a given source redshift
-        Ds = cosmo.angular_diameter_distance(source_redshift).to(u.meter).value
-        Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, source_redshift).to(u.meter).value
-        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
-        eR = np.sqrt((4 * G * self.mass * M_solar) / (c**2) * (Dls / (Ds * Dl)))
-        #rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
-        #eR = (2 * np.pi * G / c**2) * (Dls / Ds) * (800 * np.pi * rho_c / 3)**(1/3) * (self.mass * M_solar)**(2/3)
-        eR *= 206265 # Convert to arcseconds
+        Dl, Ds, Dls = utils.angular_diameter_distances(self.redshift, source_redshift)
+        eR = np.sqrt((4 * G * self.mass * M_solar) / (c**2) * (Dls / (Ds * Dl))) * 206265 # Convert to arcseconds
         # Return the Einstein radius - make sure its an array
         if np.isscalar(eR):
             eR = np.array([eR])
         return eR
-    
+
 
     def calculate_concentration(self):
         # Compute the concentration parameter for each halo
@@ -71,6 +110,9 @@ class Halo:
         # This relation is valid for 0 < z < 2
         self.concentration = 5.71 * (self.mass / (2 * 10**12))**(-0.084) * (1 + self.redshift)**(-0.47)
 
+    # --------------------------------------------
+    # Signal Calculation Functions
+    # --------------------------------------------
 
     def calc_shear_signal(self, xs, ys):
         # Compute the NFW shear signal at a given position (xs, ys), for the entire set of halos
@@ -92,21 +134,17 @@ class Halo:
                 term4 = 4 * np.arctan(np.sqrt((x - 1) / (1 + x))) / ((x**2 - 1)**(3/2))
                 sol = term1 + term2 + term3 + term4
             else:
+                print(x)
                 raise ValueError('Invalid value of x')
             return sol
         
         r200, r200_arcsec = self.calc_R200()
         rs = r200 / self.concentration # In meters
 
-        # Compute angular diameter distances
-        Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
-        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
-        Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, z_source).to(u.meter).value
-
-        # Compute the critical surface density
+        # Compute the critical surface density and characteristic convergence
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value 
         rho_s = rho_c * self.calc_delta_c() 
-        sigma_c = (c**2 / (4 * np.pi * G)) * (Ds / (Dl * Dls))
+        sigma_c = utils.critical_surface_density(self.redshift, z_source)
         kappa_s = rho_s * rs / sigma_c
 
         # Initialize shear signals
@@ -162,16 +200,12 @@ class Halo:
         r200, r200_arcsec = self.calc_R200()
         rs = r200 / self.concentration # In meters
 
-        # Compute the angular diameter distances
-        Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
-        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
-        Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, z_source).to(u.meter).value
-
         # Compute the critical surface density
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value 
         rho_s = rho_c * self.calc_delta_c()
-        sigma_c = (c**2 / (4 * np.pi * G)) * (Ds / (Dl * Dls))
+        sigma_c = utils.critical_surface_density(self.redshift, z_source)
         kappa_s = rho_s * rs / sigma_c
+        Dl, _, _ = utils.angular_diameter_distances(self.redshift, z_source)
         F_s = kappa_s * Dl / rs
 
         # Initialize flexion signals
@@ -217,16 +251,12 @@ class Halo:
         r200, r200_arcsec = self.calc_R200()
         rs = r200 / self.concentration
 
-        # Compute the angular diameter distances
-        Ds = cosmo.angular_diameter_distance(z_source).to(u.meter).value
-        Dl = cosmo.angular_diameter_distance(self.redshift).to(u.meter).value
-        Dls = cosmo.angular_diameter_distance_z1z2(self.redshift, z_source).to(u.meter).value
-
         # Compute the critical surface density
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value 
         rho_s = rho_c * self.calc_delta_c()
-        sigma_c = (c**2 / (4 * np.pi * G)) * (Ds / (Dl * Dls))
+        sigma_c = utils.critical_surface_density(self.redshift, z_source)
         kappa_s = rho_s * rs / sigma_c
+        Dl, _, _ = utils.angular_diameter_distances(self.redshift, z_source)
         F_s = kappa_s * Dl / rs
 
         g1 = np.zeros(len(xs))
@@ -262,6 +292,19 @@ class Halo:
         
         return g1, g2
 
+    # --------------------------------------------
+    # Pipeline Functions
+    # --------------------------------------------
+
+    def update_chi2_values(self, sources, use_flags):
+        # Given a set of sources, update the chi^2 values for each lens
+        chi2_values = np.zeros(len(self.x))
+        for i in range(len(self.x)):
+            chi2_values[i] = chi2wrapper3([[self.x[i]], [self.y[i]], [self.mass[i]]], [sources, use_flags, self.concentration[i], self.redshift])
+        self.chi2 = chi2_values
+        dof = pipeline.calc_degrees_of_freedom(sources, self, use_flags)
+        return np.sum(chi2_values) / dof
+
 
     def optimize_lens_positions(self, sources, use_flags):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
@@ -273,12 +316,12 @@ class Halo:
                                 sources.f1[i], sources.f2[i], 
                                 sources.g1[i], sources.g2[i],
                                 sources.sigs[i], sources.sigf[i], sources.sigg[i])
-            guess = [self.x[i], self.y[i], self.te[i]] # Class is already initialized with initial guesses
+            guess = [[self.x[i]], [self.y[i]], [max(0, self.mass[i])]] # Class is already initialized with initial guesses
             best_result = None
             best_params = guess
             for _ in range(max_attempts):
                 result = opt.minimize(
-                    pipeline.chi2wrapper, guess, args=([one_source, use_flags]), 
+                    chi2wrapper3, guess, args=([one_source, use_flags, self.concentration[i], self.redshift]), 
                     method='Nelder-Mead', 
                     tol=1e-8, 
                     options={'maxiter': 500}
@@ -288,30 +331,40 @@ class Halo:
                     best_result = result
                     best_params = result.x
 
-            self.x[i], self.y[i], self.te[i] = best_params[0], best_params[1], best_params[2]
+            self.x[i], self.y[i], self.mass[i] = best_params[0], best_params[1], best_params[2]
 
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=0.1):
         # Filter out halos that are too close to sources or too far from the center
-        distances_to_sources = np.sqrt((self.x - sources.x)**2 + (self.y - sources.y)**2)
-        too_close_to_sources = distances_to_sources < threshold_distance
-        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1 * xmax
-        zero_te_indices = np.abs(self.mass) < 10**10
 
-        valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
-        self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
+        # Compute the distance of each lens from each source
+        distances_to_sources = np.sqrt((self.x[:, None] - sources.x)**2 + (self.y[:, None] - sources.y)**2)
+        # Identify lenses that are too close to sources
+        too_close_to_sources = np.any(distances_to_sources < threshold_distance, axis=1)
+        # Identify lenses that are too far from the center
+        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1 * xmax
+        # Identify lenses with zero mass (or too small to be considered lenses)
+        zero_mass_lenses = np.abs(self.mass) < 10**10
+
+        # Remove lenses that are too close to sources, too far from the center, or have zero mass
+        valid_indices = ~too_close_to_sources & ~too_far_from_center & ~zero_mass_lenses
+        # Update the lens positions
+        self.x, self.y = self.x[valid_indices], self.y[valid_indices]
+        self.mass = self.mass[valid_indices]
+        self.chi2 = self.chi2[valid_indices]
+        self.concentration = self.concentration[valid_indices]
 
 
     def merge_close_lenses(self, merger_threshold=5):
-
         def perform_merger(i, j):
             # Given two lenses, merge them and place the new lens at the weighted average position
             # and with the average Einstein radius of the pair
             weight_i, weight_j = np.abs(self.te[i]), np.abs(self.te[j]) # Weights must be positive
             self.x[i] = (self.x[i]*weight_i + self.x[j]*weight_j) / (weight_i + weight_j)
             self.y[i] = (self.y[i]*weight_i + self.y[j]*weight_j) / (weight_i + weight_j)
-            self.te[i] = (weight_i + weight_j) / 2
-            self.x, self.y, self.te, self.chi2 = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.te, j), np.delete(self.chi2, j)
+            self.mass[i] = (weight_i + weight_j) / 2
+            self.x, self.y, self.mass, self.chi2 = np.delete(self.x, j), np.delete(self.y, j), np.delete(self.mass, j), np.delete(self.chi2, j)
+            self.concentration = np.delete(self.concentration, j)
 
         #Merge lenses that are too close to each other
         i = 0
@@ -325,7 +378,7 @@ class Halo:
                     break
             else:
                 i += 1
-    
+
 
     def select_lowest_chi2(self, lens_floor=1):
         # Function that enables the iterative elimination of lenses
@@ -333,11 +386,11 @@ class Halo:
         
         # Sort the lenses by chi^2 value
         sorted_indices = np.argsort(self.chi2)
-        self.x, self.y, self.te, self.chi2 = self.x[sorted_indices], self.y[sorted_indices], self.te[sorted_indices], self.chi2[sorted_indices]
+        self.x, self.y, self.mass, self.chi2 = self.x[sorted_indices], self.y[sorted_indices], self.mass[sorted_indices], self.chi2[sorted_indices]
 
         # Select the 'lens_floor' lenses with the lowest chi^2 values
         if len(self.x) > lens_floor:
-            self.x, self.y, self.te, self.chi2 = self.x[:lens_floor], self.y[:lens_floor], self.te[:lens_floor], self.chi2[:lens_floor]
+            self.x, self.y, self.mass, self.chi2 = self.x[:lens_floor], self.y[:lens_floor], self.mass[:lens_floor], self.chi2[:lens_floor]
 
 
     def iterative_elimination(self, sources, reducedchi2, use_flags):
@@ -347,7 +400,7 @@ class Halo:
         best_lenses = self
         for lens_floor in lens_floors:
             # Clone the lenses object
-            test_lenses = pipeline.Lens(self.x, self.y, self.te, self.chi2)
+            test_lenses = Halo(self.x, self.y, self.z, self.concentration, self.mass, self.redshift, self.chi2)
             test_lenses.select_lowest_chi2(lens_floor=lens_floor)
             reducedchi2 = test_lenses.update_chi2_values(sources, use_flags)
             new_dist = np.abs(reducedchi2 - 1)
@@ -355,19 +408,20 @@ class Halo:
                 best_dist = new_dist
                 best_lenses = test_lenses
         # Update the lenses object with the best set of lenses
-        self.x, self.y, self.te, self.chi2 = best_lenses.x, best_lenses.y, best_lenses.te, best_lenses.chi2
+        self.x, self.y, self.mass, self.chi2 = best_lenses.x, best_lenses.y, best_lenses.mass, best_lenses.chi2
+        self.calculate_concentration()
 
 
     def full_minimization(self, sources, use_flags):
-        guess = self.te
-        params = [self.x, self.y, sources, use_flags]
+        guess = self.mass
+        params = [self.x, self.y, self.redshift, self.concentration, sources, use_flags]
         max_attempts = 5  # Number of optimization attempts with different initial guesses
         best_result = None
         best_params = guess
 
         for _ in range(max_attempts):
             result = opt.minimize(
-                pipeline.chi2wrapper2, guess, args=params,
+                chi2wrapper4, guess, args=params,
                 method='Powell',  
                 tol=1e-8,  
                 options={'maxiter': 1000}
@@ -375,59 +429,35 @@ class Halo:
             if best_result is None or result.fun < best_result.fun:
                 best_result = result
                 best_params = result.x
-        self.te = best_params
+        self.mass = best_params
+
+# --------------------------------------------
+# Pipeline Functions
+# --------------------------------------------
+
+def chi2wrapper3(guess, params):
+    # Wrapper function for chi2 to allow for minimization for a single lens object
+    # Guess = [x, y, mass]
+    # Params = [source, use_flags, concentration, redshift]
+    lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], guess[2], params[3], [0])
+    return pipeline.calculate_chi_squared(params[0],lenses, params[1], lensing='NFW')
+
+
+def chi2wrapper4(guess, params):
+    # Wrapper function for chi2 to allow constrained minimization - 
+    #    only the masses are allowed to vary
+    # This time, the lens object contains the full set of lenses
+    # Guess = [mass1, mass2, ...]
+    # Params = [x, y, redshift, concentration, sources, use_flags]
+    lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], guess, params[2], [0])
+    dof = pipeline.calc_degrees_of_freedom(params[4], lenses, params[5])
+    # Return the reduced chi^2 value - 1, to be minimized
+    return np.abs(pipeline.calculate_chi_squared(params[4], lenses, params[5], lensing='NFW') / dof - 1)
 
 
 # --------------------------------------------
 # File Management Functions
 # --------------------------------------------
-
-def fix_file(z):
-    # Fix the key files
-    # THIS HAS BEEN COMPLETED - IT SHOULD NOT BE RUN AGAIN
-    # IT IS INCLUDED FOR ARCHIVAL PURPOSES
-
-    file = dir + 'Key_{}.MDARK'.format(z) 
-
-    # Define the data types for each column to improve performance
-    data_types = {f'column_{i}': 'float' for i in range(6)}
-
-    df = pd.read_csv(file, nrows=0)
-
-    # Accessing the column names
-    column_names = df.columns.tolist()
-    # The 6th column name is 'Characteristic Size10898716021' - split it into 'Characteristic Size' and '10898716021'
-    problem_column_name = column_names[5]
-    # We know that 'Characteristic Size' is 19 characters long, so we can split the string at that point
-    column_names[5] = problem_column_name[:20] # (0-19), remember that the upper bound is not included
-    # The remaining characters get added to the next column name
-    column_names.insert(6, problem_column_name[20:])
-    # Now grab column names from 7 - 12, turn this into a row of data
-    # and append it to the end of the dataframe
-    header = column_names[6:12]
-    
-    # Corrected column names
-    column_names = column_names[0:6]
-    
-    # Read the CSV file in chunks
-    chunk_size = 10000  # Adjust based on your memory constraints
-    chunks = pd.read_csv(file, dtype=data_types, chunksize=chunk_size)
-
-
-    # Write the corrected file
-    new_file = dir + 'fixed_key_{}.MDARK'.format(z)
-    with open(new_file, 'w') as f:
-        f.write(','.join(column_names) + '\n')
-        f.write(','.join(header) + '\n')
-        # Close here
-        f.close()
-        for chunk in chunks:
-            chunk_subset = chunk.iloc[:, :6]
-            chunk_subset.to_csv(new_file, mode='a', header=False, index=False)
-
-    # close the file
-    f.close()
-
 
 def chunk_data(file):
     # Define the data types for each column to improve performance
@@ -704,7 +734,6 @@ def build_chi2_plot(file_name, ID_file, test_number):
 # MDARK Processing Functions
 # --------------------------------------------
 
-
 def count_clusters(z):
     # Count the number of clusters with within a given mass range
     file = dir + 'fixed_key_{}.MDARK'.format(z)
@@ -759,7 +788,7 @@ def find_halos(ids, z):
             masshalo = complete_data['HaloMass'].to_numpy()
             
             # Create and store the Halo object
-            halos[id] = Halo(xhalo, yhalo, zhalo, chalo, masshalo, z)
+            halos[id] = Halo(xhalo, yhalo, zhalo, chalo, masshalo, z, np.zeros_like(xhalo))
         else:
             print(f'No data found for ID {id}')
 
@@ -817,17 +846,10 @@ def build_lensing_field(halos, z, Nsource = None):
     '''
 
     # Convert the halo coordinates to a 2D projection
-    x,y = utils.project_onto_principal_axis(halos.x, halos.y, halos.z)
-
-    # Convert coordinates to arcseconds (from Mpc)
-    d = cosmo.angular_diameter_distance(z).to(u.meter)
-    # Convert to arcseconds (first to meters as intermediate step)
-    x = (x * 3.086 * 10**22 / d).value * 206265
-    y = (y * 3.086 * 10**22 / d).value * 206265
-
-    # Update the halos object
-    halos.x = x
-    halos.y = y
+    halos.project_to_2D()
+    d = cosmo.angular_diameter_distance(z).to(u.meter).value
+    halos.x *= (3.086 * 10**22 / d) * 206265
+    halos.y *= (3.086 * 10**22 / d) * 206265
 
     lenses = halos # Placeholder for the lenses
 
@@ -1174,48 +1196,130 @@ def visualize_fits(ID_file, lensing_type='NFW'):
 
 
 if __name__ == '__main__':
-    xl = np.array([0])
-    yl = np.array([0])
-    zl = np.array([0])
-    cl = np.array([7.2])
-    ml = np.array([1e12])
-    halo = Halo(xl, yl, zl, cl, ml, 0.3)
+    def _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, title, ax=None, legend=True):
+        """Private helper function to plot the results of lensing reconstruction."""
+        if ax is None:
+            fig, ax = plt.subplots()
+        ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
+        for i, mass in enumerate(lenses.mass):
+            # Put mass in scientific notation
+            ax.annotate('{:.2e}'.format(mass), (lenses.x[i], lenses.y[i]))
+        ax.scatter(sources.x, sources.y, marker='.', color='blue', alpha=0.5, label='Sources')
+        if true_lenses is not None:
+            log_masses = np.log10(true_lenses.mass)
+            size_scale = (log_masses - min(log_masses)) / (max(log_masses) - min(log_masses)) * 100
+            ax.scatter(true_lenses.x, true_lenses.y, marker='o', alpha=0.5, color='green', label='True Lenses', s=size_scale)
+        if legend:
+            ax.legend(loc='upper right')
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        if xmax is not None:
+            ax.set_xlim(-xmax, xmax)
+            ax.set_ylim(-xmax, xmax)
+        ax.set_aspect('equal')
+        if title is not None:
+            ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
 
-    x = np.linspace(-10, 10, 200)
-    shear1, shear2 = halo.calc_shear_signal(x, np.zeros_like(x))
-    flexion1, flexion2 = halo.calc_F_signal(x, np.zeros_like(x))
-    gflexion1, gflexion2 = halo.calc_G_signal(x, np.zeros_like(x))
+    ID_file = 'Data/MDARK_Test/Test14/ID_file_14.csv'
+    # Choose a random cluster ID from the ID file
+    IDs = pd.read_csv(ID_file)['ID'].values
+    # Make sure the IDs are integers
+    IDs = [int(ID) for ID in IDs]
+    ID = IDs[0]
+    # ID = np.random.choice(IDs)
+    zs = [0.194, 0.391, 0.586, 0.782, 0.977]
 
-    _, R200 = halo.calc_R200()
-    rs = R200 / halo.concentration
+    start = time.time()
 
-    fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
-    ax[0].plot(x, shear1, label='Shear 1')
-    ax[0].vlines([-rs, rs], ymin=shear1.min(), ymax=shear1.max(), color='red', linestyle='--', label='Scale Radius')
-    ax[0].set_title('Shear')
-    ax[0].set_ylim(-0.05, 0.05)
-    ax[0].legend()
+    halos = find_halos([ID], zs[0])
 
-    ax[1].plot(x, flexion1, label='Flexion 1')
-    ax[1].vlines([-rs, rs], ymin=flexion1.min(), ymax=flexion1.max(), color='red', linestyle='--', label='Scale Radius')
-    ax[1].set_title('Flexion')
-    ax[1].legend()
+    stop = time.time()
+    print('Time taken to load halos: {}'.format(stop - start))
 
-    ax[2].plot(x, gflexion1, label='G-Flexion 1')
-    ax[2].vlines([-rs, rs], ymin=gflexion1.min(), ymax=gflexion1.max(), color='red', linestyle='--', label='Scale Radius')
-    ax[2].set_title('G-Flexion')
-    ax[2].legend()
+    # Load the halos
+    halo = halos[ID]
+    _, sources, xmax = build_lensing_field(halo, zs[0])
+    print('Built lenses and sources...')
 
-    halo.calculate_concentration()
-    print('Concentration: {}'.format(halo.concentration))
-    shear1, shear2 = halo.calc_shear_signal(x, np.zeros_like(x))
-    flexion1, flexion2 = halo.calc_F_signal(x, np.zeros_like(x))
-    gflexion1, gflexion2 = halo.calc_G_signal(x, np.zeros_like(x))
+    # Copy the halo object, so that one can be altered without affecting the other
+    # import copy
+    # lenses = copy.deepcopy(halo)
 
-    ax[0].plot(x, shear1, label='Shear 1 - New Concentration')
-    ax[1].plot(x, flexion1, label='Flexion 1 - New Concentration')
-    ax[2].plot(x, gflexion1, label='G-Flexion 1 - New Concentration')
+    # Arrange a plot with 6 subplots in 2 rows
+    fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
 
+    use_flags = [True, True, True]  # Use all signals
+
+    # Step 1: Generate initial list of lenses from source guesses
+    # lenses = sources.generate_initial_guess()
+    shear = np.sqrt(sources.e1**2 + sources.e2**2)
+    flexion = np.sqrt(sources.f1**2 + sources.f2**2)
+    r = shear / flexion
+    phi = np.arctan2(sources.f2, sources.f1)
+    xl = sources.x + r * np.cos(phi)
+    yl = sources.y + r * np.sin(phi)
+    eR = 2 * shear * r
+
+    Dl, Ds, Dls = utils.angular_diameter_distances(zs[0], 0.8)
+    mass = (eR/206265)**2 * (Ds * Dl / Dls) / (4 * G * M_solar) * c**2
+    lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, zs[0], np.zeros_like(xl))
+    lenses.calculate_concentration()
+
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
+    print('Initial chi2: {}'.format(reducedchi2))
+    print('Candidate lenses: {}'.format(len(lenses.x)))
+    
+    # Step 2: Optimize guesses with local minimization
+    lenses.optimize_lens_positions(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
+    print('Optimized chi2: {}'.format(reducedchi2))
+    print('Candidate lenses: {}'.format(len(lenses.x)))
+
+    # Step 3: Filter out lenses that are too far from the source population
+    lenses.filter_lens_positions(sources, xmax)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
+    print('Filtered chi2: {}'.format(reducedchi2))
+    print('Candidate lenses: {}'.format(len(lenses.x)))
+
+    # Step 4: Iterative elimination
+    lenses.iterative_elimination(sources, reducedchi2, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Iterative Elimination', ax=axarr[1,0], legend=False)
+    print('Iterative elimination chi2: {}'.format(reducedchi2))
+    print('Candidate lenses: {}'.format(len(lenses.x)))
+
+    # Step 5: Merge lenses that are too close to each other
+    start = time.time()
+    ns = len(sources.x) / (np.pi * xmax**2)
+    merger_threshold = (1/np.sqrt(ns))
+    lenses.merge_close_lenses(merger_threshold=merger_threshold)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Merging', ax=axarr[1,1], legend=False)
+    print('Merging chi2: {}'.format(reducedchi2))
+    print('Candidate lenses: {}'.format(len(lenses.x)))
+
+    # Step 6: Final minimization
+    lenses.full_minimization(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
+    print('Final chi2: {}'.format(reducedchi2))
+    print('Candidate lenses: {}'.format(len(lenses.x)))
+
+    # Compute mass
+    try:
+        mass = np.sum(lenses.mass)
+    except AttributeError:
+        print('Mass not computed')
+        mass = 0
+
+    # Save and show the plot
+    fig.suptitle('Lensing Reconstruction of Cluster ID {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(ID, np.sum(halo.mass), mass))
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
+    # plt.savefig('Images/MDARK/pipeline_visualization/Halo_Fit.png')
     plt.show()
 
 

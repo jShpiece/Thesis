@@ -22,35 +22,20 @@ def print_progress_bar(iteration, total, prefix='', suffix='',
 
 
 # ------------------------
-# General Calculation Functions
+# Cosmology Utility Functions
 # ------------------------
         
+def angular_diameter_distances(z1, z2):
+    dl = cosmo.angular_diameter_distance(z1).to(u.m).value
+    ds = cosmo.angular_diameter_distance(z2).to(u.m).value
+    dls = cosmo.angular_diameter_distance_z1z2(z1, z2).to(u.m).value
+    return dl, ds, dls
 
-def project_onto_principal_axis(x, y, z):
-    """Projects a set of 3D points onto the plane formed by the first two principal eigenvectors."""
 
-    # Sanity checks
-    assert len(x) == len(y) == len(z), "The x, y, and z arrays must have the same length."
-    assert x.ndim == y.ndim == z.ndim == 1, "The x, y, and z arrays must be 1D."
-    assert len(x) > 1, "At least two points are required."
-
-    # Combine the x, y, z coordinates into a single matrix
-    points = np.vstack((x, y, z)).T
-
-    # Calculate the covariance matrix
-    cov_matrix = np.cov(points, rowvar=False)
-
-    # Compute the eigenvectors and eigenvalues
-    eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
-
-    # Sort the eigenvectors by eigenvalues in descending order
-    idx = eigenvalues.argsort()[::-1]
-    eigenvectors = eigenvectors[:, idx]
-
-    # Project the points onto the plane formed by the first two principal eigenvectors
-    projected_points = np.dot(points, eigenvectors[:, :2])
-
-    return projected_points[:, 0], projected_points[:, 1]
+def critical_surface_density(z1, z2):
+    dl, ds, dls = angular_diameter_distances(z1, z2)
+    kappa_c = (c.value**2 / (4 * np.pi * G.value)) * (ds / (dl * dls))
+    return kappa_c
 
 
 # ------------------------
