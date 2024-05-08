@@ -395,7 +395,8 @@ class Halo:
 
     def iterative_elimination(self, sources, reducedchi2, use_flags):
         # Iteratively eliminate lenses that do not improve the chi^2 value
-        lens_floors = np.arange(1, len(self.x) + 1)
+        # lens_floors = np.arange(1, len(self.x) + 1)
+        lens_floors = np.arange(1, 10) # Limit the number of lenses to 10, to test computation time
         best_dist = np.abs(reducedchi2 - 1)
         best_lenses = self
         for lens_floor in lens_floors:
@@ -1225,102 +1226,100 @@ if __name__ == '__main__':
     IDs = pd.read_csv(ID_file)['ID'].values
     # Make sure the IDs are integers
     IDs = [int(ID) for ID in IDs]
-    ID = IDs[0]
     # ID = np.random.choice(IDs)
     zs = [0.194, 0.391, 0.586, 0.782, 0.977]
-
     start = time.time()
-
-    halos = find_halos([ID], zs[0])
-
+    halos = find_halos(IDs, zs[0])
     stop = time.time()
     print('Time taken to load halos: {}'.format(stop - start))
 
-    # Load the halos
-    halo = halos[ID]
-    _, sources, xmax = build_lensing_field(halo, zs[0])
-    print('Built lenses and sources...')
+    for ID in IDs:
+        start = time.time()
+        halo = halos[ID]
+        _, sources, xmax = build_lensing_field(halo, zs[0])
+        print('Built lenses and sources...')
 
-    # Copy the halo object, so that one can be altered without affecting the other
-    # import copy
-    # lenses = copy.deepcopy(halo)
+        # Copy the halo object, so that one can be altered without affecting the other
+        # import copy
+        # lenses = copy.deepcopy(halo)
 
-    # Arrange a plot with 6 subplots in 2 rows
-    fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
+        # Arrange a plot with 6 subplots in 2 rows
+        fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
 
-    use_flags = [True, True, True]  # Use all signals
+        use_flags = [True, True, True]  # Use all signals
 
-    # Step 1: Generate initial list of lenses from source guesses
-    # lenses = sources.generate_initial_guess()
-    shear = np.sqrt(sources.e1**2 + sources.e2**2)
-    flexion = np.sqrt(sources.f1**2 + sources.f2**2)
-    r = shear / flexion
-    phi = np.arctan2(sources.f2, sources.f1)
-    xl = sources.x + r * np.cos(phi)
-    yl = sources.y + r * np.sin(phi)
-    eR = 2 * shear * r
+        # Step 1: Generate initial list of lenses from source guesses
+        # lenses = sources.generate_initial_guess()
+        shear = np.sqrt(sources.e1**2 + sources.e2**2)
+        flexion = np.sqrt(sources.f1**2 + sources.f2**2)
+        r = shear / flexion
+        phi = np.arctan2(sources.f2, sources.f1)
+        xl = sources.x + r * np.cos(phi)
+        yl = sources.y + r * np.sin(phi)
+        eR = 2 * shear * r
 
-    Dl, Ds, Dls = utils.angular_diameter_distances(zs[0], 0.8)
-    mass = (eR/206265)**2 * (Ds * Dl / Dls) / (4 * G * M_solar) * c**2
-    lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, zs[0], np.zeros_like(xl))
-    lenses.calculate_concentration()
+        Dl, Ds, Dls = utils.angular_diameter_distances(zs[0], 0.8)
+        mass = (eR/206265)**2 * (Ds * Dl / Dls) / (4 * G * M_solar) * c**2
+        lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, zs[0], np.zeros_like(xl))
+        lenses.calculate_concentration()
 
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
-    print('Initial chi2: {}'.format(reducedchi2))
-    print('Candidate lenses: {}'.format(len(lenses.x)))
-    
-    # Step 2: Optimize guesses with local minimization
-    lenses.optimize_lens_positions(sources, use_flags)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
-    print('Optimized chi2: {}'.format(reducedchi2))
-    print('Candidate lenses: {}'.format(len(lenses.x)))
+        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
+        print('Initial chi2: {}'.format(reducedchi2))
+        print('Candidate lenses: {}'.format(len(lenses.x)))
+        
+        # Step 2: Optimize guesses with local minimization
+        lenses.optimize_lens_positions(sources, use_flags)
+        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Optimization', ax=axarr[0,1], legend=False)
+        print('Optimized chi2: {}'.format(reducedchi2))
+        print('Candidate lenses: {}'.format(len(lenses.x)))
 
-    # Step 3: Filter out lenses that are too far from the source population
-    lenses.filter_lens_positions(sources, xmax)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
-    print('Filtered chi2: {}'.format(reducedchi2))
-    print('Candidate lenses: {}'.format(len(lenses.x)))
+        # Step 3: Filter out lenses that are too far from the source population
+        lenses.filter_lens_positions(sources, xmax)
+        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Filter', ax=axarr[0,2], legend=False)
+        print('Filtered chi2: {}'.format(reducedchi2))
+        print('Candidate lenses: {}'.format(len(lenses.x)))
 
-    # Step 4: Iterative elimination
-    lenses.iterative_elimination(sources, reducedchi2, use_flags)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Iterative Elimination', ax=axarr[1,0], legend=False)
-    print('Iterative elimination chi2: {}'.format(reducedchi2))
-    print('Candidate lenses: {}'.format(len(lenses.x)))
+        # Step 4: Iterative elimination
+        lenses.iterative_elimination(sources, reducedchi2, use_flags)
+        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Iterative Elimination', ax=axarr[1,0], legend=False)
+        print('Iterative elimination chi2: {}'.format(reducedchi2))
+        print('Candidate lenses: {}'.format(len(lenses.x)))
 
-    # Step 5: Merge lenses that are too close to each other
-    start = time.time()
-    ns = len(sources.x) / (np.pi * xmax**2)
-    merger_threshold = (1/np.sqrt(ns))
-    lenses.merge_close_lenses(merger_threshold=merger_threshold)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Merging', ax=axarr[1,1], legend=False)
-    print('Merging chi2: {}'.format(reducedchi2))
-    print('Candidate lenses: {}'.format(len(lenses.x)))
+        # Step 5: Merge lenses that are too close to each other
+        ns = len(sources.x) / (np.pi * xmax**2)
+        merger_threshold = (1/np.sqrt(ns))
+        lenses.merge_close_lenses(merger_threshold=merger_threshold)
+        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Merging', ax=axarr[1,1], legend=False)
+        print('Merging chi2: {}'.format(reducedchi2))
+        print('Candidate lenses: {}'.format(len(lenses.x)))
 
-    # Step 6: Final minimization
-    lenses.full_minimization(sources, use_flags)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
-    print('Final chi2: {}'.format(reducedchi2))
-    print('Candidate lenses: {}'.format(len(lenses.x)))
+        # Step 6: Final minimization
+        lenses.full_minimization(sources, use_flags)
+        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+        _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Final Minimization', ax=axarr[1,2], legend=False)
+        print('Final chi2: {}'.format(reducedchi2))
+        print('Candidate lenses: {}'.format(len(lenses.x)))
 
-    # Compute mass
-    try:
-        mass = np.sum(lenses.mass)
-    except AttributeError:
-        print('Mass not computed')
-        mass = 0
+        # Compute mass
+        try:
+            mass = np.sum(lenses.mass)
+        except AttributeError:
+            print('Mass not computed')
+            mass = 0
 
-    # Save and show the plot
-    fig.suptitle('Lensing Reconstruction of Cluster ID {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(ID, np.sum(halo.mass), mass))
+        # Save and show the plot
+        fig.suptitle('Lensing Reconstruction of Cluster ID {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(ID, np.sum(halo.mass), mass))
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
-    # plt.savefig('Images/MDARK/pipeline_visualization/Halo_Fit.png')
-    plt.show()
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
+        plt.savefig('Images/MDARK/pipeline_visualization/Halo_Fit_{}.png'.format(ID))
+        # plt.show()
+        stop = time.time()
+        print('Time taken for cluster {}: {}'.format(ID, stop - start))
 
 
     # visualize_fits('Data/MDARK_Test/Test14/ID_file_14.csv', lensing_type='SIS')
