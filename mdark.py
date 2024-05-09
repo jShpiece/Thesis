@@ -1085,6 +1085,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         if title is not None:
             ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
 
+
     # Choose a random cluster ID from the ID file
     IDs = pd.read_csv(ID_file)['ID'].values
     # Make sure the IDs are integers
@@ -1220,6 +1221,51 @@ if __name__ == '__main__':
         ax.set_aspect('equal')
         if title is not None:
             ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
+
+    xl = [0]
+    yl = [0]
+    mass = [1e14]
+    z_source = 0.8
+
+    halos = Halo(xl, yl, [0], [0], mass, 0.2, [0])
+    halos.calculate_concentration()
+    eR = halos.calc_corresponding_einstein_radius(z_source)
+
+    lenses = pipeline.Lens(xl, yl, eR, 0)
+
+    x = 5
+    xs = np.array([x])
+    ys = np.array([0])
+    source_1 = pipeline.Source(xs, ys, 
+                               np.zeros(x), np.zeros(x), np.zeros(x), np.zeros(x), np.zeros(x), np.zeros(x),
+                                 np.ones(x) * 0.1, np.ones(x) * 0.01, np.ones(x) * 0.02)
+    source_2 = pipeline.Source(xs, ys,
+                                 np.zeros(x), np.zeros(x), np.zeros(x), np.zeros(x), np.zeros(x), np.zeros(x),
+                                    np.ones(x) * 0.1, np.ones(x) * 0.01, np.ones(x) * 0.02)
+    print('Applying lensing...')
+    start = time.time()
+    source_1.apply_SIS_lensing(lenses)
+    stop = time.time()
+    print('Time taken to apply SIS lensing: {}'.format(stop - start))
+    start = time.time()
+    source_2.apply_NFW_lensing(halos)
+    stop = time.time()
+    print('Time taken to apply NFW lensing: {}'.format(stop - start))
+
+    start = time.time()
+    gamma1, gamma2 = halos.calc_shear_signal(xs, ys)
+    stop = time.time()
+    print('Time taken to calculate shear: {}'.format(stop - start))
+    start = time.time()
+    f1, f2 = halos.calc_F_signal(xs, ys)
+    stop = time.time()
+    print('Time taken to calculate flexion: {}'.format(stop - start))
+    start = time.time()
+    g1, g2 = halos.calc_G_signal(xs, ys)
+    stop = time.time()
+    print('Time taken to calculate gflexion: {}'.format(stop - start))
+
+    raise ValueError('This function is not yet implemented')
 
     ID_file = 'Data/MDARK_Test/Test14/ID_file_14.csv'
     # Choose a random cluster ID from the ID file
