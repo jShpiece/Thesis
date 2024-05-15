@@ -104,108 +104,105 @@ class Source:
         # Apply the lensing effects of a set of halos to the sources
         # Model the halos as Navarro-Frenk-White (NFW) profiles
         # Then the primary parameters are the masses and concentrations of the halos
-        
+
+        # Define angular diameter distances
+        Dl = utils.angular_diameter_distances(halos.redshift, z_source)[0]
+
+        # Compute R200
+        r200, r200_arcsec = halos.calc_R200()
+        rs = r200 / halos.concentration
+
+        # Compute the critical surface density and characteristic convergence
+        rho_c = cosmo.critical_density(halos.redshift).to(u.kg / u.m**3).value 
+        rho_s = rho_c * halos.calc_delta_c() 
+        sigma_c = utils.critical_surface_density(halos.redshift, z_source)
+        kappa_s = rho_s * rs / sigma_c
+        flexion_s = kappa_s * Dl / rs
+
+        # Compute the distances between each source and each halo
+        x = np.sqrt((self.x - halos.x[:, np.newaxis])**2 + (self.y - halos.y[:, np.newaxis])**2) / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
+
         def radial_term_1(x):
-            # Compute the radial term - this is called f(x) in theory
-            if x < 1:
-                sol = 1 - (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
-            elif x == 1:
-                # This is a special case, unlikely to occur in practice
-                sol = 1 - np.pi / 2
-            elif x > 1:
-                sol = 1 - (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (x + 1)))
-            return sol    
+            with np.errstate(invalid='ignore'):
+                sol = np.where(x < 1, 
+                            1 - (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x))),
+                            np.where(x == 1, 
+                                        1 - np.pi / 2, 
+                                        1 - (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (x + 1)))
+                                        )
+                            )
+            return sol
         
         def radial_term_2(x):
-            # Compute the radial term - this is called g(x) in theory
-            if x < 1:
-                term1 = 8 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / (x**2 * np.sqrt(1 - x**2))
-                term2 = 4 / x**2 * np.log(x / 2)
-                term3 = -2 / (x**2 - 1)
-                term4 = 4 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / ((x**2 - 1) * np.sqrt(1 - x**2))
-                sol = term1 + term2 + term3 + term4
-            elif x == 1:
-                sol = 10 / 3 + 4 * np.log(1 / 2)
-            elif x > 1:
-                term1 = 8 * np.arctan(np.sqrt((x - 1) / (1 + x))) / (x**2 * np.sqrt(x**2 - 1))
-                term2 = 4 / x**2 * np.log(x / 2)
-                term3 = -2 / (x**2 - 1)
-                term4 = 4 * np.arctan(np.sqrt((x - 1) / (1 + x))) / ((x**2 - 1)**(3/2))
-                sol = term1 + term2 + term3 + term4
-            else:
-                print(x)
-                raise ValueError('Invalid value of x')
+            with np.errstate(invalid='ignore'):
+                sol = np.where(x < 1,
+                            8 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / (x**2 * np.sqrt(1 - x**2))
+                            + 4 / x**2 * np.log(x / 2)
+                            - 2 / (x**2 - 1)
+                            + 4 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / ((x**2 - 1) * np.sqrt(1 - x**2)),
+                            np.where(x == 1,
+                                        10 / 3 + 4 * np.log(1 / 2),
+                                        8 * np.arctan(np.sqrt((x - 1) / (1 + x))) / (x**2 * np.sqrt(x**2 - 1))
+                                        + 4 / x**2 * np.log(x / 2)
+                                        - 2 / (x**2 - 1)
+                                        + 4 * np.arctan(np.sqrt((x - 1) / (1 + x))) / ((x**2 - 1)**(3/2))
+                                        )
+                            )
             return sol
 
         def radial_term_3(x):
             # Compute the radial term - this is called h(x) in theory
-            if x < 1:
-                sol = (2 * x) / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x))) - 1 / x
-            elif x == 1:
-                sol = 1 / 3
-            elif x > 1:
-                sol = (2 * x) / np.sqrt(x**2 - 1) * np.arctan(np.sqrt((x - 1) / (1 + x))) - 1 / x
+            with np.errstate(invalid='ignore'):
+                term1_less = 2 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / np.sqrt(1 - x**2)
+                term1_more = 2 * np.arctan(np.sqrt((x - 1) / (1 + x))) / np.sqrt(x**2 - 1)
+                term2 = 1 / x
+                sol = np.where(x < 1, term1_less - term2,
+                                np.where(x == 1, 1 / 3,
+                                        term1_more - term2)
+                                )
             return sol
-
+        
         def radial_term_4(x):
             # Compute the radial term - this is called i(x) in theory
-            leading_term = (8 / x**3 - 20 / x + 15*x)
-            if x < 1:
-                sol = leading_term * (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
-            elif x == 1:
-                sol = leading_term
-            elif x > 1:
-                sol = leading_term * (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (1 + x)))
+            with np.errstate(invalid='ignore'):
+                sol = np.where(x < 1, 
+                            8 / x**3 * np.arctanh(np.sqrt((1 - x) / (1 + x))) + (3 / x) * (1 - 2 * x**2) / (x**2 - 1)**2,
+                            np.where(x == 1, 
+                                        8 / 3,
+                                        8 / x**3 * np.arctan(np.sqrt((x - 1) / (1 + x))) + (3 / x) * (1 - 2 * x**2) / (x**2 - 1)**2
+                                        )
+                            )
             return sol
 
-        # Define angular diameter distances
-        Dl, _, _ = utils.angular_diameter_distances(self.redshift, z_source)
+        term_1 = radial_term_1(x)
+        term_2 = radial_term_2(x)
+        term_3 = radial_term_3(x)
+        term_4 = radial_term_4(x)
 
-        # Compute R200
-        r200, r200_arcsec = halos.calc_R200()
-        rs = r200 / self.concentration
+        # Compute the lensing signals
+        dx = self.x - halos.x[:, np.newaxis]
+        dy = self.y - halos.y[:, np.newaxis]
+        r = np.sqrt(dx**2 + dy**2)
+        cos_phi = dx / r
+        sin_phi = dy / r
+        cos2phi = cos_phi**2 - sin_phi**2
+        sin2phi = 2 * cos_phi * sin_phi
+        cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
+        sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
 
-        # Compute the critical surface density and characteristic convergence
-        rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value 
-        rho_s = rho_c * self.calc_delta_c() 
-        sigma_c = utils.critical_surface_density(self.redshift, z_source)
-        kappa_s = rho_s * rs / sigma_c
-        flexion_s = kappa_s * Dl / rs
+        # Apply NFW lensing effects for ellipticity (e1, e2), flexion (f1, f2), and g-flexion (g1, g2)
+        shear_mag = - kappa_s[:, np.newaxis] * term_2
+        flexion_mag = (-2 * flexion_s[:, np.newaxis] / (x**2 - 1)**2) * (2 * x * term_1 - term_3) / 206265
+        g_flexion_mag = 2 * flexion_s[:, np.newaxis] * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2) / 206265
 
-        # Iterate over each halo to apply its effect
-        for i in range(len(halos.x)):
-            dx = self.x - halos.x[i]
-            dy = self.y - halos.y[i]
-            r = np.sqrt(dx**2 + dy**2)
+        self.e1 += np.sum(shear_mag * cos2phi, axis=0)
+        self.e2 += np.sum(shear_mag * sin2phi, axis=0)
+        self.f1 += np.sum(flexion_mag * cos3phi, axis=0)
+        self.f2 += np.sum(flexion_mag * sin3phi, axis=0)
+        self.g1 += np.sum(g_flexion_mag * cos3phi, axis=0)
+        self.g2 += np.sum(g_flexion_mag * sin3phi, axis=0)
 
-            x = r / (r200_arcsec / self.concentration) # In arcseconds
 
-            # Compute radial terms
-            radial_term_1 = np.array([radial_term_1(val) for val in x])
-            radial_term_2 = np.array([radial_term_2(val) for val in x])
-            radial_term_3 = np.array([radial_term_3(val) for val in x])
-            radial_term_4 = np.array([radial_term_4(val) for val in x])
-
-            # Compute the directional terms
-            cos_phi = dx / r
-            sin_phi = dy / r
-            cos2phi = cos_phi * cos_phi - sin_phi * sin_phi
-            sin2phi = 2 * cos_phi * sin_phi
-            cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
-            sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
-
-            # Compute lensing magnitudes
-            shear_mag = kappa_s * radial_term_2
-            F_mag = (-2 * flexion_s / (x**2 - 1)**2) * (2 * x * radial_term_1 - radial_term_3) / 206265
-            G_mag = 2 * flexion_s * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + radial_term_4) / (x**2 - 1)**2) / 206265
-
-            # Apply NFW lensing effects for ellipticity (e1, e2), flexion (f1, f2), and g-flexion (g1, g2)
-            self.e1 += -shear_mag * cos2phi
-            self.e2 += -shear_mag * sin2phi
-            self.f1 += F_mag * cos_phi
-            self.f2 += F_mag * sin_phi
-            self.g1 += G_mag * cos3phi
-            self.g2 += G_mag * sin3phi
 
 
 class Lens:
