@@ -118,11 +118,19 @@ class Halo:
     def update_chi2_values(self, sources, use_flags):
         # Given a set of sources, update the chi^2 values for each lens
         chi2_values = np.zeros(len(self.x))
+        chi_2_global = pipeline.calculate_chi_squared(sources, self, use_flags, lensing='NFW')
         for i in range(len(self.x)):
-            chi2_values[i] = chi2wrapper3([[self.x[i]], [self.y[i]], [self.mass[i]]], [sources, use_flags, self.concentration[i], self.redshift])
+            # Create a new set of lenses with the ith lens removed
+            # Do this without modifying the original set of lenses
+            x = np.delete(self.x, i)
+            y = np.delete(self.y, i)
+            mass = np.delete(self.mass, i)
+            concentration = np.delete(self.concentration, i)
+            chi2_val = pipeline.calculate_chi_squared(sources, Halo(x, y, self.z, concentration, mass, self.redshift, [0]), use_flags, lensing='NFW')
+            chi2_values[i] = chi2_val - chi_2_global # Track whether removing a lens improves the chi^2 value - negative values are good
         self.chi2 = chi2_values
         dof = pipeline.calc_degrees_of_freedom(sources, self, use_flags)
-        return np.sum(chi2_values) / dof
+        return chi_2_global / dof
 
 
     def optimize_lens_positions(self, sources, use_flags):
@@ -981,6 +989,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         lenses.calculate_concentration()
 
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+        # reducedchi2 = 1
         _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
         stop = time.time()
         print('Time taken to generate initial guesses: {}'.format(stop - start))
@@ -1052,7 +1061,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
 
 
 if __name__ == '__main__':
-    # visualize_fits('Data/MDARK_Test/Test14/ID_file_14.csv', lensing_type='SIS')
+    visualize_fits('Data/MDARK_Test/Test14/ID_file_14.csv', lensing_type='NFW')
 
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
