@@ -165,11 +165,11 @@ class Source:
         def radial_term_4(x):
             # Compute the radial term - this is called i(x) in theory
             with np.errstate(invalid='ignore'):
-                sol = np.where(x < 1, 
-                            8 / x**3 * np.arctanh(np.sqrt((1 - x) / (1 + x))) + (3 / x) * (1 - 2 * x**2) / (x**2 - 1)**2,
+                leading_term = 8 / x**3 - 20 / x + 15 * x
+                sol = np.where(x < 1, leading_term * (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x))),
                             np.where(x == 1, 
-                                        8 / 3,
-                                        8 / x**3 * np.arctan(np.sqrt((x - 1) / (1 + x))) + (3 / x) * (1 - 2 * x**2) / (x**2 - 1)**2
+                                        leading_term * (2 / np.sqrt(2)),
+                                        leading_term * (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (x + 1)))
                                         )
                             )
             return sol
@@ -183,17 +183,17 @@ class Source:
         dx = self.x - halos.x[:, np.newaxis]
         dy = self.y - halos.y[:, np.newaxis]
         r = np.sqrt(dx**2 + dy**2)
-        cos_phi = dx / r
-        sin_phi = dy / r
-        cos2phi = cos_phi**2 - sin_phi**2
-        sin2phi = 2 * cos_phi * sin_phi
-        cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
-        sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
+        cos_phi = dx / r # Cosine of the angle between the source and the halo
+        sin_phi = dy / r # Sine of the angle between the source and the halo
+        cos2phi = cos_phi**2 - sin_phi**2 # Cosine of 2*phi
+        sin2phi = 2 * cos_phi * sin_phi # Sine of 2*phi
+        cos3phi = cos2phi * cos_phi - sin2phi * sin_phi # Cosine of 3*phi
+        sin3phi = sin2phi * cos_phi + cos2phi * sin_phi # Sine of 3*phi
 
         # Apply NFW lensing effects for ellipticity (e1, e2), flexion (f1, f2), and g-flexion (g1, g2)
         shear_mag = - kappa_s[:, np.newaxis] * term_2
         flexion_mag = (-2 * flexion_s[:, np.newaxis] / (x**2 - 1)**2) * (2 * x * term_1 - term_3) / 206265
-        g_flexion_mag = 2 * flexion_s[:, np.newaxis] * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2) / 206265
+        g_flexion_mag = (2 * flexion_s[:, np.newaxis] * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)) / 206265
 
         self.e1 += np.sum(shear_mag * cos2phi, axis=0)
         self.e2 += np.sum(shear_mag * sin2phi, axis=0)
@@ -201,8 +201,6 @@ class Source:
         self.f2 += np.sum(flexion_mag * sin3phi, axis=0)
         self.g1 += np.sum(g_flexion_mag * cos3phi, axis=0)
         self.g2 += np.sum(g_flexion_mag * sin3phi, axis=0)
-
-
 
 
 class Lens:
