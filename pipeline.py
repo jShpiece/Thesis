@@ -197,8 +197,8 @@ class Source:
 
         self.e1 += np.sum(shear_mag * cos2phi, axis=0)
         self.e2 += np.sum(shear_mag * sin2phi, axis=0)
-        self.f1 += np.sum(flexion_mag * cos3phi, axis=0)
-        self.f2 += np.sum(flexion_mag * sin3phi, axis=0)
+        self.f1 += np.sum(flexion_mag * cos_phi, axis=0)
+        self.f2 += np.sum(flexion_mag * sin_phi, axis=0)
         self.g1 += np.sum(g_flexion_mag * cos3phi, axis=0)
         self.g2 += np.sum(g_flexion_mag * sin3phi, axis=0)
 

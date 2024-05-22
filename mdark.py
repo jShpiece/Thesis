@@ -157,13 +157,22 @@ class Halo:
             best_result = None
             best_params = guess
             for _ in range(max_attempts):
+                
+                result = opt.minimize(
+                    chi2wrapper3, guess, args=([one_source, use_flags, self.concentration[i], self.redshift]), 
+                    method='Nelder-Mead', 
+                    tol=1e-8, 
+                    options={'maxiter': 1000}
+                )
+                '''
+                # Lets try a BFGS method, to avoid getting stuck in local minima
                 result = opt.minimize(
                     chi2wrapper3, guess, args=([one_source, use_flags, self.concentration[i], self.redshift]), 
                     method='BFGS', 
                     tol=1e-8, 
                     options={'maxiter': 1000}
                 )
-
+                '''
                 if best_result is None or result.fun < best_result.fun:
                     best_result = result
                     best_params = result.x
@@ -1040,11 +1049,18 @@ def visualize_fits(ID_file, lensing_type='NFW'):
     for ID in IDs:
         global_start = time.time()
         halo = halos[ID]
+        # Simplify for tests - lets just look at the 3 largest halos
+        indices = np.argsort(halo.mass)[::-1][:3]
+        halo.x = halo.x[indices]
+        halo.y = halo.y[indices]
+        halo.mass = halo.mass[indices]
+        halo.z = halo.z[indices]
+        halo.concentration = halo.concentration[indices]
+        
         _, sources, xmax = build_lensing_field(halo, zs[0])
         print('Built lenses and sources...')
 
         # Copy the halo object, so that one can be altered without affecting the other
-        import copy
         lenses = copy.deepcopy(halo)
 
         # Arrange a plot with 6 subplots in 2 rows
@@ -1064,7 +1080,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         eR = 2 * shear * r
 
         Dl, Ds, Dls = utils.angular_diameter_distances(zs[0], 0.8)
-        mass = (eR/206265)**2 * (Ds * Dl / Dls) / (4 * G * M_solar) * c**2
+        mass = (eR/206265)**2 * (Ds * Dl / Dls) * c**2 / (4 * G * M_solar) * 10**3
         lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, zs[0], np.zeros_like(xl))
         lenses.calculate_concentration()
 
@@ -1104,11 +1120,11 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         # This ensures that the true answers are present, which means that the pipeline should find them
         # If it doesn't, then the step is broken
         # If it does, it means that the step is working as intended, and that the issue with the pipeline is an earlier step
-        lenses.x = np.concatenate((lenses.x, halo.x))
-        lenses.y = np.concatenate((lenses.y, halo.y))
-        lenses.mass = np.concatenate((lenses.mass, halo.mass))
-        lenses.z = np.concatenate((lenses.z, halo.z))
-        lenses.concentration = np.concatenate((lenses.concentration, halo.concentration))
+        #lenses.x = np.concatenate((lenses.x, halo.x))
+        #lenses.y = np.concatenate((lenses.y, halo.y))
+        #lenses.mass = np.concatenate((lenses.mass, halo.mass))
+        #lenses.z = np.concatenate((lenses.z, halo.z))
+        #lenses.concentration = np.concatenate((lenses.concentration, halo.concentration))
         # Update the chi2 values
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
         start = time.time()
@@ -1215,38 +1231,60 @@ if __name__ == '__main__':
     # chi2_heatmap()
     # Create a simple system to test this
     xmax = 10
-    xl = np.array([0])
-    yl = np.array([0])
+    xl = np.array([0.0])
+    yl = np.array([0.0])
     mass = np.array([1e14])
     z = 0.2
     halo = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, z, np.zeros_like(xl))
     halo.calculate_concentration()
 
     ns = 0.01
-    Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    sources = utils.createSources(halo, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
-
+    # Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
+    Nsource = 1
+    # sources = utils.createSources(halo, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
+    xs = np.array([5.0])
+    ys = np.array([5.0])
+    sources = pipeline.Source(xs, ys, 
+                              np.zeros_like(xs), np.zeros_like(xs), 
+                              np.zeros_like(xs), np.zeros_like(xs), 
+                              np.zeros_like(xs), np.zeros_like(xs), 
+                              np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
+    sources.apply_NFW_lensing(halo)
     true_chi2 = halo.update_chi2_values(sources, [True, True, False])
     print('True chi2: {}'.format(true_chi2))
+
+    # Build the guessed lenses
+    shear = np.sqrt(sources.e1**2 + sources.e2**2)
+    flexion = np.sqrt(sources.f1**2 + sources.f2**2)
+    r = shear / flexion
+    phi = np.arctan2(sources.f2, sources.f1)
+    # r is the distance from the source to the lens
+    # phi is the angle pointing from the source to the lens
+    xl = sources.x + r * np.cos(phi)
+    yl = sources.y + r * np.sin(phi)
+    eR = 2 * shear * r
+
+    Dl, Ds, Dls = utils.angular_diameter_distances(z, 0.8)
+    mass = (eR/206265)**2 * (Ds * Dl / Dls) * c**2 / (4 * G * M_solar) * 10**3
+    lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, z, np.zeros_like(xl))
+    lenses.calculate_concentration()
 
     # Okay look, the fail points are the minimization and the lens number selection - the rest is fine (or should be)
     # So let's start with the minimization
     # Place a couple of lenses near the true lenses and see if the minimization gets closer or further away from the true values
-    lenses = copy.deepcopy(halo)
+    # lenses = copy.deepcopy(halo)
     # Now perturb the fit parameters (position and mass)
     # First, the position (correcting for different data types) 
-    lenses.x = xl + np.random.normal(0, 2, len(lenses.x))
-    lenses.y = np.random.normal(0, 2, len(lenses.y))
+    # lenses.x = xl + np.random.normal(0, 2, len(lenses.x))
+    # lenses.y = np.random.normal(0, 2, len(lenses.y))
     # Now the mass
-    lenses.mass += np.random.normal(0, 1e13, len(lenses.mass))
+    # lenses.mass += np.random.normal(0, 1e13, len(lenses.mass))
     chi2 = lenses.update_chi2_values(sources, [True, True, True])
     print('Initial chi2: {}'.format(chi2))
     print('Parameter | True Value | Initial Guess')
     print('x | {} | {}'.format(halo.x, lenses.x))
     print('y | {} | {}'.format(halo.y, lenses.y))
     print('Mass | {} | {}'.format(halo.mass, lenses.mass))
-    x_guess = copy.deepcopy(lenses.x)
-    y_guess = copy.deepcopy(lenses.y)
 
     # Now run the minimization
     use_flags = [True, True, True]
@@ -1260,8 +1298,11 @@ if __name__ == '__main__':
     # Now plot the results
     plt.figure()
     plt.scatter(halo.x, halo.y, color='red', label='True Lenses')
-    plt.scatter(x_guess, y_guess, color='blue', label='Initial Guess')
+    plt.scatter(xl, yl, color='blue', label='Initial Guess')
     plt.scatter(lenses.x, lenses.y, color='blue', marker='x', label='Minimized Lenses')
+    plt.scatter(sources.x, sources.y, color='green', marker='.', label='Sources')
+    # Create a flexion vector pointing from the source to the lens
+    plt.quiver(sources.x, sources.y, sources.f1, sources.f2, color='green', label='Source Flexion')
     plt.xlim(-xmax, xmax)
     plt.ylim(-xmax, xmax)
     plt.legend()
