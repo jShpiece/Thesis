@@ -112,7 +112,7 @@ class Source:
         r200, r200_arcsec = halos.calc_R200()
         rs = r200 / halos.concentration
 
-        # Compute the critical surface density and characteristic convergence
+        # Compute the critical surface density and characteristic convergence / flexion
         rho_c = cosmo.critical_density(halos.redshift).to(u.kg / u.m**3).value 
         rho_s = rho_c * halos.calc_delta_c() 
         sigma_c = utils.critical_surface_density(halos.redshift, z_source)
@@ -122,6 +122,7 @@ class Source:
         # Compute the distances between each source and each halo
         x = np.sqrt((self.x - halos.x[:, np.newaxis])**2 + (self.y - halos.y[:, np.newaxis])**2) / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
 
+        # Define the radial terms that go into lensing calculations - these are functions of x
         def radial_term_1(x):
             with np.errstate(invalid='ignore'):
                 sol = np.where(x < 1, 
@@ -180,6 +181,8 @@ class Source:
         term_4 = radial_term_4(x)
 
         # Compute the lensing signals
+
+        # Begin with the distances and angles between the source and the halo
         dx = self.x - halos.x[:, np.newaxis]
         dy = self.y - halos.y[:, np.newaxis]
         r = np.sqrt(dx**2 + dy**2)
@@ -190,11 +193,12 @@ class Source:
         cos3phi = cos2phi * cos_phi - sin2phi * sin_phi # Cosine of 3*phi
         sin3phi = sin2phi * cos_phi + cos2phi * sin_phi # Sine of 3*phi
 
-        # Apply NFW lensing effects for ellipticity (e1, e2), flexion (f1, f2), and g-flexion (g1, g2)
+        # Compute lensing magnitudes (in arcseconds)
         shear_mag = - kappa_s[:, np.newaxis] * term_2
         flexion_mag = (-2 * flexion_s[:, np.newaxis] / (x**2 - 1)**2) * (2 * x * term_1 - term_3) / 206265
         g_flexion_mag = (2 * flexion_s[:, np.newaxis] * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)) / 206265
 
+        # Apply lensing effects to the source
         self.e1 += np.sum(shear_mag * cos2phi, axis=0)
         self.e2 += np.sum(shear_mag * sin2phi, axis=0)
         self.f1 += np.sum(flexion_mag * cos_phi, axis=0)

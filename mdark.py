@@ -157,7 +157,7 @@ class Halo:
             best_result = None
             best_params = guess
             for _ in range(max_attempts):
-                
+                '''
                 result = opt.minimize(
                     chi2wrapper3, guess, args=([one_source, use_flags, self.concentration[i], self.redshift]), 
                     method='Nelder-Mead', 
@@ -172,7 +172,7 @@ class Halo:
                     tol=1e-8, 
                     options={'maxiter': 1000}
                 )
-                '''
+                
                 if best_result is None or result.fun < best_result.fun:
                     best_result = result
                     best_params = result.x
@@ -814,7 +814,7 @@ def build_lensing_field(halos, z, Nsource = None):
     # Generate a set of background galaxies
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
+    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.001, sigf=0.0001, sigg=0.0002, xmax=xmax, lens_type='NFW')
 
     return lenses, sources, xmax
 
@@ -1066,7 +1066,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         # Arrange a plot with 6 subplots in 2 rows
         fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
 
-        use_flags = [True, True, True]  # Use all signals
+        use_flags = [True, True, False]  # Use all signals
 
         # Step 1: Generate initial list of lenses from source guesses
         # lenses = sources.generate_initial_guess()
@@ -1090,7 +1090,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         stop = time.time()
         print('Time taken to generate initial guesses: {}'.format(stop - start))
         print('Initial chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-        
+        '''
         # Step 2: Optimize guesses with local minimization
         start = time.time()
         lenses.optimize_lens_positions(sources, use_flags)
@@ -1105,7 +1105,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         stop = time.time()
         print('Time taken to optimize initial guesses: {}'.format(stop - start))
         print('Optimized chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-
+        '''
         # Step 3: Filter out lenses that are too far from the source population
         start = time.time()
         lenses.filter_lens_positions(sources, xmax)
@@ -1242,13 +1242,26 @@ if __name__ == '__main__':
     # Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
     Nsource = 1
     # sources = utils.createSources(halo, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
-    xs = np.array([5.0])
-    ys = np.array([5.0])
+    xs = np.array([-2.0])
+    ys = np.array([3.0])
+    source_lens_distance = np.sqrt((xs - xl)**2 + (ys - yl)**2)
+
+    sig_gamma = 0.1
+    sig_flex = 0.01
+    sig_g = 0.02
     sources = pipeline.Source(xs, ys, 
                               np.zeros_like(xs), np.zeros_like(xs), 
                               np.zeros_like(xs), np.zeros_like(xs), 
                               np.zeros_like(xs), np.zeros_like(xs), 
-                              np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
+                              np.ones(len(xs)) * sig_gamma, np.ones(len(xs)) * sig_flex, np.ones(len(xs)) * sig_g)
+    # Apply noise
+    sources.e1 += np.random.normal(0, sig_gamma, len(sources.x))
+    sources.e2 += np.random.normal(0, sig_gamma, len(sources.x))
+    sources.f1 += np.random.normal(0, sig_flex, len(sources.x))
+    sources.f2 += np.random.normal(0, sig_flex, len(sources.x))
+    sources.g1 += np.random.normal(0, sig_g, len(sources.x))
+    sources.g2 += np.random.normal(0, sig_g, len(sources.x))
+
     sources.apply_NFW_lensing(halo)
     true_chi2 = halo.update_chi2_values(sources, [True, True, False])
     print('True chi2: {}'.format(true_chi2))
@@ -1257,6 +1270,7 @@ if __name__ == '__main__':
     shear = np.sqrt(sources.e1**2 + sources.e2**2)
     flexion = np.sqrt(sources.f1**2 + sources.f2**2)
     r = shear / flexion
+    print('distance ratio: {}'.format(r / source_lens_distance))
     phi = np.arctan2(sources.f2, sources.f1)
     # r is the distance from the source to the lens
     # phi is the angle pointing from the source to the lens
@@ -1267,6 +1281,8 @@ if __name__ == '__main__':
     Dl, Ds, Dls = utils.angular_diameter_distances(z, 0.8)
     mass = (eR/206265)**2 * (Ds * Dl / Dls) * c**2 / (4 * G * M_solar) * 10**3
     lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, z, np.zeros_like(xl))
+    xl = copy.deepcopy(xl)
+    yl = copy.deepcopy(yl)
     lenses.calculate_concentration()
 
     # Okay look, the fail points are the minimization and the lens number selection - the rest is fine (or should be)
