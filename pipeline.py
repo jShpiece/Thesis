@@ -52,6 +52,14 @@ class Source:
             concentration = 5 # Placeholder concentration
             return r, mass, concentration
 
+    def apply_noise(self):
+        # Apply noise to the source - lensing properties
+        self.e1 += np.random.normal(0, self.sigs)
+        self.e2 += np.random.normal(0, self.sigs)
+        self.f1 += np.random.normal(0, self.sigf)
+        self.f2 += np.random.normal(0, self.sigf)
+        self.g1 += np.random.normal(0, self.sigg)
+        self.g2 += np.random.normal(0, self.sigg)
 
     def apply_SIS_lensing(self, lenses):
         """
