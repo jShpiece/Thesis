@@ -1236,6 +1236,31 @@ def test_nfw_lensing():
     
     halos = find_halos([ID], zs)
     halo = halos[ID]
+    # Correct positioning
+    halos.project_to_2D()
+    d = cosmo.angular_diameter_distance(zs).to(u.meter).value
+    halos.x *= (3.086 * 10**22 / d) * 206265
+    halos.y *= (3.086 * 10**22 / d) * 206265
+
+    lenses = halos # Placeholder for the lenses
+
+    # Center the lenses at (0, 0)
+    # This is a necessary step for the pipeline
+    # Let the centroid be the location of the most massive halo
+    # This will be where we expect to see the most ligwht, which
+    # means it will be where observations are centered
+
+    largest_halo = np.argmax(halos.mass)
+    centroid = [halos.x[largest_halo], halos.y[largest_halo]]
+    lenses.x -= centroid[0] 
+    lenses.y -= centroid[1] 
+
+    xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
+    
+    # Don't allow the field of view to be larger than 2 arcminutes - or smaller than 1 arcminute
+    xmax = np.min([xmax, 3*60])
+    xmax = np.max([xmax, 1*60])
+
     indices = np.argsort(halo.mass)[::-1][:3]
     halo.x = halo.x[indices]
     halo.y = halo.y[indices]
