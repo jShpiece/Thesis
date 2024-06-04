@@ -37,20 +37,28 @@ class Source:
         return valid_indices
 
 
-    def generate_initial_guess(self, lens_type='SIS'):
+    def generate_initial_guess(self, lens_type='SIS', z_l = 0.5, z_s = 1.0):
         # Generate initial guesses for possible lens positions based on the source ellipticity and flexion
         phi = np.arctan2(self.f2, self.f1)
         gamma = np.sqrt(self.e1**2 + self.e2**2)
         flexion = np.sqrt(self.f1**2 + self.f2**2)
-        r = gamma / flexion # A characteristic distance from the source
 
         if lens_type == 'SIS':
+            r = gamma / flexion # A characteristic distance from the source
             te = 2 * gamma * r # The Einstein radius of the lens
             return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
         elif lens_type == 'NFW':
-            mass = 1e14 # Placeholder mass
-            concentration = 5 # Placeholder concentration
-            return r, mass, concentration
+            r = gamma / flexion # A characteristic distance from the source
+            concentration = 5 # A characteristic concentration parameter
+            r200 = r*concentration # A characteristic radius
+            rho_c = cosmo.critical_density(z_s).to(u.solMass / u.Mpc**3).value
+            delta_c = (200 / 3) * concentration**3 / (np.log(1 + concentration) - concentration / (1 + concentration))
+            mass = (4/3) * np.pi * r200**3 * delta_c * rho_c
+
+            xl = np.array(self.x + r * np.cos(phi))
+            yl = np.array(self.y + r * np.sin(phi))
+            return xl, yl, mass
+
 
     def apply_noise(self):
         # Apply noise to the source - lensing properties
@@ -60,6 +68,7 @@ class Source:
         self.f2 += np.random.normal(0, self.sigf)
         self.g1 += np.random.normal(0, self.sigg)
         self.g2 += np.random.normal(0, self.sigg)
+
 
     def apply_SIS_lensing(self, lenses):
         """
@@ -109,110 +118,14 @@ class Source:
 
     
     def apply_NFW_lensing(self, halos, z_source=1):
-        # Apply the lensing effects of a set of halos to the sources
-        # Model the halos as Navarro-Frenk-White (NFW) profiles
-        # Then the primary parameters are the masses and concentrations of the halos
+        e1, e2, f1, f2, g1, g2 = utils.calculate_lensing_signals_nfw(halos, self, z_source)
 
-        # Define angular diameter distances
-        Dl = utils.angular_diameter_distances(halos.redshift, z_source)[0]
-
-        # Compute R200
-        r200, r200_arcsec = halos.calc_R200()
-        rs = r200 / halos.concentration
-
-        # Compute the critical surface density and characteristic convergence / flexion
-        rho_c = cosmo.critical_density(halos.redshift).to(u.kg / u.m**3).value 
-        rho_s = rho_c * halos.calc_delta_c() 
-        sigma_c = utils.critical_surface_density(halos.redshift, z_source)
-        kappa_s = rho_s * rs / sigma_c
-        flexion_s = kappa_s * Dl / rs
-
-        # Compute the distances between each source and each halo
-        x = np.sqrt((self.x - halos.x[:, np.newaxis])**2 + (self.y - halos.y[:, np.newaxis])**2) / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
-
-        # Define the radial terms that go into lensing calculations - these are functions of x
-        def radial_term_1(x):
-            with np.errstate(invalid='ignore'):
-                sol = np.where(x < 1, 
-                            1 - (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x))),
-                            np.where(x == 1, 
-                                        1 - np.pi / 2, 
-                                        1 - (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (x + 1)))
-                                        )
-                            )
-            return sol
-        
-        def radial_term_2(x):
-            with np.errstate(invalid='ignore'):
-                sol = np.where(x < 1,
-                            8 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / (x**2 * np.sqrt(1 - x**2))
-                            + 4 / x**2 * np.log(x / 2)
-                            - 2 / (x**2 - 1)
-                            + 4 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / ((x**2 - 1) * np.sqrt(1 - x**2)),
-                            np.where(x == 1,
-                                        10 / 3 + 4 * np.log(1 / 2),
-                                        8 * np.arctan(np.sqrt((x - 1) / (1 + x))) / (x**2 * np.sqrt(x**2 - 1))
-                                        + 4 / x**2 * np.log(x / 2)
-                                        - 2 / (x**2 - 1)
-                                        + 4 * np.arctan(np.sqrt((x - 1) / (1 + x))) / ((x**2 - 1)**(3/2))
-                                        )
-                            )
-            return sol
-
-        def radial_term_3(x):
-            # Compute the radial term - this is called h(x) in theory
-            with np.errstate(invalid='ignore'):
-                term1_less = 2 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / np.sqrt(1 - x**2)
-                term1_more = 2 * np.arctan(np.sqrt((x - 1) / (1 + x))) / np.sqrt(x**2 - 1)
-                term2 = 1 / x
-                sol = np.where(x < 1, term1_less - term2,
-                                np.where(x == 1, 1 / 3,
-                                        term1_more - term2)
-                                )
-            return sol
-        
-        def radial_term_4(x):
-            # Compute the radial term - this is called i(x) in theory
-            with np.errstate(invalid='ignore'):
-                leading_term = 8 / x**3 - 20 / x + 15 * x
-                sol = np.where(x < 1, leading_term * (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x))),
-                            np.where(x == 1, 
-                                        leading_term * (2 / np.sqrt(2)),
-                                        leading_term * (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (x + 1)))
-                                        )
-                            )
-            return sol
-
-        term_1 = radial_term_1(x)
-        term_2 = radial_term_2(x)
-        term_3 = radial_term_3(x)
-        term_4 = radial_term_4(x)
-
-        # Compute the lensing signals
-
-        # Begin with the distances and angles between the source and the halo
-        dx = self.x - halos.x[:, np.newaxis]
-        dy = self.y - halos.y[:, np.newaxis]
-        r = np.sqrt(dx**2 + dy**2)
-        cos_phi = dx / r # Cosine of the angle between the source and the halo
-        sin_phi = dy / r # Sine of the angle between the source and the halo
-        cos2phi = cos_phi**2 - sin_phi**2 # Cosine of 2*phi
-        sin2phi = 2 * cos_phi * sin_phi # Sine of 2*phi
-        cos3phi = cos2phi * cos_phi - sin2phi * sin_phi # Cosine of 3*phi
-        sin3phi = sin2phi * cos_phi + cos2phi * sin_phi # Sine of 3*phi
-
-        # Compute lensing magnitudes (in arcseconds)
-        shear_mag = - kappa_s[:, np.newaxis] * term_2
-        flexion_mag = (-2 * flexion_s[:, np.newaxis] / (x**2 - 1)**2) * (2 * x * term_1 - term_3) / 206265
-        g_flexion_mag = (2 * flexion_s[:, np.newaxis] * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)) / 206265
-
-        # Apply lensing effects to the source
-        self.e1 += np.sum(shear_mag * cos2phi, axis=0)
-        self.e2 += np.sum(shear_mag * sin2phi, axis=0)
-        self.f1 += np.sum(flexion_mag * cos_phi, axis=0)
-        self.f2 += np.sum(flexion_mag * sin_phi, axis=0)
-        self.g1 += np.sum(g_flexion_mag * cos3phi, axis=0)
-        self.g2 += np.sum(g_flexion_mag * sin3phi, axis=0)
+        self.e1 += e1
+        self.e2 += e2
+        self.f1 += f1
+        self.f2 += f2
+        self.g1 += g1
+        self.g2 += g2
 
 
 class Lens:
