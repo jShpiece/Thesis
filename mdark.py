@@ -334,7 +334,7 @@ def assign_lens_chi2_values(lenses, sources, use_flags):
     weights = np.exp(-r**2 / r0**2)
     # Normalize the weights
     weights /= np.sum(weights, axis=1)[:, None]
-    assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1."
+    assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
     assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
 
     # Unpack flags for clarity
@@ -1226,56 +1226,67 @@ def chi2_heatmap():
     plt.show()
 
 
-def test_nfw_lensing():
+def test_initial_steps(lens_type='NFW'):
     # Pick a cluster from the MDARK data, select the three largest halos, and test the NFW lensing
     ID = 11426787731
     zs = 0.194
     use_flags = [True, True, True]
 
+    xmax = 20 # Default xmax
+
     # Build the halos
+    if lens_type == 'NFW':
+        halos = find_halos([ID], zs)
+        halo = halos[ID]
+        # Correct positioning
+        halo.project_to_2D()
+        d = cosmo.angular_diameter_distance(zs).to(u.meter).value
+        halo.x *= (3.086 * 10**22 / d) * 206265
+        halo.y *= (3.086 * 10**22 / d) * 206265
+
+        # Center the lenses at (0, 0)
+        # This is a necessary step for the pipeline
+        # Let the centroid be the location of the most massive halo
+        # This will be where we expect to see the most ligwht, which
+        # means it will be where observations are centered
+
+        largest_halo = np.argmax(halo.mass)
+        centroid = [halo.x[largest_halo], halo.y[largest_halo]]
+        halo.x -= centroid[0] 
+        halo.y -= centroid[1] 
     
-    halos = find_halos([ID], zs)
-    halo = halos[ID]
-    # Correct positioning
-    halo.project_to_2D()
-    d = cosmo.angular_diameter_distance(zs).to(u.meter).value
-    halo.x *= (3.086 * 10**22 / d) * 206265
-    halo.y *= (3.086 * 10**22 / d) * 206265
+        indices = np.argsort(halo.mass)[::-1][:3]
+        halo.x = halo.x[indices]
+        halo.y = halo.y[indices]
+        halo.mass = halo.mass[indices]
+        halo.z = halo.z[indices]
+        halo.concentration = halo.concentration[indices]
 
-    # Center the lenses at (0, 0)
-    # This is a necessary step for the pipeline
-    # Let the centroid be the location of the most massive halo
-    # This will be where we expect to see the most ligwht, which
-    # means it will be where observations are centered
+        xmax = np.max((halo.x**2 + halo.y**2)**0.5)
+        # Don't allow the field of view to be larger than 2 arcminutes - or smaller than 1 arcminute
+        xmax = np.min([xmax, 3*60])
+        xmax = np.max([xmax, 1*60])
+        xmax = int(xmax)
 
-    largest_halo = np.argmax(halo.mass)
-    centroid = [halo.x[largest_halo], halo.y[largest_halo]]
-    halo.x -= centroid[0] 
-    halo.y -= centroid[1] 
+        # Rename for consistency
+        true_lenses = halo
+    elif lens_type == 'SIS':
+        # Create 3 lenses
+        xl = np.array([0])
+        yl = np.array([0])
+        # Add two randomly placed lenses
+        xl = np.concatenate((xl, np.random.uniform(-10, 10, 2)))
+        yl = np.concatenate((yl, np.random.uniform(-10, 10, 2)))
+        tE = [1, 1, 1]
+        lenses = pipeline.Lens(xl, yl, tE, np.zeros_like(xl))
+        true_lenses = lenses
 
-    xmax = np.max((halo.x**2 + halo.y**2)**0.5)
-    
-    # Don't allow the field of view to be larger than 2 arcminutes - or smaller than 1 arcminute
-    xmax = np.min([xmax, 3*60])
-    xmax = np.max([xmax, 1*60])
-    xmax = int(xmax)
-    # xmax = 100 # Set lower values for testing
-
-    indices = np.argsort(halo.mass)[::-1][:3]
-    halo.x = halo.x[indices]
-    halo.y = halo.y[indices]
-    halo.mass = halo.mass[indices]
-    halo.z = halo.z[indices]
-    halo.concentration = halo.concentration[indices]
-    
     # Lay sources down in a uniform grid
-    xgrid = np.linspace(-xmax, xmax, xmax // 2)
-    ygrid = np.linspace(-xmax, xmax, xmax // 2)
+    xgrid = np.linspace(-xmax, xmax, 2*xmax)
+    ygrid = np.linspace(-xmax, xmax, 2*xmax)
     xgrid, ygrid = np.meshgrid(xgrid, ygrid)
 
     # First, lets run each source through the pipeline on its own
-    halo_found_guess = np.zeros_like(xgrid)
-    halo_found_optimized = np.zeros_like(xgrid)
     print('Starting test...')
     start = time.time()
 
@@ -1286,86 +1297,179 @@ def test_nfw_lensing():
                                 np.zeros_like(xgrid.flatten()), np.zeros_like(xgrid.flatten()), 
                                 np.ones_like(xgrid.flatten()) * 0.1, np.ones_like(xgrid.flatten()) * 0.01, np.ones_like(xgrid.flatten()) * 0.02)
     sources.apply_noise()
-    sources.apply_NFW_lensing(halo)
 
-    # Step 1 - Generate initial guesses
-    xl, yl, mass = sources.generate_initial_guess(lens_type='NFW')
-    lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, zs, np.zeros_like(xl))
-    lenses.calculate_concentration()
+    # Apply lensing and generate initial guesses
+    if lens_type == 'NFW':
+        sources.apply_NFW_lensing(true_lenses)
+        xl, yl, compute_masses = sources.generate_initial_guess(lens_type='NFW')
+        lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), compute_masses, 0.2, np.zeros_like(xl))
+    elif lens_type == 'SIS':
+        sources.apply_SIS_lensing(true_lenses)
+        lenses = sources.generate_initial_guess(lens_type='SIS')
 
-    lens_halo_distance = np.zeros(len(lenses.x))
+    # Check the initial guesses
+    # Instead of a boolean, lets make a heatmap of guesses
+    halo_found_guess = np.zeros_like(xgrid)
     for i in range(len(lenses.x)):
-        lens_halo_distance[i] = np.min((lenses.x[i] - halo.x)**2 + (lenses.y[i] - halo.y)**2)
-    halo_found_guess = lens_halo_distance < 5
-    # Reshape halo_found to match the shape of chi2_values
-    halo_found_guess = halo_found_guess.reshape(xgrid.shape)
+        # Add a 1 to the grid where the lens is found
+        lens_loc = np.argmin((lenses.x[i] - xgrid)**2 + (lenses.y[i] - ygrid)**2)
+        halo_found_guess[lens_loc] += 1
 
     print('Initial guesses calculated...')
     # Step 2 - Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, use_flags)
 
-    lens_halo_distance = np.zeros(len(lenses.x))
+    # Check the optimized guesses
+    halo_found_optimized = np.zeros_like(xgrid)
     for i in range(len(lenses.x)):
-        lens_halo_distance[i] = np.min((lenses.x[i] - halo.x)**2 + (lenses.y[i] - halo.y)**2)
-    halo_found_optimized = lens_halo_distance < 5
-    # Reshape halo_found to match the shape of chi2_values
-    halo_found_optimized = halo_found_optimized.reshape(xgrid.shape)
+        # Add a 1 to the grid where the lens is found
+        lens_loc = np.argmin((lenses.x[i] - xgrid)**2 + (lenses.y[i] - ygrid)**2)
+        halo_found_optimized[lens_loc] += 1
+    
     print('Initial optimization complete...')
 
     # Now, lets plot the results
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    fig.suptitle('NFW Guess Assessment')
+    if lens_type == 'NFW':
+        title = 'Initial Steps - NFW Lensing'
+    elif lens_type == 'SIS':
+        title = 'Initial Steps - SIS Lensing'
+    fig.suptitle(title)
+
     im = ax[0].imshow(halo_found_guess, extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
-    ax[0].scatter(halo.x, halo.y, color='red', marker='x', label='True Halos')
+    ax[0].scatter(true_lenses.x, true_lenses.y, color='red', marker='x', label='True Halos')
     ax[0].set_xlabel('x')
     ax[0].set_ylabel('y')
     ax[0].set_title('Halo Found (Initial Guess)')
     fig.colorbar(im, ax=ax[0])
 
     im = ax[1].imshow(halo_found_optimized, extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
-    ax[1].scatter(halo.x, halo.y, color='red', marker='x', label='True Halos')
+    ax[1].scatter(true_lenses.x, true_lenses.y, color='red', marker='x', label='True Halos')
     ax[1].set_xlabel('x')
     ax[1].set_ylabel('y')
     ax[1].set_title('Halo Found (Optimized)')
     fig.colorbar(im, ax=ax[1])
     
     plt.tight_layout()
-    plt.savefig('Images/MDARK/source_threshold_test_nfw.png')
+    if lens_type == 'NFW':
+        file_name = 'Images/MDARK/pipeline_initial_steps_NFW.png'
+    elif lens_type == 'SIS':
+        file_name = 'Images/MDARK/pipeline_initial_steps_SIS.png'
+    plt.savefig(file_name)
     stop = time.time()
-    print('Time taken: {}'.format(stop - start))
-    plt.show()
+    time_taken = stop - start
+    time_taken_readable = '{:.2f} s'.format(time_taken)
+    # Change to minutes if time taken is greater than 60 seconds
+    if time_taken > 60:
+        time_taken = time_taken / 60
+        time_taken_readable = '{:.2f} m'.format(time_taken)
+    print('Time taken for {} lensing: {}'.format(lens_type, time_taken_readable))
+    # plt.show()
 
 
 
 if __name__ == '__main__':
     # visualize_fits('Data/MDARK_Test/Test14/ID_file_14.csv', lensing_type='NFW')
 
-    test_nfw_lensing()
+    # test_initial_steps(lens_type='SIS')
+    # test_initial_steps(lens_type='NFW')
 
-    # Place a halo at the origin
-    halo = Halo(np.array([0]), np.array([0]), np.array([0]), np.array([0]), np.array([1e12]), 0.2, np.array([0]))
+    # Test what my guesses look like
+    # Create a single lens at the origin
+    # Model it as both an NFW halo (with a mass of 1e14) and an SIS lens (with a tE of 1)
+
+    xl = np.array([0])
+    yl = np.array([0])
+    mass = np.array([1e14])
+    z = 0.2
+    halo = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, z, np.zeros_like(xl))
     halo.calculate_concentration()
 
-    xs = 5
-    ys = 5
-    # Create a single source
-    sources = pipeline.Source(np.array([xs]), np.array([ys]),
-                                np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.ones(1) * 0.1, np.ones(1) * 0.01, np.ones(1) * 0.02)
-    sources.apply_NFW_lensing(halo)
+    lens = pipeline.Lens(xl, yl, 1, 0)
 
-    xl, yl, mass = sources.generate_initial_guess(lens_type='NFW')
-    lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, 0.2, np.zeros_like(xl))
-    lenses.calculate_concentration()
+    # Now put a spiral of sources around the lens, moving outwards
+    Nsources = 10
+    r_starting = 1
+    r_ending = 10
+    theta = np.linspace(0, 2*np.pi, Nsources)
+    xs = r_starting * np.cos(theta)
+    ys = r_starting * np.sin(theta)
+    # Now, going around the circle, move each successive source further out
+    for i in range(1, Nsources):
+        xs[i] = r_starting + (r_ending - r_starting) * i / Nsources * np.cos(theta[i])
+        ys[i] = r_starting + (r_ending - r_starting) * i / Nsources * np.sin(theta[i])
+    
 
-    # Plot these
-    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    ax[0].scatter(xs, ys, color='blue', label='Source')
-    ax[0].scatter(0, 0, color='red', label='True Halo')
-    ax[0].scatter(lenses.x, lenses.y, color='green', label='Initial Guess')
+    # Create a source object
+    sources_1 = pipeline.Source(xs, ys, 
+                              np.zeros_like(xs), np.zeros_like(xs), 
+                              np.zeros_like(xs), np.zeros_like(xs), 
+                              np.zeros_like(xs), np.zeros_like(xs), 
+                              np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
+    
+    sources_2 = copy.deepcopy(sources_1)
+
+    # Add noise
+    sources_1.apply_noise()
+    sources_2.apply_noise()
+
+    # Apply lensing
+    sources_1.apply_SIS_lensing(lens)
+    sources_2.apply_NFW_lensing(halo)
+
+    # Generate initial guesses
+    SIS_guesses = sources_1.generate_initial_guess(lens_type='SIS')
+    NFW_xl, NFW_yl, NFW_mass = sources_2.generate_initial_guess(lens_type='NFW')
+    NFW_params = [NFW_xl, NFW_yl, NFW_mass]
+    NFW_guesses = Halo(NFW_params[0], NFW_params[1], np.zeros_like(NFW_params[0]), np.zeros_like(NFW_params[0]), NFW_params[2], z, np.zeros_like(NFW_params[0]))
+
+    # Plot the results
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+    fig.suptitle('Initial Guesses for SIS and NFW Lensing')
+
+    ax[0].scatter(sources_1.x, sources_1.y, color='blue', label='Sources')
+    ax[0].scatter(lens.x, lens.y, color='red', marker='x', label='True Lens')
+    ax[0].set_title('Test Source Distribution')
     ax[0].set_xlabel('x')
     ax[0].set_ylabel('y')
-    ax[0].set_title('Initial Guess \n Mass: {:.2e}'.format(np.sum(lenses.mass)))
+    ax[0].set_xlim(-10, 10)
+    ax[0].set_ylim(-10, 10)
+    # Set aspect ratio to be equal
+    ax[0].set_aspect('equal', adjustable='box')
     ax[0].legend()
+
+    ax[1].scatter(sources_1.x, sources_1.y, color='blue', label='Sources')
+    ax[1].scatter(lens.x, lens.y, color='red', marker='x', label='True Lens')
+    # ax[0].scatter(SIS_guesses.x, SIS_guesses.y, color='green', label='Initial Guesses')
+    # Draw arrows from source to guess
+    for i in range(len(sources_1.x)):
+        ax[1].arrow(sources_1.x[i], sources_1.y[i], SIS_guesses.x[i] - sources_1.x[i], SIS_guesses.y[i] - sources_1.y[i], head_width=0.1, head_length=0.1, fc='k', ec='k')
+    ax[1].set_title('SIS Lensing')
+    ax[1].set_xlabel('x')
+    ax[1].set_ylabel('y')
+    ax[1].set_xlim(-10, 10)
+    ax[1].set_ylim(-10, 10)
+    # Set aspect ratio to be equal
+    ax[1].set_aspect('equal', adjustable='box')
+    ax[1].legend()
+
+    ax[2].scatter(sources_2.x, sources_2.y, color='blue', label='Sources')
+    ax[2].scatter(halo.x, halo.y, color='red', marker='x', label='True Lens')
+    # ax[1].scatter(NFW_guesses.x, NFW_guesses.y, color='green', label='Initial Guesses')
+    # Draw arrows from source to guess
+    for i in range(len(sources_2.x)):
+        ax[2].arrow(sources_2.x[i], sources_2.y[i], NFW_guesses.x[i] - sources_2.x[i], NFW_guesses.y[i] - sources_2.y[i], head_width=0.1, head_length=0.1, fc='k', ec='k')
+    ax[2].set_title('NFW Lensing')
+    ax[2].set_xlabel('x')
+    ax[2].set_ylabel('y')
+    ax[2].set_xlim(-10, 10)
+    ax[2].set_ylim(-10, 10)
+    # Set aspect ratio to be equal
+    ax[2].set_aspect('equal', adjustable='box')
+    ax[2].legend()
+
+    plt.tight_layout()
+    plt.savefig('Images/MDARK/initial_guesses_comp.png')
     plt.show()
 
 

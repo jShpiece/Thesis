@@ -125,6 +125,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
 
+
     # Step 2: Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
@@ -149,6 +150,7 @@ def visualize_pipeline_steps(Nlens, Nsource, xmax, use_flags):
     lenses.merge_close_lenses(merger_threshold=10)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(xmax, lenses, sources, true_lenses, reducedchi2, 'Merging', ax=axarr[1,1], legend=False)
+
 
     # Step 6: Final minimization
     lenses.full_minimization(sources, use_flags)
@@ -319,7 +321,8 @@ def accuracy_assessment():
 
 
 if __name__ == '__main__':
-    visualize_examples(True, True, True)
+    # visualize_examples(True, True, True)
+    visualize_pipeline_steps(3, 100, 50, [True, True, True])
 
     raise NotImplementedError('This script is not meant to be run directly. Please run the test_pipeline.py script instead.')
     Nlens = 20

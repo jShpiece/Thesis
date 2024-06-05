@@ -131,10 +131,11 @@ class Source:
 class Lens:
     # Class to store lens information. Each lens has a position (x, y) and an Einstein radius (te)
     def __init__(self, x, y, te, chi2):
-        self.x = x
-        self.y = y
-        self.te = te
-        self.chi2 = chi2
+        # When initializing the Lens object, make sure all inputs are numpy arrays
+        self.x = np.atleast_1d(x)
+        self.y = np.atleast_1d(y)
+        self.te = np.atleast_1d(te)
+        self.chi2 = np.atleast_1d(chi2)
 
 
     def optimize_lens_positions(self, sources, use_flags):
@@ -174,8 +175,17 @@ class Lens:
         too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1 * xmax
         zero_te_indices = np.abs(self.te) < 10**-3
 
-        valid_indices = ~(too_close_to_sources | too_far_from_center | zero_te_indices)        
-        self.x, self.y, self.te, self.chi2 = self.x[valid_indices], self.y[valid_indices], self.te[valid_indices], self.chi2[valid_indices]
+        valid_indices = np.logical_not(np.any(too_close_to_sources, axis=1)) & np.logical_not(too_far_from_center) & np.logical_not(zero_te_indices)
+        # Does the shape of valid_indices match the shape of the lens positions?
+        assert len(valid_indices) == len(self.x), "Valid indices must have the same length as the lens positions: {} vs {}".format(len(valid_indices), len(self.x))
+        # Getting an error here - IndexError, too many indices for array
+        # It seems like valid indices is a 2D array, while it should be a 1D array
+        # I will try to flatten it
+        valid_indices = valid_indices.flatten()
+        self.x = self.x[valid_indices]
+        self.y = self.y[valid_indices]
+        self.te = self.te[valid_indices]
+        self.chi2 = self.chi2[valid_indices]
 
 
     def merge_close_lenses(self, merger_threshold=5):
@@ -255,14 +265,23 @@ class Lens:
 
 
     def update_chi2_values(self, sources, use_flags):
-        # Change the chi^2 values of the lenses to reflect the current set of sources
-        # And return the reduced chi^2 value of the set of lenses
-        for i in range(len(self.x)):
-            one_lens = Lens(self.x[i], self.y[i], self.te[i], 0)
-            self.chi2[i] = calculate_chi_squared(sources, one_lens, use_flags)
+        # Given a set of sources, update the chi^2 values for each lens
+        global_chi2 = calculate_chi_squared(sources, self, use_flags, lensing='SIS')
+        chi2_values = np.zeros(len(self.x))
+        if len(self.x) == 1:
+            # Only one lens - calculate the chi2 value for this lens
+            chi2_values[0] = assign_lens_chi2_values(self, sources, use_flags)
+        else:
+            for i in range(len(self.x)):
+                # Only pass in the i-th lens
+                one_lens = Lens(self.x[i], self.y[i], self.te[i], np.empty_like(self.x))
+                chi2_values[i] = assign_lens_chi2_values(one_lens, sources, use_flags)
+        self.chi2 = chi2_values
         dof = calc_degrees_of_freedom(sources, self, use_flags)
-        total_chi2 = calculate_chi_squared(sources, self, use_flags) 
-        return total_chi2 / dof
+        if dof == 0:
+            print('Degrees of freedom is zero')
+            return global_chi2
+        return global_chi2 / dof
 
 
 # ------------------------------
@@ -344,6 +363,62 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS') -> float:
     # Return the total chi-squared including penalties
     return total_chi_squared + penalty
 
+
+def assign_lens_chi2_values(lenses, sources, use_flags):
+    # Given a single lens object, assign a weighted chi2 value based on source distances
+    xl = lenses.x
+    yl = lenses.y
+    assert len(xl) == len(yl), "The x and y arrays must have the same length."
+    assert xl.ndim == yl.ndim == 1, "The x and y arrays must be 1D."
+    assert len(xl) == 1, "Only one lens is allowed."
+
+    xs = sources.x
+    ys = sources.y
+
+    r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2)
+    # Choose a characteristic distance such that 1/5 of the sources are within this distance
+    # Calculate distances from the current lens to all sources
+    distances = np.sqrt((xl - xs)**2 + (yl - ys)**2)
+    
+    # Sort distances
+    sorted_distances = np.sort(distances)
+    
+    # Determine the index for the desired fraction
+    index = int(len(sorted_distances) * (0.4))
+    
+    # Set r0 as the distance at the calculated index
+    r0 = sorted_distances[index]
+
+    weights = np.exp(-r**2 / r0**2)
+    # Normalize the weights
+    weights /= np.sum(weights, axis=1)[:, None]
+    assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
+    assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
+
+    # Unpack flags for clarity
+    use_shear, use_flexion, use_g_flexion = use_flags
+
+    # Initialize a clone of sources with zeroed lensing signals
+    source_clone = Source(
+        x=sources.x, y=sources.y,
+        e1=np.zeros_like(sources.e1), e2=np.zeros_like(sources.e2),
+        f1=np.zeros_like(sources.f1), f2=np.zeros_like(sources.f2),
+        g1=np.zeros_like(sources.g1), g2=np.zeros_like(sources.g2),
+        sigs=sources.sigs, sigf=sources.sigf, sigg=sources.sigg
+    )
+
+    source_clone.apply_SIS_lensing(lenses)
+
+    # Weigh the chi^2 values by the distance of each source from each lens
+    total_chi_squared = 0
+    for i in range(len(source_clone.x)):
+        # Get the chi2 values for each source, weighted by the source-lens distance
+        shear_chi2 = ((sources.e1[i] - source_clone.e1[i]) / sources.sigs[i])**2 + ((sources.e2[i] - source_clone.e2[i]) / sources.sigs[i])**2
+        flexion_chi2 = ((sources.f1[i] - source_clone.f1[i]) / sources.sigf[i])**2 + ((sources.f2[i] - source_clone.f2[i]) / sources.sigf[i])**2
+        g_flexion_chi2 = ((sources.g1[i] - source_clone.g1[i]) / sources.sigg[i])**2 + ((sources.g2[i] - source_clone.g2[i]) / sources.sigg[i])**2
+        total_chi_squared += weights[:, i].dot(shear_chi2*use_shear + flexion_chi2*use_flexion + g_flexion_chi2*use_g_flexion)
+
+    return total_chi_squared[0]
 
 # ------------------------------
 # Helper functions
