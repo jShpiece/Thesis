@@ -247,8 +247,8 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 
     shear_1 = np.sum(shear_mag * cos2phi, axis=0)
     shear_2 = np.sum(shear_mag * sin2phi, axis=0)
-    flexion_1 = np.sum(flexion_mag * cos3phi, axis=0)
-    flexion_2 = np.sum(flexion_mag * sin3phi, axis=0)
+    flexion_1 = np.sum(flexion_mag * cos_phi, axis=0)
+    flexion_2 = np.sum(flexion_mag * sin_phi, axis=0)
     g_flexion_1 = np.sum(g_flexion_mag * cos3phi, axis=0)
     g_flexion_2 = np.sum(g_flexion_mag * sin3phi, axis=0)
 
@@ -272,15 +272,13 @@ def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5
     x = r*np.cos(phi)
     y = r*np.sin(phi)
 
-    # Initialize lensing parameters with gaussian noise
-    e1data = np.random.normal(0,sigs,ns)
-    e2data = np.random.normal(0,sigs,ns)
-    f1data = np.random.normal(0,sigf,ns)
-    f2data = np.random.normal(0,sigf,ns)
-    g1data = np.random.normal(0,sigg,ns)
-    g2data = np.random.normal(0,sigg,ns)
-
-    sources = pipeline.Source(x, y, e1data, e2data, f1data, f2data, g1data, g2data, sigs*np.ones(ns), sigf*np.ones(ns), sigg*np.ones(ns))
+    sources = pipeline.Source(x, y, 
+                              np.zeros_like(x), np.zeros_like(y),
+                                np.zeros_like(x), np.zeros_like(y),
+                                np.zeros_like(x), np.zeros_like(y), 
+                                np.ones_like(x) * sigs, np.ones_like(x) * sigf, np.ones_like(x) * sigg)
+    # Now apply noise
+    sources.apply_noise()
     # Apply the lensing effects of the lenses
     if lens_type == 'SIS':
         sources.apply_SIS_lensing(lenses)
