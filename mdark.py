@@ -1092,7 +1092,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         stop = time.time()
         print('Time taken to generate initial guesses: {}'.format(stop - start))
         print('Initial chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-        '''
+        
         # Step 2: Optimize guesses with local minimization
         start = time.time()
         lenses.optimize_lens_positions(sources, use_flags)
@@ -1107,7 +1107,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         stop = time.time()
         print('Time taken to optimize initial guesses: {}'.format(stop - start))
         print('Optimized chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-        '''
+        
         # Step 3: Filter out lenses that are too far from the source population
         start = time.time()
         lenses.filter_lens_positions(sources, xmax)
@@ -1128,7 +1128,7 @@ def visualize_fits(ID_file, lensing_type='NFW'):
         #lenses.z = np.concatenate((lenses.z, halo.z))
         #lenses.concentration = np.concatenate((lenses.concentration, halo.concentration))
         # Update the chi2 values
-        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+        # reducedchi2 = lenses.update_chi2_values(sources, use_flags)
         start = time.time()
         lenses.iterative_elimination(sources, reducedchi2, use_flags)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
@@ -1223,7 +1223,8 @@ def chi2_heatmap():
     ax[1].set_title(r'Best Fit Mass (log scale)')
     fig.colorbar(im, ax=ax[1])
     plt.tight_layout()
-    plt.show()
+    # plt.show()
+    plt.savefig('Images/MDARK/chi2_heatmap.png')
 
 
 def test_initial_steps(lens_type='NFW'):
@@ -1308,26 +1309,26 @@ def test_initial_steps(lens_type='NFW'):
         lenses = sources.generate_initial_guess(lens_type='SIS')
 
     # Check the initial guesses
-    # Instead of a boolean, lets make a heatmap of guesses
-    halo_found_guess = np.zeros_like(xgrid)
+    lens_halo_distance = np.zeros(len(lenses.x))
     for i in range(len(lenses.x)):
-        # Add a 1 to the grid where the lens is found
-        lens_loc = np.argmin((lenses.x[i] - xgrid)**2 + (lenses.y[i] - ygrid)**2)
-        halo_found_guess[lens_loc] += 1
+        lens_halo_distance[i] = np.min((lenses.x[i] - halo.x)**2 + (lenses.y[i] - halo.y)**2)
+    halo_found_guess = lens_halo_distance < 5
+    # Reshape halo_found to match the shape of chi2_values
+    halo_found_guess = halo_found_guess.reshape(xgrid.shape)
 
     print('Initial guesses calculated...')
     # Step 2 - Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, use_flags)
 
     # Check the optimized guesses
-    halo_found_optimized = np.zeros_like(xgrid)
+    lens_halo_distance = np.zeros(len(lenses.x))
     for i in range(len(lenses.x)):
-        # Add a 1 to the grid where the lens is found
-        lens_loc = np.argmin((lenses.x[i] - xgrid)**2 + (lenses.y[i] - ygrid)**2)
-        halo_found_optimized[lens_loc] += 1
-    
+        lens_halo_distance[i] = np.min((lenses.x[i] - halo.x)**2 + (lenses.y[i] - halo.y)**2)
+    halo_found_optimized = lens_halo_distance < 5
+    # Reshape halo_found to match the shape of chi2_values
+    halo_found_optimized = halo_found_optimized.reshape(xgrid.shape)
     print('Initial optimization complete...')
-
+    
     # Now, lets plot the results
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
     if lens_type == 'NFW':
@@ -1369,11 +1370,75 @@ def test_initial_steps(lens_type='NFW'):
 
 
 if __name__ == '__main__':
+    chi2_heatmap()
     # visualize_fits('Data/MDARK_Test/Test14/ID_file_14.csv', lensing_type='NFW')
 
     # test_initial_steps(lens_type='SIS')
     # test_initial_steps(lens_type='NFW')
 
+    xl = np.array([0])
+    yl = np.array([0])
+    mass = np.array([1e13])
+    halo = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, 0.2, np.zeros_like(xl))
+    halo.calculate_concentration()
+    r200 = halo.calc_R200()[1]
+    rs = r200 / halo.concentration
+
+    x = np.linspace(0, 50, 1000)
+
+    # Create a source catalogue along the x-axis
+    sources = pipeline.Source(x, np.zeros_like(x), 
+                              np.zeros_like(x), np.zeros_like(x), 
+                              np.zeros_like(x), np.zeros_like(x), 
+                              np.zeros_like(x), np.zeros_like(x), 
+                              np.ones(len(x)) * 0.1, np.ones(len(x)) * 0.01, np.ones(len(x)) * 0.02)
+    # sources.apply_noise()
+    sources.apply_NFW_lensing(halo)
+
+    # Plot the flexion and shear
+    fig, ax = plt.subplots(1, 2, figsize=(10, 5), sharex=True, sharey=True)
+    fig.suptitle('Flexion and Shear for a Single Lens')
+
+    ax[0].plot(x, sources.f1, label='f1')
+    # ax[0].plot(x, sources.f2, label='f2')
+    ax[0].axvline(x=rs, color='red', linestyle='--', label='r_s', alpha=0.5)
+    ax[0].set_ylim(-0.1, 0.1)
+    ax[0].set_title('Flexion')
+    ax[0].set_xlabel(r'$x = \theta / r_s$')
+    ax[0].set_ylabel(r'$\mathcal{F}$')
+    ax[0].legend()
+
+    ax[1].plot(x, sources.e1, label='e1')
+    # ax[1].plot(x, sources.e2, label='e2')
+    ax[1].axvline(x=rs, color='red', linestyle='--', label='r_s')
+    ax[1].set_title('Shear')
+    ax[1].set_xlabel(r'$x = \theta / r_s$')
+    ax[1].set_ylabel(r'$\gamma$')
+    ax[1].legend()
+
+    plt.tight_layout()
+    plt.savefig('Images/MDARK/flexion_shear_single_lens.png')
+
+    r = np.sqrt(sources.e1**2 + sources.e2**2) / np.sqrt(sources.f1**2 + sources.f2**2)
+
+    # Plot the characteristic radius
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+    ax.plot(x, r, label='Characteristic Distance')
+    ax.axvline(x=rs, color='red', linestyle='--', label='r_s')
+    ax.plot(x, x, label = 'True Distance')
+    ax.set_title('Characteristic Distance')
+    ax.set_xlabel(r'$x = \theta / r_s$')
+    ax.set_ylabel(r'$r$')
+    ax.legend()
+    # Equal aspect ratio
+    # ax.set_aspect('equal', adjustable='box')
+    plt.tight_layout()
+    plt.savefig('Images/MDARK/characteristic_distance_single_lens.png')
+    plt.show()
+
+
+
+    raise ValueError('Stop here')
     # Test what my guesses look like
     # Create a single lens at the origin
     # Model it as both an NFW halo (with a mass of 1e14) and an SIS lens (with a tE of 1)

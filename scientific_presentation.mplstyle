@@ -12,6 +12,12 @@ mathtext.fontset : stix
 axes.labelsize : medium
 axes.titlesize : large
 axes.grid : True
+# Set the aspect of the plot to be equal
+axes.axisbelow : True
+axes.spines.left : True
+axes.spines.bottom : True
+axes.spines.right : True
+axes.spines.top : True
 
 #### Colors ####
 axes.facecolor : white
