@@ -27,7 +27,7 @@ class Source:
         self.sigg = np.atleast_1d(sigg)
 
 
-    def filter_sources(self, a, max_flexion=0.5):
+    def filter_sources(self, max_flexion=0.5):
         # Make cuts in the source data based on size and flexion
         valid_indices = (np.abs(self.f1) <= max_flexion) & (np.abs(self.f2) <= max_flexion)
         self.x, self.y = self.x[valid_indices], self.y[valid_indices]
@@ -49,11 +49,12 @@ class Source:
             return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
         elif lens_type == 'NFW':
             r = gamma / flexion # A characteristic distance from the source
-            concentration = 5 # A characteristic concentration parameter
-            r200 = r*concentration # A characteristic radius
-            rho_c = cosmo.critical_density(z_s).to(u.solMass / u.Mpc**3).value
-            delta_c = (200 / 3) * concentration**3 / (np.log(1 + concentration) - concentration / (1 + concentration))
-            mass = (4/3) * np.pi * r200**3 * delta_c * rho_c
+            te = 2 * gamma * r / 206265 # The Einstein radius of the lens in radians
+            from astropy.constants import c, G
+            _, Ds, Dls = utils.angular_diameter_distances(z_l, z_s)
+            rho_c = cosmo.critical_density(z_l).to(u.kg / u.m**3)
+            mass = (te * (c**2 / (2 * np.pi * G)) * (Ds / Dls) * (3 / (800 * np.pi * rho_c))**(1/3))**(3/2)
+            mass = mass.to(u.Msun).value
 
             xl = np.array(self.x + r * np.cos(phi))
             yl = np.array(self.y + r * np.sin(phi))

@@ -285,7 +285,7 @@ def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5
         # Note - in this case the 'lenses' object is actually a 'halos' object
         # The effect is the same in practice
         sources.apply_NFW_lensing(lenses)
-
+    sources.filter_sources() # Remove sources that are too close to the lens
     return sources
 
 
