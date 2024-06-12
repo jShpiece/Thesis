@@ -1053,7 +1053,7 @@ def visualize_fits(ID_file):
         
         # eR = 2 * shear * r
         # Dl, Ds, Dls = utils.angular_diameter_distances(zs[0], 0.8)
-        # mass = (eR/206265)**2 * (Ds * Dl / Dls) * c**2 / (4 * G * M_solar) * 10**3
+        # mass = (eR/206265)**2 * (Ds * Dl / Dls) * c**2 / (4 * G * M_solar) 
         lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, zs[0], np.zeros_like(xl))
         lenses.calculate_concentration()
 
