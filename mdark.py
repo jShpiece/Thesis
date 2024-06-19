@@ -1081,7 +1081,7 @@ def visualize_fits(ID_file):
         stop = time.time()
         print('Time taken to filter lenses: {}'.format(stop - start))
         print('Filtered chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-
+        
         # Step 4: Iterative elimination
         start = time.time()
         lenses.iterative_elimination(sources, reducedchi2, use_flags)
@@ -1272,94 +1272,14 @@ def test_initial_steps(lens_type='NFW'):
 
 
 if __name__ == '__main__':
-    visualize_fits('Data/MDARK_Test/Test14/ID_file_14.csv')
-
-    xmax = 100
-
-    xl = np.array([0])
-    yl = np.array([0])
-    mass = np.array([10**13])
-    z = 0.194
-    halo = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, z, np.zeros_like(xl))
-    halo.calculate_concentration()
-
-    # Lay sources down randomly
-    ns = 0.01
-    Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    r = np.sqrt(np.random.random(Nsource)) * xmax
-    phi = np.random.uniform(0, 2*np.pi, Nsource)
-    xs = r * np.cos(phi)
-    ys = r * np.sin(phi)
-
-    sources = pipeline.Source(xs, ys, 
-                              np.zeros_like(xs), np.zeros_like(xs), 
-                              np.zeros_like(xs), np.zeros_like(xs), 
-                              np.zeros_like(xs), np.zeros_like(xs), 
-                              np.ones_like(xs) * 0.1, np.ones_like(xs) * 0.01, np.ones_like(xs) * 0.02)
-    sources.apply_noise()
-    sources.apply_NFW_lensing(halo)
-
-    # Run through the pipeline
-    fig, axarr = plt.subplots(2, 3, figsize=(15, 10))
-
-    # Step 1: Generate initial list of lenses from source guesses
-    xl, yl, mass = sources.generate_initial_guess(lens_type='NFW', z_l = z)
-    lenses = Halo(xl, yl, np.zeros_like(xl), np.zeros_like(xl), mass, 0.2, np.zeros_like(xl))
-    lenses.calculate_concentration()
-    reducedchi2 = lenses.update_chi2_values(sources, [True, True, True])
-    print('Initial chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Guesses', ax=axarr[0,0])
-
-    # Step 2: Optimize guesses with local minimization
-    lenses.optimize_lens_positions(sources, [True, True, True])
-    reducedchi2 = lenses.update_chi2_values(sources, [True, True, True])
-    print('Optimized chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Initial Optimization', ax=axarr[0,1])
-
-    # Step 3: Filter out lenses that are too far from the source population
-    lenses.filter_lens_positions(sources, xmax)
-    reducedchi2 = lenses.update_chi2_values(sources, [True, True, True])
-    print('Filtered chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Filter', ax=axarr[0,2])
-
-    # Step 4: Iterative elimination
-    lenses.iterative_elimination(sources, reducedchi2, [True, True, True])
-    reducedchi2 = lenses.update_chi2_values(sources, [True, True, True])
-    print('Iterative elimination chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Iterative Elimination', ax=axarr[1,0])
-
-    # Step 5: Merge lenses that are too close to each other
-    ns = len(sources.x) / (np.pi * xmax**2)
-    merger_threshold = (1/np.sqrt(ns))
-    lenses.merge_close_lenses(merger_threshold=merger_threshold)
-    reducedchi2 = lenses.update_chi2_values(sources, [True, True, True])
-    print('Merging chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Merging', ax=axarr[1,1])
-
-    # Step 6: Final minimization
-    lenses.full_minimization(sources, [True, True, True])
-    reducedchi2 = lenses.update_chi2_values(sources, [True, True, True])
-    print('Final chi2: {:.2f}, With {} candidate lenses'.format(reducedchi2, len(lenses.x)))
-    # Compute mass
-    mass = np.sum(lenses.mass)
-    print('Inferred mass: {:.2e}'.format(mass))
-
-
-    _plot_results(xmax, lenses, sources, halo, reducedchi2, 'Final Minimization', ax=axarr[1,2])
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
-    plt.savefig('Images/MDARK/simple_field.png')
-    plt.show()
-
-    raise ValueError('This script is not meant to be run as a standalone script')
-
+    # visualize_fits('Data/MDARK_Test/Test14/ID_file_14.csv')
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
     z_chosen = zs[0]
     start = time.time()
     Ntrials = 1 # Number of trials to run for each cluster in the test set
 
-    test_number = 14
+    test_number = 15
     test_dir = 'Data/MDARK_Test/Test{}'.format(test_number)
     halos_file = 'MDARK/Halos_{}.MDARK'.format(z_chosen)
     ID_file = test_dir + '/ID_file_{}.csv'.format(test_number)
@@ -1380,7 +1300,6 @@ if __name__ == '__main__':
     start = time.time()
     halos = find_halos(IDs, zs[0])
     stop = time.time()
-
 
     run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()

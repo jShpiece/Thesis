@@ -27,7 +27,7 @@ class Source:
         self.sigg = np.atleast_1d(sigg)
 
 
-    def filter_sources(self, max_flexion=0.5):
+    def filter_sources(self, max_flexion=0.2):
         # Make cuts in the source data based on size and flexion
         valid_indices = (np.abs(self.f1) <= max_flexion) & (np.abs(self.f2) <= max_flexion)
         self.x, self.y = self.x[valid_indices], self.y[valid_indices]
