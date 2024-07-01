@@ -20,7 +20,6 @@ def print_progress_bar(iteration, total, prefix='', suffix='',
         print() 
 
 
-
 # ------------------------
 # Cosmology Utility Functions
 # ------------------------
