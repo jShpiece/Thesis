@@ -28,13 +28,16 @@ class Source:
         self.sigg = np.atleast_1d(sigg)
 
 
-    def filter_sources(self, max_flexion=0.2):
+    def filter_sources(self, max_flexion=0.1):
         # Make cuts in the source data based on size and flexion
         valid_indices = (np.abs(self.f1) <= max_flexion) & (np.abs(self.f2) <= max_flexion)
         self.x, self.y = self.x[valid_indices], self.y[valid_indices]
         self.e1, self.e2 = self.e1[valid_indices], self.e2[valid_indices]
         self.f1, self.f2 = self.f1[valid_indices], self.f2[valid_indices]
         self.g1, self.g2 = self.g1[valid_indices], self.g2[valid_indices]
+        self.sigs = self.sigs[valid_indices]
+        self.sigf = self.sigf[valid_indices]
+        self.sigg = self.sigg[valid_indices]
         return valid_indices
 
 
@@ -49,7 +52,7 @@ class Source:
             te = 2 * gamma * r # The Einstein radius of the lens
             return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
         elif lens_type == 'NFW':
-            r = gamma / flexion # A characteristic distance from the source
+            r = 1.45 * gamma / flexion # A characteristic distance from the source
             te = 2 * gamma * r / 206265 # The Einstein radius of the lens in radians
             from astropy.constants import c, G
             _, Ds, Dls = utils.angular_diameter_distances(z_l, z_s)
@@ -689,7 +692,6 @@ def assign_halo_chi2_values(lenses, sources, use_flags):
     ys = sources.y
 
     r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2)
-    # Choose a characteristic distance such that 1/5 of the sources are within this distance
     # Calculate distances from the current lens to all sources
     distances = np.sqrt((xl - xs)**2 + (yl - ys)**2)
     
@@ -697,7 +699,8 @@ def assign_halo_chi2_values(lenses, sources, use_flags):
     sorted_distances = np.sort(distances)
     
     # Find the index at which 1/4 of the sources are within this distance
-    index = int(len(sorted_distances) * (0.1))
+    # index = int(len(sorted_distances) * (0.4))
+    index = -1
     
     # Set r0 as the distance at the calculated index
     r0 = sorted_distances[index]
