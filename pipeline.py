@@ -3,6 +3,7 @@ import scipy.optimize as opt
 from astropy import units as u
 from astropy.cosmology import WMAP9 as cosmo
 import utils
+import minimizer
 M_solar = 1.989 * 10**30 # kg
 
 # ------------------------------
@@ -413,6 +414,24 @@ class Halo:
     def optimize_lens_positions(self, sources, use_flags):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
+        learning_rate = 0.1
+        learning_rates = [0.01, 0.01, 1e-10]
+        momentum = 0.9
+        num_iterations = 100
+        for i in range(len(self.x)):
+            one_source = Source(sources.x[i], sources.y[i], 
+                                sources.e1[i], sources.e2[i], 
+                                sources.f1[i], sources.f2[i], 
+                                sources.g1[i], sources.g2[i],
+                                sources.sigs[i], sources.sigf[i], sources.sigg[i])
+            guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
+            params = [one_source, use_flags, self.concentration[i], self.redshift]
+            result = minimizer.gradient_descent_3d_with_momentum(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
+            # result = minimizer.adam_optimizer_with_different_learning_rates(chi2wrapper3, guess, params, learning_rates, num_iterations=num_iterations)
+            self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
+            # Now update the concentrations
+            self.calculate_concentration()
+        '''
         max_attempts = 1
         for i in range(len(self.x)):
             one_source = Source(sources.x[i], sources.y[i], 
@@ -427,7 +446,7 @@ class Halo:
                 # Lets try a BFGS method, to avoid getting stuck in local minima
                 result = opt.minimize(
                     chi2wrapper3, guess, args=([one_source, use_flags, self.concentration[i], self.redshift]), 
-                    method='BFGS', 
+                    method='Nelder-Mead',
                     tol=1e-8, 
                     options={'maxiter': 1000}
                 )
@@ -436,9 +455,7 @@ class Halo:
                     best_result = result
                     best_params = result.x
 
-            self.x[i], self.y[i], self.mass[i] = best_params[0], best_params[1], best_params[2]
-            # Now update the concentrations
-            self.calculate_concentration()
+            '''
 
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=0.5):
@@ -449,9 +466,9 @@ class Halo:
         # Identify lenses that are too close to sources
         too_close_to_sources = np.any(distances_to_sources < threshold_distance, axis=1)
         # Identify lenses that are too far from the center
-        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1 * xmax
+        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1.5 * xmax
         # Identify lenses with zero mass (or too small to be considered lenses)
-        zero_mass_lenses = np.abs(self.mass) < 10**11
+        zero_mass_lenses = np.abs(self.mass) < 10**10
         # Identify lenses with a mass greater than one we could reasonably expect
         too_large_mass = np.abs(self.mass) > 10**16
 
@@ -769,7 +786,8 @@ def chi2wrapper3(guess, params):
     # Wrapper function for chi2 to allow for minimization for a single lens object
     # Guess = [x, y, mass]
     # Params = [source, use_flags, concentration, redshift]
-    lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], guess[2], params[3], [0])
+    lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
+    lenses.calculate_concentration() # The concentration needs to be updated, because the mass will change during optimization
     return assign_halo_chi2_values(lenses, params[0], params[1])
 
 

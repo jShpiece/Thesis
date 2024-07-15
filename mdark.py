@@ -61,6 +61,23 @@ def GOF_file_reader(IDs):
 def _plot_results(halo, true_halo, title, reducedchi2, xmax, ax=None, legend=True):
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # If the halo is empty, plot the true halo only
+    if len(halo.x) == 0:
+        x_true, y_true, mass_true = [true_halo.x, true_halo.y, true_halo.mass]
+        mass_true_log = np.log10(mass_true)
+        true_sizes = (mass_true_log - np.min(mass_true_log) + 1) * 50
+        ax.scatter(x_true, y_true, s=true_sizes, c='blue', alpha=0.8, label='True Halos', edgecolors='w', marker='*')
+        ax.set_xlabel('X Position')
+        ax.set_ylabel('Y Position')
+        ax.set_title(title + '\n' + 'No Halos Recovered')
+        ax.set_xlim(-xmax, xmax)
+        ax.set_ylim(-xmax, xmax)
+        ax.set_aspect('equal')
+        if legend:
+            ax.legend()
+        return
+
 
     # Extract positions and masses for both sets
     x_true, y_true, mass_true = [true_halo.x, true_halo.y, true_halo.mass]
@@ -719,8 +736,22 @@ def simple_nfw_test(Nlens, Nsource, xmax):
     halos = pipeline.Halo(x, y, np.zeros_like(x), concentration, mass, 0.194, np.zeros_like(x))
 
     # Create a set of sources
-    xs = np.random.uniform(-xmax, xmax, Nsource)
-    ys = np.random.uniform(-xmax, xmax, Nsource)
+    # xs = np.random.uniform(-xmax, xmax, Nsource)
+    # ys = np.random.uniform(-xmax, xmax, Nsource)
+    # Distribute sources uniformly in a grid (if Nsource is 1, place it randomly)
+    if Nsource == 1:
+        xs = np.random.uniform(-xmax, xmax, Nsource)
+        ys = np.random.uniform(-xmax, xmax, Nsource)
+    else:
+        n = int(np.sqrt(Nsource))
+        x = np.linspace(-xmax, xmax, n)
+        y = np.linspace(-xmax, xmax, n)
+        xs, ys = np.meshgrid(x, y)
+        xs = xs.flatten()
+        ys = ys.flatten()
+        # Update Nsource
+        Nsource = len(xs)
+
     sig_s = np.ones(Nsource) * 0.1
     sig_f = np.ones(Nsource) * 0.01
     sig_g = np.ones(Nsource) * 0.02
@@ -756,6 +787,7 @@ def simple_nfw_test(Nlens, Nsource, xmax):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Lens Number Selection', reducedchi2, xmax, ax=axarr[1,0], legend=False)
 
+
     # Step 5: Merge lenses that are too close to each other
     ns = len(sources.x) / (np.pi * xmax**2)
     merger_threshold = (1/np.sqrt(ns))
@@ -763,14 +795,17 @@ def simple_nfw_test(Nlens, Nsource, xmax):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
 
+
     # Step 6: Final minimization
     lenses.full_minimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False)
 
+
     fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$'.format(np.sum(halos.mass), np.sum(lenses.mass)))
     plt.savefig('Images/test_cluster_Nlens_{}_Nsource_{}.png'.format(Nlens, Nsource))
-    # plt.show()
+
+    print('Finished test...')
 
 
 # --------------------------------------------
@@ -1125,14 +1160,162 @@ def test_initial_steps(lens_type='NFW'):
     plt.show()
 
 
+def visualize_initial_guesses():
+    # Create a single halo, a set of sources around that halo, and see how the initial guesses do as a function of source-halo distance
+
+    # Create a single halo
+    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
+    halo.calculate_concentration()
+
+    # Create a set of sources
+    # Distribute the sources in a spiral pattern, moving outwards
+    rmax = 50
+    N = 200
+    r = np.linspace(1, rmax, N)
+    theta = np.linspace(0, 2*np.pi, N)
+    x = r * np.cos(theta)
+    y = r * np.sin(theta)
+
+    # Create a source object
+    sources = pipeline.Source(x, y, 
+                              np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), 
+                              np.ones_like(x) * 0.1, np.ones_like(x) * 0.01, np.ones_like(x) * 0.02)
+    sources.apply_noise()
+    sources.apply_NFW_lensing(halo)
+
+    # Create initial guesses
+    lenses = sources.generate_initial_guess(z_l = 0.194, lens_type='NFW')
+
+    # Create a plot
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+    ax.scatter(sources.x, sources.y, color='black', label='Sources', alpha=0.5)
+    ax.scatter(halo.x, halo.y, color='red', label='True Halo', marker='*', s=100)
+    ax.scatter(lenses.x, lenses.y, color='blue', label='Initial Guesses', marker='x', alpha=0.75)
+    # Draw an arrow from the source to the lens
+    for i in range(len(lenses.x)):
+        ax.arrow(sources.x[i], sources.y[i], lenses.x[i] - sources.x[i], lenses.y[i] - sources.y[i], head_width=0.1, head_length=0.1, fc='blue', ec='blue')
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlim([-rmax, rmax])
+    ax.set_ylim([-rmax, rmax])
+    plt.tight_layout()
+
+    # Evaluate the initial guesses
+    lens_halo_distance = np.zeros(len(lenses.x))
+    for i in range(len(lenses.x)):
+        lens_halo_distance[i] = np.min((lenses.x[i] - halo.x)**2 + (lenses.y[i] - halo.y)**2)
+    lens_halo_distance = np.sqrt(lens_halo_distance)
+    halo_found = lens_halo_distance < 5
+    # Reshape halo_found to match the shape of chi2_values
+    halo_found = halo_found.reshape(x.shape)
+    print('{}% of the sources were correctly identified'.format(np.sum(halo_found) / N * 100))
+
+    # Lets try to draw a circle at the distance where sources stop identifying the halo
+    # This is a rough estimate - using halo_found, what's the point at which the values stop being True?
+    # We shouldn't just take the first index where halo_found is False, but rather find the first sequence of multiple False values
+    # This is because there may be a few false positives
+    for i in range(len(halo_found)):
+        if np.sum(halo_found[i:i+5]) == 0:
+            break
+    # The distance at which the halo is no longer found is r[i]
+    # Draw a circle at this distance
+    circle = plt.Circle((0, 0), r[i], color='red', fill=False, label='Halo Detection Limit: {:.2f}'.format(r[i]), linestyle='--')
+    ax.add_artist(circle)
+    ax.legend(loc='best')
+
+    ax.set_title('Evaluation of Initial Guesses \n Of {} sources, {} came close to guessing the halo location'.format(N, np.sum(halo_found)), fontsize=10)
+
+
+    plt.savefig('Images/initial_guesses_large.png')
+
+
+def visualize_initial_optimization():
+    # Create a single halo, a set of initial guesses around that halo, and see how the optimization step does
+
+    # Create a single halo
+    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
+    halo.calculate_concentration()
+
+    # Create background sources, which we need in order to perform the optimization
+    # Distribute the sources in a uniform grid
+    rmax = 50
+    N = 100
+    
+    xs = np.linspace(-rmax, rmax, int(np.sqrt(N)))
+    ys = np.linspace(-rmax, rmax, int(np.sqrt(N)))
+    xs, ys = np.meshgrid(xs, ys)
+    xs = xs.flatten()
+    ys = ys.flatten()
+    sources = pipeline.Source(xs, ys,
+                                np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), 
+                                np.ones_like(xs) * 0.1, np.ones_like(xs) * 0.01, np.ones_like(xs) * 0.02)
+    sources.apply_noise()
+    sources.apply_NFW_lensing(halo)
+
+    # Create a set of guesses
+    # Distribute the guesses in a spiral pattern, moving outwards
+
+    r = np.linspace(1, rmax, N)
+    theta = np.linspace(0, 2*np.pi, N)
+    x = r * np.cos(theta)
+    y = r * np.sin(theta)
+
+    mass = np.ones_like(x) * 1e14 # Cheating a bit here, but lets roll with it for now
+
+    # Create a halo object
+    lenses = pipeline.Halo(x, y, np.zeros_like(x), np.zeros_like(x), mass, 0.194, np.zeros_like(x))
+    lenses.calculate_concentration()
+    # Clone the halo object for plotting
+    lenses_clone = copy.deepcopy(lenses)
+
+    # Optimize 
+    lenses.optimize_lens_positions(sources, [True, True, True])
+    print('Optimization complete...')
+
+    # Create a plot
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+    ax.scatter(lenses_clone.x, lenses_clone.y, color='black', label='Initial Guesses', alpha=0.5)
+    ax.scatter(halo.x, halo.y, color='red', label='True Halo', marker='*', s=100)
+    ax.scatter(lenses.x, lenses.y, color='blue', label='Optimized Guesses', marker='x', alpha=0.75)
+    # Draw an arrow from the source to the lens
+    for i in range(len(lenses.x)):
+        ax.arrow(lenses_clone.x[i], lenses_clone.y[i], lenses.x[i] - lenses_clone.x[i], lenses.y[i] - lenses_clone.y[i], head_width=0.1, head_length=0.1, fc='blue', ec='blue', alpha=0.5)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlim([-rmax, rmax])
+    ax.set_ylim([-rmax, rmax])
+    plt.tight_layout()
+    # Draw a circle that contains half of our optimization guesses
+    # This is a rough estimate of the distance at which the optimization stops working
+    r = (lenses.x**2 + lenses.y**2)**0.5 
+    halo_found = r < 5
+    print('{}% of the sources were correctly identified'.format(np.sum(halo_found) / N * 100))
+    r = np.sort(r)
+    r = r[int(len(r)/2)]
+    circle = plt.Circle((0, 0), r, color='red', fill=False, label='Half of Lenses: {:.2f}'.format(r), linestyle='--')
+    ax.add_artist(circle)
+
+    ax.legend(loc='best')
+    ax.set_title('Evaluation of Initial Optimization \n Of {} sources, {} came close to guessing the halo location'.format(N, np.sum(halo_found)), fontsize=10)
+    plt.savefig('Images/initial_optimization.png')
+    plt.show()
+
+
+
+
 if __name__ == '__main__':
+    # visualize_initial_guesses()
+    # visualize_initial_optimization()
+    # raise ValueError('This script is not meant to be run as a standalone script')
+    
     # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
     # Run a set of tests with varying scales and lens/source numbers
-    simple_nfw_test(1, 1, 10)
     simple_nfw_test(1, 10, 10)
     simple_nfw_test(2, 10, 10)
-    simple_nfw_test(1, 100, 10)
-    simple_nfw_test(2, 400, 100)
+    simple_nfw_test(1, 100, 100)
+    simple_nfw_test(2, 100, 100)
 
     raise ValueError('This script is not meant to be run as a standalone script')
     # Initialize file paths
