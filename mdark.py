@@ -1230,26 +1230,12 @@ def visualize_initial_guesses():
 
 def visualize_initial_optimization():
     # Create a single halo, a set of initial guesses around that halo, and see how the optimization step does
-
+    rmax = 50
+    N = 50
+    
     # Create a single halo
     halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
     halo.calculate_concentration()
-
-    # Create background sources, which we need in order to perform the optimization
-    # Distribute the sources in a uniform grid
-    rmax = 50
-    N = 100
-    
-    xs = np.linspace(-rmax, rmax, int(np.sqrt(N)))
-    ys = np.linspace(-rmax, rmax, int(np.sqrt(N)))
-    xs, ys = np.meshgrid(xs, ys)
-    xs = xs.flatten()
-    ys = ys.flatten()
-    sources = pipeline.Source(xs, ys,
-                                np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), 
-                                np.ones_like(xs) * 0.1, np.ones_like(xs) * 0.01, np.ones_like(xs) * 0.02)
-    sources.apply_noise()
-    sources.apply_NFW_lensing(halo)
 
     # Create a set of guesses
     # Distribute the guesses in a spiral pattern, moving outwards
@@ -1267,9 +1253,41 @@ def visualize_initial_optimization():
     # Clone the halo object for plotting
     lenses_clone = copy.deepcopy(lenses)
 
+    # Create background sources, which we need in order to perform the optimization
+    # Distribute the sources in a wider spiral pattern
+
+    r_s = 2 * r
+    xs = r_s * np.cos(theta) + np.random.normal(0, 0.1, N)
+    ys = r_s * np.sin(theta) + np.random.normal(0, 0.1, N) # Add some noise to the source positions
+
+    sources = pipeline.Source(xs, ys,
+                                np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), 
+                                np.ones_like(xs) * 0.1, np.ones_like(xs) * 0.01, np.ones_like(xs) * 0.02)
+    sources.apply_noise()
+    sources.apply_NFW_lensing(halo)
+
     # Optimize 
-    lenses.optimize_lens_positions(sources, [True, True, True])
+    points = lenses.optimize_lens_positions(sources, [True, True, True])
     print('Optimization complete...')
+    def plot_optimization_path(points, true_value):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Convert points to numpy array for easier plotting
+        points = np.array(points)
+        ax.plot(points[:, 0], points[:, 1], points[:, 2], marker='o', label='Optimization Path')
+        # Highlight the first and last points
+        ax.scatter(points[0, 0], points[0, 1], points[0, 2], color='g', label='Initial Guess', s=100)
+        ax.scatter(points[-1, 0], points[-1, 1], points[-1, 2], color='b', label='Final Guess', s=100)
+        ax.scatter(*true_value, color='r', label='True Value', s=100)  # Plot true value
+        ax.set_xlabel('X1')
+        ax.set_ylabel('X2')
+        ax.set_zlabel('X3')
+        ax.legend()
+        plt.show()
+    
+    print(points)
+    # plot_optimization_path(points, [0, 0, np.log10(1e14)])
 
     # Create a plot
     fig, ax = plt.subplots(1, 1, figsize=(5, 5))
@@ -1304,10 +1322,10 @@ def visualize_initial_optimization():
 
 if __name__ == '__main__':
     # visualize_initial_guesses()
-    # visualize_initial_optimization()
+    visualize_initial_optimization()
     # raise ValueError('This script is not meant to be run as a standalone script')
     
-    visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
+    # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
     # Run a set of tests with varying scales and lens/source numbers
     #simple_nfw_test(1, 10, 10)
     #simple_nfw_test(2, 10, 10)

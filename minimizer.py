@@ -1,6 +1,7 @@
 import numpy as np
 
-def numerical_gradient(func, x, params, epsilon=1e-8):
+def numerical_gradient(func, x, params, epsilon=1e-6):
+    x = np.asarray(x, dtype=float)  # Ensure x is a NumPy array
     grad = np.zeros_like(x)
     for i in range(len(x)):
         x_plus = np.copy(x)
@@ -10,21 +11,22 @@ def numerical_gradient(func, x, params, epsilon=1e-8):
         grad[i] = (func(x_plus, params) - func(x_minus, params)) / (2 * epsilon)
     return grad
 
-def gradient_descent_3d_with_momentum(func, initial_x, learning_rate, num_iterations, momentum, params):
-    # Momentum-based gradient descent for 3D functions
-    # Momentum is a hyperparameter in the range [0, 1], where 0 is no momentum and 1 is full momentum
-    # The idea is to add a fraction of the previous step to the current step, which can help accelerate convergence
-    x = np.array(initial_x, dtype=float)
-    velocity = np.zeros_like(x)
+def gradient_descent(func, initial_x, learning_rate, num_iterations, momentum, params):
+    x = np.asarray(initial_x, dtype=float)
+    velocity = np.zeros_like(x)  # Ensure velocity is a NumPy array
+    grad_avg = np.zeros_like(x)
+    points = []
     for i in range(num_iterations):
         grad = numerical_gradient(func, x, params)
-        velocity = momentum * velocity - learning_rate * grad
-        x += velocity
+        grad_avg = momentum * grad_avg + (1 - momentum) * grad
+        velocity = momentum * velocity - learning_rate * grad_avg
+        x = x + velocity
+        points.append(np.copy(x))
         # print(f"Iteration {i+1}: x = {x}, f(x) = {func(x, params)}")
-    return x
+    return x, points
 
 
-def adam_optimizer(func, initial_x, params, learning_rate=0.001, num_iterations=1000, beta1=0.9, beta2=0.999, epsilon=1e-8):
+def adam_optimizer(func, initial_x, params, learning_rate=0.1, num_iterations=1000, beta1=0.9, beta2=0.999, epsilon=1e-8):
     x = np.asarray(initial_x, dtype=float)
     m = np.zeros_like(x)
     v = np.zeros_like(x)

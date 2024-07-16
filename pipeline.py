@@ -415,7 +415,7 @@ class Halo:
     def optimize_lens_positions(self, sources, use_flags):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
-        learning_rate = 1e-2
+        learning_rate = 1e-1
         # learning_rates = [0.01, 0.01, 0.01]
         momentum = 0.9
         num_iterations = 100
@@ -427,11 +427,18 @@ class Halo:
                                 sources.sigs[i], sources.sigf[i], sources.sigg[i])
             guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
             params = [one_source, use_flags, self.concentration[i], self.redshift]
-            result = minimizer.gradient_descent_3d_with_momentum(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
-            # result = minimizer.adam_optimizer(chi2wrapper3, guess, params)
+            #guess = [self.x[i], self.y[i]] # Try without mass 
+            #params = [one_source, use_flags, self.concentration[i], self.redshift, self.mass[i]]
+            result, points = minimizer.gradient_descent(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
+            if i == 5:
+                first_points = points
+            # result = minimizer.gradient_descent_3d_with_momentum(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
+            #result = minimizer.adam_optimizer(chi2wrapper3, guess, params)
             self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
+            #self.x[i], self.y[i] = result[0], result[1]
             # Now update the concentrations
             self.calculate_concentration()
+        return first_points
         '''
         max_attempts = 1
         for i in range(len(self.x)):
@@ -798,6 +805,7 @@ def chi2wrapper3(guess, params):
     # Guess = [x, y, mass]
     # Params = [source, use_flags, concentration, redshift]
     lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
+    #lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], params[4], params[3], [0]) # Try a run with mass as a parameter instead of a guess
     lenses.calculate_concentration() # The concentration needs to be updated, because the mass will change during optimization
     return assign_halo_chi2_values(lenses, params[0], params[1])
 
