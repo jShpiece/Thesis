@@ -787,14 +787,12 @@ def simple_nfw_test(Nlens, Nsource, xmax):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Lens Number Selection', reducedchi2, xmax, ax=axarr[1,0], legend=False)
 
-
     # Step 5: Merge lenses that are too close to each other
     ns = len(sources.x) / (np.pi * xmax**2)
     merger_threshold = (1/np.sqrt(ns))
     lenses.merge_close_lenses(merger_threshold=merger_threshold)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
-
 
     # Step 6: Final minimization
     lenses.full_minimization(sources, use_flags)
@@ -817,7 +815,7 @@ def visualize_fits(ID_file):
     # Make sure the IDs are integers
     IDs = [int(ID) for ID in IDs]
     # Just grab the first N
-    # IDs = IDs[:5]
+    IDs = IDs[:5]
     zs = [0.194, 0.391, 0.586, 0.782, 0.977]
     start = time.time()
     halos = find_halos(IDs, zs[0])
@@ -1304,18 +1302,17 @@ def visualize_initial_optimization():
 
 
 
-
 if __name__ == '__main__':
     # visualize_initial_guesses()
     # visualize_initial_optimization()
     # raise ValueError('This script is not meant to be run as a standalone script')
     
-    # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
+    visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
     # Run a set of tests with varying scales and lens/source numbers
-    simple_nfw_test(1, 10, 10)
-    simple_nfw_test(2, 10, 10)
-    simple_nfw_test(1, 100, 100)
-    simple_nfw_test(2, 100, 100)
+    #simple_nfw_test(1, 10, 10)
+    #simple_nfw_test(2, 10, 10)
+    #simple_nfw_test(1, 100, 100)
+    #simple_nfw_test(2, 100, 100)
 
     raise ValueError('This script is not meant to be run as a standalone script')
     # Initialize file paths

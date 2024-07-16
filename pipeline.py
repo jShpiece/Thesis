@@ -381,11 +381,12 @@ class Halo:
     def calculate_concentration(self):
         # Compute the concentration parameter for each halo
         # This is done with the Duffy et al. (2008) relation
-        # This relation is valid for 0 < z < 2
+        # This relation is valid for 0 < z < 2 - this covers the range of redshifts we are interested in
         # Note - numpy doesn't like negative powers on lists, even if the answer isn't complex
         # Get around this by taking taking the absolute value of arrays (then multiplying by -1 if necessary) (actually don't do this - mass and concentration should be positive)
+        # It also breaks down if the mass is 0 (we'll be dividing by the mass)
+        self.mass += 1e-10 # Add a small value to the mass to avoid division by zero
         self.concentration = 5.71 * (np.abs(self.mass) / (2 * 10**12))**(-0.084) * (1 + self.redshift)**(-0.47) 
-        # self.concentration = 5.71 * (self.mass / (2 * 10**12))**(-0.084) * (1 + self.redshift)**(-0.47)
 
     # --------------------------------------------
     # Pipeline Functions
@@ -414,8 +415,8 @@ class Halo:
     def optimize_lens_positions(self, sources, use_flags):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
-        learning_rate = 0.1
-        learning_rates = [0.01, 0.01, 1e-10]
+        learning_rate = 1e-2
+        # learning_rates = [0.01, 0.01, 0.01]
         momentum = 0.9
         num_iterations = 100
         for i in range(len(self.x)):
@@ -427,7 +428,7 @@ class Halo:
             guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
             params = [one_source, use_flags, self.concentration[i], self.redshift]
             result = minimizer.gradient_descent_3d_with_momentum(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
-            # result = minimizer.adam_optimizer_with_different_learning_rates(chi2wrapper3, guess, params, learning_rates, num_iterations=num_iterations)
+            # result = minimizer.adam_optimizer(chi2wrapper3, guess, params)
             self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
             # Now update the concentrations
             self.calculate_concentration()
@@ -716,16 +717,26 @@ def assign_halo_chi2_values(lenses, sources, use_flags):
     sorted_distances = np.sort(distances)
     
     # Find the index at which 1/4 of the sources are within this distance
-    # index = int(len(sorted_distances) * (0.4))
-    index = -1
+    index = int(len(sorted_distances) * (0.4))
     
     # Set r0 as the distance at the calculated index
     r0 = sorted_distances[index]
 
     weights = np.exp(-r**2 / r0**2)
+    # Check if there are any nan values in the weights - if so, set them to 0 (also figure out why this is happening)
+    if np.isnan(weights).any():
+        print(lenses.x, lenses.y)
+        weights = np.nan_to_num(weights, nan=0.0)
+        assert not np.isnan(weights).any(), "There are still nan values in the weights"
+
     # Normalize the weights
-    weights /= np.sum(weights, axis=1)[:, None]
-    assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
+    if np.sum(weights, axis=1).any() == 0:
+        weights = np.ones_like(weights)
+        print('Weights sum to zero')
+    else:
+        weights /= np.sum(weights, axis=1)[:, None]
+        assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
+    
     assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
 
     # Unpack flags for clarity
