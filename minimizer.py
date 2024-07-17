@@ -1,6 +1,6 @@
 import numpy as np
 
-def numerical_gradient(func, x, params, epsilon=1e-6):
+def numerical_gradient(func, x, params, epsilon=1e-2):
     x = np.asarray(x, dtype=float)  # Ensure x is a NumPy array
     grad = np.zeros_like(x)
     for i in range(len(x)):

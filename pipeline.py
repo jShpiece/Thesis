@@ -418,7 +418,7 @@ class Halo:
         learning_rate = 1e-1
         # learning_rates = [0.01, 0.01, 0.01]
         momentum = 0.9
-        num_iterations = 100
+        num_iterations = 1000
         for i in range(len(self.x)):
             one_source = Source(sources.x[i], sources.y[i], 
                                 sources.e1[i], sources.e2[i], 
@@ -429,16 +429,14 @@ class Halo:
             params = [one_source, use_flags, self.concentration[i], self.redshift]
             #guess = [self.x[i], self.y[i]] # Try without mass 
             #params = [one_source, use_flags, self.concentration[i], self.redshift, self.mass[i]]
-            result, points = minimizer.gradient_descent(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
-            if i == 5:
-                first_points = points
+            result, trail = minimizer.gradient_descent(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
             # result = minimizer.gradient_descent_3d_with_momentum(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
             #result = minimizer.adam_optimizer(chi2wrapper3, guess, params)
             self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
             #self.x[i], self.y[i] = result[0], result[1]
             # Now update the concentrations
             self.calculate_concentration()
-        return first_points
+        return trail
         '''
         max_attempts = 1
         for i in range(len(self.x)):
@@ -447,14 +445,14 @@ class Halo:
                                 sources.f1[i], sources.f2[i], 
                                 sources.g1[i], sources.g2[i],
                                 sources.sigs[i], sources.sigf[i], sources.sigg[i])
-            guess = [self.x[i], self.y[i], max(0, self.mass[i])] # Class is already initialized with initial guesses
+            guess = [self.x[i], self.y[i], max(0, np.log10(self.mass[i]))] # Class is already initialized with initial guesses
             best_result = None
             best_params = guess
             for _ in range(max_attempts):
                 # Lets try a BFGS method, to avoid getting stuck in local minima
                 result = opt.minimize(
                     chi2wrapper3, guess, args=([one_source, use_flags, self.concentration[i], self.redshift]), 
-                    method='Nelder-Mead',
+                    method='BFGS',
                     tol=1e-8, 
                     options={'maxiter': 1000}
                 )
@@ -462,8 +460,8 @@ class Halo:
                 if best_result is None or result.fun < best_result.fun:
                     best_result = result
                     best_params = result.x
-
-            '''
+        '''
+            
 
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=0.5):
@@ -707,45 +705,8 @@ def assign_lens_chi2_values(lenses, sources, use_flags):
 
 def assign_halo_chi2_values(lenses, sources, use_flags):
     # Given a single lens object, assign a weighted chi2 value based on source distances
-    xl = lenses.x
-    yl = lenses.y
-    assert len(xl) == len(yl), "The x and y arrays must have the same length."
-    assert xl.ndim == yl.ndim == 1, "The x and y arrays must be 1D."
-    assert len(xl) == 1, "Only one lens is allowed."
 
-    xs = sources.x
-    ys = sources.y
-
-    r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2)
-    # Calculate distances from the current lens to all sources
-    distances = np.sqrt((xl - xs)**2 + (yl - ys)**2)
-    
-    # Sort distances
-    sorted_distances = np.sort(distances)
-    
-    # Find the index at which 1/4 of the sources are within this distance
-    index = int(len(sorted_distances) * (0.4))
-    
-    # Set r0 as the distance at the calculated index
-    r0 = sorted_distances[index]
-
-    weights = np.exp(-r**2 / r0**2)
-    # Check if there are any nan values in the weights - if so, set them to 0 (also figure out why this is happening)
-    if np.isnan(weights).any():
-        print(lenses.x, lenses.y)
-        weights = np.nan_to_num(weights, nan=0.0)
-        assert not np.isnan(weights).any(), "There are still nan values in the weights"
-
-    # Normalize the weights
-    if np.sum(weights, axis=1).any() == 0:
-        weights = np.ones_like(weights)
-        print('Weights sum to zero')
-    else:
-        weights /= np.sum(weights, axis=1)[:, None]
-        assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
-    
-    assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
-
+    weights = utils.compute_source_weights(lenses, sources)    
     # Unpack flags for clarity
     use_shear, use_flexion, use_g_flexion = use_flags
 
@@ -763,11 +724,14 @@ def assign_halo_chi2_values(lenses, sources, use_flags):
     # Weigh the chi^2 values by the distance of each source from each lens
     total_chi_squared = 0
     for i in range(len(source_clone.x)):
-        # Get the chi2 values for each source, weighted by the source-lens distance
+        # Calculate chi2 for each component
         shear_chi2 = ((sources.e1[i] - source_clone.e1[i]) / sources.sigs[i])**2 + ((sources.e2[i] - source_clone.e2[i]) / sources.sigs[i])**2
         flexion_chi2 = ((sources.f1[i] - source_clone.f1[i]) / sources.sigf[i])**2 + ((sources.f2[i] - source_clone.f2[i]) / sources.sigf[i])**2
         g_flexion_chi2 = ((sources.g1[i] - source_clone.g1[i]) / sources.sigg[i])**2 + ((sources.g2[i] - source_clone.g2[i]) / sources.sigg[i])**2
-        total_chi_squared += weights[:, i].dot(shear_chi2*use_shear + flexion_chi2*use_flexion + g_flexion_chi2*use_g_flexion)
+        
+        # Ensure correct shape for weights
+        chi2_sum = shear_chi2 * use_shear + flexion_chi2 * use_flexion + g_flexion_chi2 * use_g_flexion
+        total_chi_squared += weights[:, i].dot(chi2_sum)
 
     return total_chi_squared[0]
 

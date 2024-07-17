@@ -56,6 +56,48 @@ def create_gaussian_kernel(stamp_size, sigma):
     gaussian = np.exp(-((xp / sigma) ** 2 + (yp / sigma) ** 2) / 2)
     return gaussian / np.sum(gaussian)
 
+# ------------------------
+# Chi-Squared Utility Functions
+# ------------------------
+
+def compute_source_weights(lenses, sources, r_frac = 0.4):
+    # Calculate gaussian weights for each lens-source pair based on the distance between them
+
+    xl, yl = lenses.x, lenses.y
+    xs, ys = sources.x, sources.y
+
+    r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2)
+    # Calculate distances from the current lens to all sources
+    distances = np.sqrt((xl - xs)**2 + (yl - ys)**2)
+    
+    # Sort distances
+    sorted_distances = np.sort(distances)
+    
+    # Find the index at which 1/4 of the sources are within this distance
+    index = int(len(sorted_distances) * (r_frac))
+    
+    # Set r0 as the distance at the calculated index
+    r0 = sorted_distances[index]
+    
+    weights = np.exp(-r**2 / r0**2)
+    # Check if there are any nan values in the weights - if so, set them to 0 (also figure out why this is happening)
+    if np.isnan(weights).any():
+        print(lenses.x, lenses.y)
+        weights = np.nan_to_num(weights, nan=0.0)
+        assert not np.isnan(weights).any(), "There are still nan values in the weights"
+
+    # Normalize the weights
+    if np.sum(weights, axis=1).any() == 0:
+        weights = np.ones_like(weights)
+        print('Weights sum to zero')
+    else:
+        weights /= np.sum(weights, axis=1)[:, None]
+        assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
+    
+    assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
+
+    return weights
+
 
 # ------------------------
 # Lensing Utility Functions

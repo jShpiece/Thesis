@@ -1176,8 +1176,8 @@ def visualize_initial_guesses():
 
     # Create a source object
     sources = pipeline.Source(x, y, 
-                              np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), 
-                              np.ones_like(x) * 0.1, np.ones_like(x) * 0.01, np.ones_like(x) * 0.02)
+                            np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), np.zeros_like(x), 
+                            np.ones_like(x) * 0.1, np.ones_like(x) * 0.01, np.ones_like(x) * 0.02)
     sources.apply_noise()
     sources.apply_NFW_lensing(halo)
 
@@ -1266,8 +1266,36 @@ def visualize_initial_optimization():
     sources.apply_noise()
     sources.apply_NFW_lensing(halo)
 
+    
     # Optimize 
     points = lenses.optimize_lens_positions(sources, [True, True, True])
+    '''
+    chi_2_vals = []
+    halo.update_chi2_values(sources, [True, True, True])
+    true_chi2 = halo.chi2
+    chi_2_vals.append(true_chi2[0])
+
+    for i in range(len(points)):
+        current_point = points[i]
+        final_point = current_point[-1]
+        lens = pipeline.Halo(final_point[0], final_point[1], np.zeros_like(final_point[0]), np.zeros_like(final_point[0]), final_point[2], 0.194, np.zeros_like(final_point[0]))
+        lens.calculate_concentration()
+        one_source = pipeline.Source(xs[i], ys[i], 
+                                    np.zeros_like(xs[i]), np.zeros_like(xs[i]), np.zeros_like(xs[i]), np.zeros_like(xs[i]), np.zeros_like(xs[i]), np.zeros_like(xs[i]),
+                                    np.ones_like(xs[i]) * 0.1, np.ones_like(xs[i]) * 0.01, np.ones_like(xs[i]) * 0.02)
+        one_source.apply_NFW_lensing(halo)
+        lens.update_chi2_values(sources, [True, True, True])
+        chi_2_vals.append(lens.chi2[0])
+    
+    print('Chi2 values: ', chi_2_vals)
+    plt.figure()
+    x = np.linspace(0, len(chi_2_vals), len(chi_2_vals))
+    plt.plot(x, chi_2_vals, marker='o')
+    plt.xlabel('Lens Num')
+    plt.ylabel('Chi2 Value')
+    plt.title('Chi2 Value after Optimization')
+    plt.show()
+    '''
     print('Optimization complete...')
     def plot_optimization_path(points, true_value):
         fig = plt.figure()
@@ -1286,7 +1314,7 @@ def visualize_initial_optimization():
         ax.legend()
         plt.show()
     
-    print(points)
+    # print(points)
     # plot_optimization_path(points, [0, 0, np.log10(1e14)])
 
     # Create a plot
@@ -1307,22 +1335,101 @@ def visualize_initial_optimization():
     # This is a rough estimate of the distance at which the optimization stops working
     r = (lenses.x**2 + lenses.y**2)**0.5 
     halo_found = r < 5
-    print('{}% of the sources were correctly identified'.format(np.sum(halo_found) / N * 100))
+    print("{}% of the lenses were brought within 5'' of a halo".format(np.sum(halo_found) / N * 100))
     r = np.sort(r)
     r = r[int(len(r)/2)]
     circle = plt.Circle((0, 0), r, color='red', fill=False, label='Half of Lenses: {:.2f}'.format(r), linestyle='--')
     ax.add_artist(circle)
 
     ax.legend(loc='best')
-    ax.set_title('Evaluation of Initial Optimization \n Of {} sources, {} came close to guessing the halo location'.format(N, np.sum(halo_found)), fontsize=10)
+    ax.set_title('Evaluation of Initial Optimization \n Of {} lenses, {} were brought within 5'' of a halo'.format(N, np.sum(halo_found)), fontsize=10)
     plt.savefig('Images/initial_optimization.png')
     plt.show()
 
 
+def map_chi2_space():
+    # Create a single halo, a set of sources, and place a test lens everywhere in space, getting the chi2 value for each lens. 
+    # Get a sense of how chi2 varies around the halo
+
+    # Create a single halo
+    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
+    halo.calculate_concentration()
+
+    # Create a set of sources
+    xmax = 50
+    N = 100
+    rs = np.sqrt(np.random.random(N)) * xmax  
+    thetas = np.random.random(N) * 2 * np.pi
+    xs = rs * np.cos(thetas)
+    ys = rs * np.sin(thetas)
+
+    sources = pipeline.Source(xs, ys,
+                              np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
+                                np.ones_like(xs) * 0.1, np.ones_like(xs) * 0.01, np.ones_like(xs) * 0.02)
+    sources.apply_noise()
+    sources.apply_NFW_lensing(halo)
+    sources.filter_sources(xmax)
+
+    xgrid = np.linspace(-xmax, xmax, 2*xmax)
+    ygrid = np.linspace(-xmax, xmax, 2*xmax)
+
+    chi2_values = np.zeros((len(xgrid), len(ygrid)))
+    for i in range(len(xgrid)):
+        for j in range(len(ygrid)):
+            lens = pipeline.Halo(np.array([xgrid[i]]), np.array([ygrid[j]]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
+            lens.calculate_concentration()
+            lens.update_chi2_values(sources, [True, True, True])
+            chi2_values[i, j] = lens.chi2[0]
+
+    # Pick one lens, optimize it, and plot the trail across our chi2 space
+    xl = 0
+    yl = 0
+    mass = 1e14
+    test_lens = pipeline.Halo(np.array([xl]), np.array([yl]), np.array([0]), np.array([5]), np.array([mass]), 0.194, np.array([0]))
+    test_lens.calculate_concentration()
+    test_lens.update_chi2_values(sources, [True, True, True])
+    trail = test_lens.optimize_lens_positions(sources, [True, True, True])
+
+    # Get the gradient of the chi2 values (numerically)
+    grad_x, grad_y = np.gradient(chi2_values)
+    # Create a plot out of this
+    
+    # Plot the chi2 values
+    fig, ax = plt.subplots(1, 3, figsize=(5, 5))
+    fig.suptitle('Chi2 Space (All logarithmic)')
+
+    ax[0].imshow(np.log(chi2_values), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
+    ax[0].scatter(halo.x, halo.y, color='red', label='True Halo', marker='*', s=100)
+    for i in range(len(trail)):
+        points = trail[i]
+        x = points[0]
+        y = points[1]
+        ax[0].scatter(x, y, color='yellow', alpha=0.5)
+    ax[0].set_xlabel('x')
+    ax[0].set_ylabel('y')
+    ax[0].set_title('Chi2 Values for Test Lenses')
+    
+    # Plot the gradient
+    ax[1].imshow(np.log(np.abs(grad_x))*np.sign(grad_x), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
+    ax[1].scatter(halo.x, halo.y, color='red', label='True Halo', marker='*', s=100)
+    ax[1].set_xlabel('x')
+    ax[1].set_ylabel('y')
+    ax[1].set_title('Gradient of Chi2 Values (x)')
+
+    ax[2].imshow(np.log(np.abs(grad_y))*np.sign(grad_y), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
+    ax[2].scatter(halo.x, halo.y, color='red', label='True Halo', marker='*', s=100)
+    ax[2].set_xlabel('x')
+    ax[2].set_ylabel('y')
+    ax[2].set_title('Gradient of Chi2 Values (y)')
+
+    # plt.tight_layout()
+    plt.savefig('Images/chi2_space.png')
+    plt.show()
 
 if __name__ == '__main__':
+    map_chi2_space()
     # visualize_initial_guesses()
-    visualize_initial_optimization()
+    # visualize_initial_optimization()
     # raise ValueError('This script is not meant to be run as a standalone script')
     
     # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
