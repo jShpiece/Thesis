@@ -60,7 +60,7 @@ def create_gaussian_kernel(stamp_size, sigma):
 # Chi-Squared Utility Functions
 # ------------------------
 
-def compute_source_weights(lenses, sources, r_frac = 0.4):
+def compute_source_weights(lenses, sources, r_frac = 0.2):
     # Calculate gaussian weights for each lens-source pair based on the distance between them
 
     xl, yl = lenses.x, lenses.y
@@ -298,6 +298,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 # ------------------------------
 # Initialization functions
 # ------------------------------
+
 
 def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5,lens_type='SIS'):
     #Create sources for a lensing system and apply the lensing signal

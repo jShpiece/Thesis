@@ -42,7 +42,7 @@ class Source:
         return valid_indices
 
 
-    def generate_initial_guess(self, lens_type='SIS', z_l = 0.5, z_s = 1.0):
+    def generate_initial_guess(self, lens_type='SIS', z_l = 0.5, z_s = 0.8):
         # Generate initial guesses for possible lens positions based on the source ellipticity and flexion
         phi = np.arctan2(self.f2, self.f1)
         gamma = np.sqrt(self.e1**2 + self.e2**2)
@@ -125,7 +125,7 @@ class Source:
             self.g2 += (3 * einstein_radius) / (2 * r**2) * sin3phi
 
     
-    def apply_NFW_lensing(self, halos, z_source=1):
+    def apply_NFW_lensing(self, halos, z_source=0.8):
         e1, e2, f1, f2, g1, g2 = utils.calculate_lensing_signals_nfw(halos, self, z_source)
 
         self.e1 += e1
@@ -394,6 +394,7 @@ class Halo:
 
     def update_chi2_values(self, sources, use_flags):
         # Given a set of sources, update the chi^2 values for each lens
+
         global_chi2 = calculate_chi_squared(sources, self, use_flags, lensing='NFW')
         chi2_values = np.zeros(len(self.x))
         if len(self.x) == 1:
@@ -415,10 +416,12 @@ class Halo:
     def optimize_lens_positions(self, sources, use_flags):
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
-        learning_rate = 1e-1
-        # learning_rates = [0.01, 0.01, 0.01]
-        momentum = 0.9
-        num_iterations = 1000
+
+        learning_rates = [0.1, 0.1, 0.1]  # Adjust learning rate for mass parameter
+        num_iterations = 100
+        beta1 = 0.9
+        beta2 = 0.999
+
         for i in range(len(self.x)):
             one_source = Source(sources.x[i], sources.y[i], 
                                 sources.e1[i], sources.e2[i], 
@@ -427,41 +430,13 @@ class Halo:
                                 sources.sigs[i], sources.sigf[i], sources.sigg[i])
             guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
             params = [one_source, use_flags, self.concentration[i], self.redshift]
-            #guess = [self.x[i], self.y[i]] # Try without mass 
-            #params = [one_source, use_flags, self.concentration[i], self.redshift, self.mass[i]]
-            result, trail = minimizer.gradient_descent(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
-            # result = minimizer.gradient_descent_3d_with_momentum(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
-            #result = minimizer.adam_optimizer(chi2wrapper3, guess, params)
+            # result, trail = minimizer.gradient_descent(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
+            result, trail = minimizer.adam_optimizer(chi2wrapper3, guess, learning_rates, num_iterations, beta1, beta2, params=params)
+
             self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
-            #self.x[i], self.y[i] = result[0], result[1]
             # Now update the concentrations
             self.calculate_concentration()
         return trail
-        '''
-        max_attempts = 1
-        for i in range(len(self.x)):
-            one_source = Source(sources.x[i], sources.y[i], 
-                                sources.e1[i], sources.e2[i], 
-                                sources.f1[i], sources.f2[i], 
-                                sources.g1[i], sources.g2[i],
-                                sources.sigs[i], sources.sigf[i], sources.sigg[i])
-            guess = [self.x[i], self.y[i], max(0, np.log10(self.mass[i]))] # Class is already initialized with initial guesses
-            best_result = None
-            best_params = guess
-            for _ in range(max_attempts):
-                # Lets try a BFGS method, to avoid getting stuck in local minima
-                result = opt.minimize(
-                    chi2wrapper3, guess, args=([one_source, use_flags, self.concentration[i], self.redshift]), 
-                    method='BFGS',
-                    tol=1e-8, 
-                    options={'maxiter': 1000}
-                )
-                
-                if best_result is None or result.fun < best_result.fun:
-                    best_result = result
-                    best_params = result.x
-        '''
-            
 
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=0.5):
@@ -518,7 +493,7 @@ class Halo:
         
         # Sort the lenses by chi^2 value
         sorted_indices = np.argsort(self.chi2)
-        self.x, self.y, self.mass, self.chi2 = self.x[sorted_indices], self.y[sorted_indices], self.mass[sorted_indices], self.chi2[sorted_indices]
+        self.x, self.y, self.mass, self.concentration, self.chi2 = self.x[sorted_indices], self.y[sorted_indices], self.mass[sorted_indices], self.concentration[sorted_indices], self.chi2[sorted_indices]
 
         # Select the 'lens_floor' lenses with the lowest chi^2 values
         if len(self.x) > lens_floor:
@@ -536,6 +511,7 @@ class Halo:
             # Clone the lenses object
             test_lenses = Halo(self.x, self.y, self.z, self.concentration, self.mass, self.redshift, self.chi2)
             test_lenses.select_lowest_chi2(lens_floor=lens_floor)
+
             reducedchi2 = test_lenses.update_chi2_values(sources, use_flags)
             new_dist = np.abs(reducedchi2 - 1)
             if new_dist < best_dist:
@@ -657,7 +633,7 @@ def assign_lens_chi2_values(lenses, sources, use_flags):
     xs = sources.x
     ys = sources.y
 
-    r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2)
+    r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2 + 0.01**2) # Add a small value to avoid division by zero
     # Choose a characteristic distance such that 1/5 of the sources are within this distance
     # Calculate distances from the current lens to all sources
     distances = np.sqrt((xl - xs)**2 + (yl - ys)**2)

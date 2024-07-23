@@ -783,6 +783,12 @@ def simple_nfw_test(Nlens, Nsource, xmax):
     _plot_results(lenses, halos, 'Filtering', reducedchi2, xmax, ax=axarr[0,2], legend=False)
     
     # Step 4: Iterative elimination
+    # Add the true lenses back into the candidates
+    # lenses.x = np.concatenate((lenses.x, halos.x))
+    # lenses.y = np.concatenate((lenses.y, halos.y))
+    # lenses.mass = np.concatenate((lenses.mass, halos.mass))
+    # lenses.concentration = np.concatenate((lenses.concentration, halos.concentration))
+    # lenses.calculate_concentration()
     lenses.iterative_elimination(sources, reducedchi2, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Lens Number Selection', reducedchi2, xmax, ax=axarr[1,0], legend=False)
@@ -1230,11 +1236,12 @@ def visualize_initial_guesses():
 
 def visualize_initial_optimization():
     # Create a single halo, a set of initial guesses around that halo, and see how the optimization step does
-    rmax = 50
-    N = 50
+    rmax = 30
+    N = 30
     
     # Create a single halo
-    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
+    halo = pipeline.Halo(np.array([0, -10]), np.array([0,-10]), np.array([0,0]), np.array([5,2]), np.array([1e14,1e14]), 0.194, np.array([0,0]))
+    # halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
     halo.calculate_concentration()
 
     # Create a set of guesses
@@ -1245,7 +1252,7 @@ def visualize_initial_optimization():
     x = r * np.cos(theta)
     y = r * np.sin(theta)
 
-    mass = np.ones_like(x) * 1e14 # Cheating a bit here, but lets roll with it for now
+    mass = 10**np.random.normal(14, 1, N) # A little less of a cheat
 
     # Create a halo object
     lenses = pipeline.Halo(x, y, np.zeros_like(x), np.zeros_like(x), mass, 0.194, np.zeros_like(x))
@@ -1333,18 +1340,46 @@ def visualize_initial_optimization():
     plt.tight_layout()
     # Draw a circle that contains half of our optimization guesses
     # This is a rough estimate of the distance at which the optimization stops working
-    r = (lenses.x**2 + lenses.y**2)**0.5 
-    halo_found = r < 5
-    print("{}% of the lenses were brought within 5'' of a halo".format(np.sum(halo_found) / N * 100))
-    r = np.sort(r)
-    r = r[int(len(r)/2)]
-    circle = plt.Circle((0, 0), r, color='red', fill=False, label='Half of Lenses: {:.2f}'.format(r), linestyle='--')
+    r_found = (lenses.x**2 + lenses.y**2)**0.5 
+    halo_found = r_found < 5
+    print("{}% of the lenses were brought within 5 arcseconds of a halo".format(np.sum(halo_found) / N * 100))
+    r_found = np.sort(r_found)
+    r_found = r[int(len(r_found)/2)]
+    circle = plt.Circle((0, 0), 5, color='red', fill=False, label='Detection Threshold', linestyle='--')
+    circle2 = plt.Circle((-10, -10), 5, color='red', fill=False, linestyle='--')
     ax.add_artist(circle)
+    ax.add_artist(circle2)
 
     ax.legend(loc='best')
     ax.set_title('Evaluation of Initial Optimization \n Of {} lenses, {} were brought within 5'' of a halo'.format(N, np.sum(halo_found)), fontsize=10)
-    plt.savefig('Images/initial_optimization.png')
+    plt.savefig('Images/initial_optimization_2lenses.png')
+    
+    
+    assert len(lenses.mass) == N, 'Masses not computed for all lenses'
+    assert np.all(lenses.mass > 0), 'Masses are not positive'
+    '''
+    # Plot the mass distribution of the lenses as a histogram
+    plt.figure()
+    plt.hist(np.log10(lenses.mass), bins=10, color='blue', alpha=0.5, label='Optimized Masses')
+    plt.axvline(x=14, color='red', linestyle='--', label='True Mass')
+    plt.xlabel('Mass (log scale)')
+    plt.ylabel('Frequency')
+    plt.title('Mass Distribution of Lenses')
+    plt.legend()
+    plt.savefig('Images/initial_optimization_masses.png')
+
+    # Plot mass distribution as a function of distance from the halo
+    plt.figure()
+    plt.scatter(r, np.log10(lenses.mass), color='blue', label='Optimized Masses')
+    plt.axhline(y=np.log10(1e14), color='red', linestyle='--', label='True Mass')
+    plt.xlabel('Distance from Halo')
+    plt.ylabel('Mass (log scale)')
+    plt.title('Mass Distribution of Lenses as a Function of Distance from Halo')
+    plt.legend()
+    plt.savefig('Images/initial_optimization_masses_distance.png')
+    '''
     plt.show()
+    
 
 
 def map_chi2_space():
@@ -1382,8 +1417,8 @@ def map_chi2_space():
             chi2_values[i, j] = lens.chi2[0]
 
     # Pick one lens, optimize it, and plot the trail across our chi2 space
-    xl = 0
-    yl = 0
+    xl = 10
+    yl = 10
     mass = 1e14
     test_lens = pipeline.Halo(np.array([xl]), np.array([yl]), np.array([0]), np.array([5]), np.array([mass]), 0.194, np.array([0]))
     test_lens.calculate_concentration()
@@ -1392,31 +1427,39 @@ def map_chi2_space():
 
     # Get the gradient of the chi2 values (numerically)
     grad_x, grad_y = np.gradient(chi2_values)
+    
+    # Smooth and clip the gradient
+    # grad_x = np.clip(grad_x, -1, 1)
+    # grad_y = np.clip(grad_y, -1, 1)
+    from scipy.ndimage import gaussian_filter
+    # grad_x = gaussian_filter(grad_x, sigma=5)
+    # grad_y = gaussian_filter(grad_y, sigma=5)
+    
     # Create a plot out of this
     
     # Plot the chi2 values
     fig, ax = plt.subplots(1, 3, figsize=(5, 5))
-    fig.suptitle('Chi2 Space (All logarithmic)')
+    fig.suptitle('Chi2 Space')
 
-    ax[0].imshow(np.log(chi2_values), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
+    ax[0].imshow((chi2_values), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
     ax[0].scatter(halo.x, halo.y, color='red', label='True Halo', marker='*', s=100)
     for i in range(len(trail)):
         points = trail[i]
         x = points[0]
         y = points[1]
-        ax[0].scatter(x, y, color='yellow', alpha=0.5)
+        # ax[0].scatter(x, y, color='yellow', alpha=0.5)
     ax[0].set_xlabel('x')
     ax[0].set_ylabel('y')
     ax[0].set_title('Chi2 Values for Test Lenses')
     
     # Plot the gradient
-    ax[1].imshow(np.log(np.abs(grad_x))*np.sign(grad_x), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
+    ax[1].imshow(((grad_x)), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
     ax[1].scatter(halo.x, halo.y, color='red', label='True Halo', marker='*', s=100)
     ax[1].set_xlabel('x')
     ax[1].set_ylabel('y')
     ax[1].set_title('Gradient of Chi2 Values (x)')
 
-    ax[2].imshow(np.log(np.abs(grad_y))*np.sign(grad_y), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
+    ax[2].imshow((grad_y), extent=(-xmax, xmax, -xmax, xmax), origin='lower', cmap='viridis')
     ax[2].scatter(halo.x, halo.y, color='red', label='True Halo', marker='*', s=100)
     ax[2].set_xlabel('x')
     ax[2].set_ylabel('y')
@@ -1426,18 +1469,22 @@ def map_chi2_space():
     plt.savefig('Images/chi2_space.png')
     plt.show()
 
+
 if __name__ == '__main__':
-    map_chi2_space()
+    # map_chi2_space()
     # visualize_initial_guesses()
-    # visualize_initial_optimization()
+    visualize_initial_optimization()
     # raise ValueError('This script is not meant to be run as a standalone script')
     
     # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
     # Run a set of tests with varying scales and lens/source numbers
     #simple_nfw_test(1, 10, 10)
-    #simple_nfw_test(2, 10, 10)
-    #simple_nfw_test(1, 100, 100)
-    #simple_nfw_test(2, 100, 100)
+    # simple_nfw_test(2, 10, 10)
+    # start = time.time()
+    # simple_nfw_test(1, 100, 100)
+    # stop = time.time()
+    # print('Time taken: {}'.format(stop - start))
+    # simple_nfw_test(2, 100, 100)
 
     raise ValueError('This script is not meant to be run as a standalone script')
     # Initialize file paths
