@@ -1401,7 +1401,7 @@ def map_chi2_space():
     sources = pipeline.Source(xs, ys,
                               np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
                                 np.ones_like(xs) * 0.1, np.ones_like(xs) * 0.01, np.ones_like(xs) * 0.02)
-    sources.apply_noise()
+    # sources.apply_noise()
     sources.apply_NFW_lensing(halo)
     sources.filter_sources(xmax)
 
@@ -1473,7 +1473,7 @@ def map_chi2_space():
 if __name__ == '__main__':
     # map_chi2_space()
     # visualize_initial_guesses()
-    visualize_initial_optimization()
+    # visualize_initial_optimization()
     # raise ValueError('This script is not meant to be run as a standalone script')
     
     # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
@@ -1481,11 +1481,11 @@ if __name__ == '__main__':
     #simple_nfw_test(1, 10, 10)
     # simple_nfw_test(2, 10, 10)
     # start = time.time()
-    # simple_nfw_test(1, 100, 100)
+    simple_nfw_test(1, 100, 100)
     # stop = time.time()
     # print('Time taken: {}'.format(stop - start))
-    # simple_nfw_test(2, 100, 100)
-
+    simple_nfw_test(2, 100, 100)
+    # plt.show()
     raise ValueError('This script is not meant to be run as a standalone script')
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]

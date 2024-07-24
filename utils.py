@@ -95,7 +95,7 @@ def compute_source_weights(lenses, sources, r_frac = 0.2):
         assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
     
     assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
-
+    weights = np.ones_like(weights)
     return weights
 
 

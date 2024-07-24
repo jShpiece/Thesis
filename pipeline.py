@@ -418,7 +418,7 @@ class Halo:
         # via local minimization
 
         learning_rates = [0.1, 0.1, 0.1]  # Adjust learning rate for mass parameter
-        num_iterations = 100
+        num_iterations = 1000
         beta1 = 0.9
         beta2 = 0.999
 
@@ -429,7 +429,7 @@ class Halo:
                                 sources.g1[i], sources.g2[i],
                                 sources.sigs[i], sources.sigf[i], sources.sigg[i])
             guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
-            params = [one_source, use_flags, self.concentration[i], self.redshift]
+            params = [sources, use_flags, self.concentration[i], self.redshift]
             # result, trail = minimizer.gradient_descent(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
             result, trail = minimizer.adam_optimizer(chi2wrapper3, guess, learning_rates, num_iterations, beta1, beta2, params=params)
 
