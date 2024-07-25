@@ -60,7 +60,7 @@ def create_gaussian_kernel(stamp_size, sigma):
 # Chi-Squared Utility Functions
 # ------------------------
 
-def compute_source_weights(lenses, sources, r_frac = 0.2):
+def compute_source_weights(lenses, sources, r_frac = 0.4):
     # Calculate gaussian weights for each lens-source pair based on the distance between them
 
     xl, yl = lenses.x, lenses.y
@@ -81,6 +81,7 @@ def compute_source_weights(lenses, sources, r_frac = 0.2):
     
     weights = np.exp(-r**2 / r0**2)
     # Check if there are any nan values in the weights - if so, set them to 0 (also figure out why this is happening)
+    
     if np.isnan(weights).any():
         print(lenses.x, lenses.y)
         weights = np.nan_to_num(weights, nan=0.0)
@@ -91,11 +92,12 @@ def compute_source_weights(lenses, sources, r_frac = 0.2):
         weights = np.ones_like(weights)
         print('Weights sum to zero')
     else:
-        weights /= np.sum(weights, axis=1)[:, None]
+        weights /= np.sum(weights, axis=1)[:, None]  # Normalize the weights to sum to N_sources
         assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
     
+    # print('Weights:', weights)
     assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
-    weights = np.ones_like(weights)
+    # weights = np.ones_like(weights)
     return weights
 
 

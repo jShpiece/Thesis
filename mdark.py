@@ -88,7 +88,7 @@ def _plot_results(halo, true_halo, title, reducedchi2, xmax, ax=None, legend=Tru
     mass_recon_log = np.log10(np.abs(mass_recon) + 1e-10)  # Add a small value to avoid log(0)
 
     # Plot true properties with distinct markers and sizes
-    true_sizes = (mass_true_log - np.min(mass_true_log) + 1) * 50  # Scale sizes
+    true_sizes = (mass_true_log - np.min(mass_true_log) + 1) * 100  # Scale sizes
     ax.scatter(x_true, y_true, s=true_sizes, c='blue', alpha=0.8, label='True Halos', edgecolors='w', marker='*')
 
     # Plot reconstructed properties with distinct markers and sizes
@@ -1379,7 +1379,6 @@ def visualize_initial_optimization():
     plt.savefig('Images/initial_optimization_masses_distance.png')
     '''
     plt.show()
-    
 
 
 def map_chi2_space():
@@ -1480,11 +1479,11 @@ if __name__ == '__main__':
     # Run a set of tests with varying scales and lens/source numbers
     #simple_nfw_test(1, 10, 10)
     # simple_nfw_test(2, 10, 10)
-    # start = time.time()
-    simple_nfw_test(1, 100, 100)
-    # stop = time.time()
-    # print('Time taken: {}'.format(stop - start))
-    simple_nfw_test(2, 100, 100)
+    start = time.time()
+    simple_nfw_test(1, 100, 50)
+    simple_nfw_test(2, 100, 50)
+    stop = time.time()
+    print('Time taken: {}'.format(stop - start))
     # plt.show()
     raise ValueError('This script is not meant to be run as a standalone script')
     # Initialize file paths
