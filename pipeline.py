@@ -418,7 +418,7 @@ class Halo:
         # via local minimization
 
         learning_rates = [0.1, 0.1, 0.1]  # Adjust learning rate for mass parameter
-        num_iterations = 1000
+        num_iterations = 100
         beta1 = 0.9
         beta2 = 0.999
 
