@@ -88,41 +88,14 @@ class Source:
                 Expected to be arrays but can handle single values.
         """
         
-        # Convert lens properties to numpy arrays of at least one dimension, ensuring floating point type
-        lenses.x = np.array(lenses.x, ndmin=1, dtype=float)
-        lenses.y = np.array(lenses.y, ndmin=1, dtype=float)
-        lenses.te = np.array(lenses.te, ndmin=1, dtype=float)
+        e1, e2, f1, f2, g1, g2 = utils.calculate_lensing_signals_sis(lenses, self)
 
-        # Ensure the source properties are also of float type to handle the results of division and multiplication
-        self.e1 = self.e1.astype(float)
-        self.e2 = self.e2.astype(float)
-        self.f1 = self.f1.astype(float)
-        self.f2 = self.f2.astype(float)
-        self.g1 = self.g1.astype(float)
-        self.g2 = self.g2.astype(float)
-        
-        # Iterate over each lens to apply its effect
-        for lens_x, lens_y, einstein_radius in zip(lenses.x, lenses.y, lenses.te):
-            # Compute displacement from lens to source
-            dx = self.x - lens_x
-            dy = self.y - lens_y
-            r = np.sqrt(dx**2 + dy**2)
-            
-            # Calculate trigonometric terms needed for lensing equations
-            cos_phi = dx / r
-            sin_phi = dy / r
-            cos2phi = cos_phi * cos_phi - sin_phi * sin_phi
-            sin2phi = 2 * cos_phi * sin_phi
-            cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
-            sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
-            
-            # Apply SIS lensing effects for ellipticity (e1, e2), flexion (f1, f2), and g-flexion (g1, g2)
-            self.e1 += -einstein_radius / (2 * r) * cos2phi
-            self.e2 += -einstein_radius / (2 * r) * sin2phi
-            self.f1 += -dx * einstein_radius / (2 * r**3)
-            self.f2 += -dy * einstein_radius / (2 * r**3)
-            self.g1 += (3 * einstein_radius) / (2 * r**2) * cos3phi
-            self.g2 += (3 * einstein_radius) / (2 * r**2) * sin3phi
+        self.e1 += e1
+        self.e2 += e2
+        self.f1 += f1
+        self.f2 += f2
+        self.g1 += g1
+        self.g2 += g2
 
     
     def apply_NFW_lensing(self, halos, z_source=0.8):
@@ -770,27 +743,8 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     This function takes in a set of sources - with positions, ellipticity, and flexion 
     signals, and attempts to reconstruct the lensing field that produced them. 
     The lensing field is represented by a set of lenses - with positions and Einstein radii. 
-    The lenses are modeled as Singular Isothermal Spheres (SIS). 
-
-    Parameters
-    ----------
-    sources : Source
-        A Source object containing the sources and their lensing parameters
-    sigs : float
-        The standard deviation of the source ellipticity
-    sigf : float
-        The standard deviation of the source flexion
-    xmax : float
-        The maximum distance from the center of the field to the edge
-    lens_floor : int
-        The minimum number of lenses to keep - a target number of lenses based on priors
-    use_flags : list of bool
-        A list of booleans indicating which lensing signals to use
-            0 - shear
-            1 - flexion
-            2 - g_flexion
-    flags : bool
-        Whether to print out step information
+    The lenses are modeled as Singular Isothermal Spheres (SIS) by default, but can be
+    modeled as NFW halos as well.
     '''
 
     # Initialize candidate lenses from source guesses

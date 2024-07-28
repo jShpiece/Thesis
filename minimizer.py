@@ -110,21 +110,3 @@ def plot_optimization_path(points, true_value, func):
 def pit_function(x):
     noise = np.random.normal(0, 0.1)
     return x[0]**2 + x[1]**2 + noise
-
-'''
-# Parameters
-initial_x = [10, 10]  # Starting point away from the minimum
-true_value = [0, 0]  # The true minimum value
-learning_rates = [0.1, 0.1]  # Adjust learning rate for mass parameter
-num_iterations = 10000
-beta1 = 0.9
-beta2 = 0.999
-
-# Run Adam optimizer
-minimized_x, points = adam_optimizer(pit_function, initial_x, learning_rates, num_iterations, beta1, beta2, 1e-8)
-print(f"Minimized value of x: {minimized_x}")
-print(f"Function value at minimized x: {pit_function(minimized_x)}")
-
-# Plot the optimization path and the contour plot
-plot_optimization_path(points, true_value, pit_function)
-'''

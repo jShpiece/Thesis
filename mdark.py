@@ -676,6 +676,139 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
 
     return
 
+
+def single_realization(args):
+    lenses, Nsource, xmax = args
+
+    # Generate a set of background galaxies
+    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
+
+    # Now run the pipeline
+    candidate_lenses, candidate_chi2 = pipeline.fit_lensing_field(sources, xmax, False, [True, True, True], lens_type='NFW')
+    return candidate_lenses, candidate_chi2
+
+
+def random_realization_test(Ntrials, Nlens, Nsource, xmax, file_name):
+    # Run a test with a random realization of lenses and sources
+    # This is a test of the pipeline, to see how well it can recover the true lenses
+
+    # Generate the true lenses - place the first lens in the center, the rest place around it
+    xl = np.zeros(Nlens)
+    yl = np.zeros(Nlens)
+    ml = np.zeros(Nlens)
+
+    for i in range(1, Nlens):
+        theta = 2 * np.pi * i / Nlens
+        xl[i] = xmax/2 * np.cos(theta)
+        yl[i] = xmax/2 * np.sin(theta)
+
+    ml[0] = 10**14
+    ml[1:] = 10**13
+
+    halos = pipeline.Halo(xl, yl, np.zeros(Nlens), np.zeros(Nlens), ml, 0.194, np.zeros(Nlens))
+    halos.calculate_concentration()
+
+    # Run the test in parallel
+    tasks = [(halos, Nsource, xmax) for _ in range(Ntrials)]
+    with Pool() as pool:
+        results = pool.map(single_realization, tasks)
+    
+    # Unpack the results
+    xlens = []
+    ylens = []
+    log_mass = []
+    chi2 = []
+    
+    for result in results:
+        candidate_lenses, candidate_chi2 = result
+        for x in candidate_lenses.x:
+            xlens.append(x)
+        for y in candidate_lenses.y:
+            ylens.append(y)
+        for mass in candidate_lenses.mass:
+            mass = np.abs(mass)
+            log_mass.append(np.log10(mass))
+
+        chi2.append(candidate_chi2)
+
+    # Save the results to a file
+    # Keep in mind, arrays are not the same length. 
+    # We need to pad the arrays with NANs to make them the same length
+    max_length = max(len(xlens), len(ylens), len(log_mass), len(chi2))
+    xlens = np.pad(xlens, (0, max_length - len(xlens)), 'constant', constant_values=np.nan)
+    ylens = np.pad(ylens, (0, max_length - len(ylens)), 'constant', constant_values=np.nan)
+    log_mass = np.pad(log_mass, (0, max_length - len(log_mass)), 'constant', constant_values=np.nan)
+    chi2 = np.pad(chi2, (0, max_length - len(chi2)), 'constant', constant_values=np.nan)
+
+    results = pd.DataFrame({'x': xlens, 'y': ylens, 'log_mass': log_mass, 'chi2': chi2})
+    results.to_csv(file_name, index=False)
+    
+    return
+
+
+def interpret_rr_results(results_file, xmax, Nlens):
+    # Read in the results file and interpret the results
+    results = pd.read_csv(results_file)
+    xlens = results['x'].values
+    ylens = results['y'].values
+    log_mass = results['log_mass'].values
+    chi2 = results['chi2'].values
+    
+    # Concatenate the results, so that each of the four arrays is just a list of values
+    '''
+    xlens = np.concatenate(xlens)
+    ylens = np.concatenate(ylens)
+    log_mass = np.concatenate(log_mass)
+    chi2 = np.concatenate(chi2)
+    '''
+    # Check for NANs, if so, remove them
+    xlens = xlens[~np.isnan(xlens)]
+    ylens = ylens[~np.isnan(ylens)]
+    log_mass = log_mass[~np.isnan(log_mass)]
+    chi2 = chi2[~np.isnan(chi2)]
+
+    # Reproduce the true lenses
+    xl = np.zeros(Nlens)
+    yl = np.zeros(Nlens)
+    ml = np.zeros(Nlens)
+
+    for i in range(1, Nlens):
+        theta = 2 * np.pi * i / Nlens
+        xl[i] = xmax/2 * np.cos(theta)
+        yl[i] = xmax/2 * np.sin(theta)
+
+    ml[0] = 10**14
+    ml[1:] = 10**13
+
+    # Now plot the results - 4 histograms
+
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+    data = [xlens, ylens, log_mass, chi2]
+    xlabels = ['x', 'y', 'log_mass', 'chi2']
+    titles = ['Lens x Position', 'Lens y Position', 'Lens Mass', 'Chi2']
+    true_vals = [xl, yl, np.log10(ml), 0]
+    xrange = [(-xmax, xmax), (-xmax, xmax), (10, 15), (0, 2)]
+
+    for i in range(4):
+        fancy_hist(data[i], ax=ax[i], bins=50, color='black', histtype='step', density=True)
+        if i < 3:
+            if len(true_vals[i]) > 1:
+                for val in true_vals[i]:
+                    ax[i].axvline(val, color='red', linestyle='--', label='True Value', alpha=0.5)
+            else:
+                ax[i].axvline(true_vals[i], color='red', linestyle='--', label='True Value')
+        else:
+            ax[i].axvline(1, color='red', linestyle='--', label='True Value')
+        ax[i].set_xlim(xrange[i])
+        ax[i].set_xlabel(xlabels[i])
+        ax[i].set_ylabel('Probability Density')
+        ax[i].set_title(titles[i])
+        
+    fig.tight_layout()
+    plt.savefig('Images/rr_results_{}.png'.format(Nlens))
+
+
 # --------------------------------------------
 # Debugging Functions
 # --------------------------------------------
@@ -1042,12 +1175,15 @@ def visualize_initial_optimization():
 if __name__ == '__main__':
     N_lens = [1,2]
     Nsource = 100
-    Ntrials = 100
+    Ntrials = 1000
     xmax = 50
     for Nlens in N_lens:
+        start = time.time()
         file_name = 'Images/rr_Nlens_{}_Nsource_{}_Ntrials_{}.txt'.format(Nlens, Nsource, Ntrials)
-        random_realization_test(Ntrials, Nlens, Nsource, xmax)
+        random_realization_test(Ntrials, Nlens, Nsource, xmax, file_name)
         interpret_rr_results(file_name, xmax, Nlens)
+        stop = time.time()
+        print('Time taken for Nlens = {}: {}'.format(Nlens, stop - start))
     
     # map_chi2_space()
     # visualize_initial_guesses()

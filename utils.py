@@ -190,6 +190,33 @@ def mass_sheet_transformation(kappa, k):
     return k*kappa + (1 - k)
 
 
+def calculate_lensing_signals_nfw(lenses, sources):
+    dx = sources.x - lenses.x[:, np.newaxis]
+    dy = sources.y - lenses.y[:, np.newaxis]
+    r = np.sqrt(dx**2 + dy**2)
+
+    cos_phi = dx / r
+    sin_phi = dy / r
+    cos2phi = cos_phi * cos_phi - sin_phi * sin_phi
+    sin2phi = 2 * cos_phi * sin_phi
+    cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
+    sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
+
+    shear_mag = -lenses.te[:, np.newaxis] / (2 * r)
+    flexion_mag = -lenses.te[:, np.newaxis] / (2 * r**2)
+    g_flexion_mag = 3*lenses.te[:, np.newaxis] / (2 * r**2)
+
+    # Sum over all lenses, resulting array should have shape (n_sources,)
+    shear_1 = np.sum(shear_mag * cos2phi, axis=0)
+    shear_2 = np.sum(shear_mag * sin2phi, axis=0)
+    flexion_1 = np.sum(flexion_mag * cos_phi, axis=0)
+    flexion_2 = np.sum(flexion_mag * sin_phi, axis=0)
+    g_flexion_1 = np.sum(g_flexion_mag * cos3phi, axis=0)
+    g_flexion_2 = np.sum(g_flexion_mag * sin3phi, axis=0)
+    
+    return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
+
+
 def calculate_lensing_signals_nfw(halos, sources, z_source):
     # Apply the lensing effects of a set of halos to the sources
     # Model the halos as Navarro-Frenk-White (NFW) profiles
