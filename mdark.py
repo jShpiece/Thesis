@@ -828,38 +828,11 @@ def visualize_fits(ID_file):
     stop = time.time()
     print('Time taken to load halos: {}'.format(stop - start))
 
-    # Create a results file
-    # This will tell me the following things
-    # For each of the three lenses (primary, lens2, lens3) - did we find them? and what was the mass?
-    # For the overall system - what was the total mass?
-    # How many candidate lenses did we find?
-    # What was the chi2 value?
-    # What was the total mass of the system, vs the true mass?
-
-    # Create the file
-
-    located_primary = []
-    located_lens2 = []
-    located_lens3 = []
-    total_mass = []
-    candidate_number = []
-    chi_scores = []
-    true_mass = []
-
-    primary_mass = []
-    lens2_mass = []
-    lens3_mass = []
-
-    primary_true_mass = []
-    lens2_true_mass = []
-    lens3_true_mass = []
-
     counter = 0
     for ID in IDs:
-        global_start = time.time()
+        start = time.time()
         halo = halos[ID]
-        # Simplify for tests - lets just look at the 3 largest halos
-        indices = np.argsort(halo.mass)[::-1][:3]
+        indices = np.argsort(halo.mass)[::-1][:3]  # Simplify for tests - lets just look at the 3 largest halos
         halo.x = halo.x[indices]
         halo.y = halo.y[indices]
         halo.mass = halo.mass[indices]
@@ -868,48 +841,10 @@ def visualize_fits(ID_file):
         
         _, sources, xmax = build_lensing_field(halo, zs[0])
 
-        # Arrange a plot with 6 subplots in 2 rows
-        fig, axarr = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
-
         use_flags = [True, True, True]  # Use all signals
 
-        # Step 1: Generate initial list of lenses from source guesses
-        lenses = sources.generate_initial_guess(z_l = zs[0], lens_type='NFW')
-        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(lenses, halo, 'Initial Guesses', reducedchi2, xmax, ax=axarr[0,0], legend=True)
-        
-        # Step 2: Optimize guesses with local minimization
-        lenses.optimize_lens_positions(sources, use_flags)
-        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(lenses, halo, 'Initial Optimization', reducedchi2, xmax, ax=axarr[0,1], legend=False)
-        
-        # Step 3: Filter out lenses that are too far from the source population
-        lenses.filter_lens_positions(sources, xmax)
-        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(lenses, halo, 'Filtering', reducedchi2, xmax, ax=axarr[0,2], legend=False)
-        
-        # Step 4: Iterative elimination
-        # Add the true lenses back into the candidates
-        #lenses.x = np.concatenate((lenses.x, halo.x))
-        #lenses.y = np.concatenate((lenses.y, halo.y))
-        #lenses.mass = np.concatenate((lenses.mass, halo.mass))
-        #lenses.concentration = np.concatenate((lenses.concentration, halo.concentration))
-        
-        lenses.iterative_elimination(sources, reducedchi2, use_flags)
-        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(lenses, halo, 'Iterative Elimination', reducedchi2, xmax, ax=axarr[1,0], legend=False)
-
-        # Step 5: Merge lenses that are too close to each other
-        ns = len(sources.x) / (np.pi * xmax**2)
-        merger_threshold = (1/np.sqrt(ns))
-        lenses.merge_close_lenses(merger_threshold=merger_threshold)
-        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(lenses, halo, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
-
-        # Step 6: Final minimization
-        lenses.full_minimization(sources, use_flags)
-        reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-        _plot_results(lenses, halo, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False)
+        # Run the pipeline
+        lenses, reducedchi2 = pipeline.fit_lensing_field(sources, xmax, False, use_flags, lens_type='NFW')
 
         # Compute mass
         try:
@@ -919,107 +854,16 @@ def visualize_fits(ID_file):
             mass = 0
 
         # Save and show the plot
-        fig.suptitle('Lensing Reconstruction of Cluster ID {} \n True Mass: {:.2e} $M_\odot$ \n Inferred Mass: {:.2e} $M_\odot$'.format(ID, np.sum(halo.mass), mass))
-
-        # Save the results to a file
-        primary_found = np.min((lenses.x - halo.x[0])**2 + (lenses.y - halo.y[0])**2) < 10
-        lens2_found = np.min((lenses.x - halo.x[1])**2 + (lenses.y - halo.y[1])**2) < 10
-        lens3_found = np.min((lenses.x - halo.x[2])**2 + (lenses.y - halo.y[2])**2) < 10
-
-        located_primary.append(primary_found)
-        located_lens2.append(lens2_found)
-        located_lens3.append(lens3_found)
-        total_mass.append(mass)
-        candidate_number.append(len(lenses.x))
-        chi_scores.append(reducedchi2)
-
-        true_mass.append(np.sum(halo.mass))
-
-        if primary_found:
-            primary_index = np.argmin((lenses.x - halo.x[0])**2 + (lenses.y - halo.y[0])**2)
-            primary_mass.append(lenses.mass[primary_index])
-        else:
-            primary_mass.append(0)
-        if lens2_found:
-            lens2_index = np.argmin((lenses.x - halo.x[1])**2 + (lenses.y - halo.y[1])**2)
-            lens2_mass.append(lenses.mass[lens2_index])
-        else:
-            lens2_mass.append(0)
-        if lens3_found:
-            lens3_index = np.argmin((lenses.x - halo.x[2])**2 + (lenses.y - halo.y[2])**2)
-            lens3_mass.append(lenses.mass[lens3_index])
-        else:
-            lens3_mass.append(0)
-        
-        primary_true_mass.append(halo.mass[0])
-        lens2_true_mass.append(halo.mass[1])
-        lens3_true_mass.append(halo.mass[2])
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        title = 'Cluster ID: {} \n True Mass: {:.2e} \n Inferred Mass: {:.2e}'.format(ID, halo.mass.sum(), mass)
+        _plot_results(lenses, halo, title, reducedchi2, xmax, ax)
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust layout for better visualization
         plt.savefig('Images/MDARK/pipeline_visualization/Halo_Fit_{}.png'.format(ID))
         plt.close()
-        global_stop = time.time()
-        print('Time taken for cluster {}: {}'.format(counter, global_stop - global_start))
+        stop = time.time()
+        print('Time taken for cluster {}: {}'.format(counter, stop - start))
         counter += 1
-
-    # Save the results to a file
-    with open('Images/MDARK/pipeline_visualization/results.csv', 'w') as f:
-        f.write('ID, Located Primary, Located Lens 2, Located Lens 3, Total Mass, Candidate Number, Chi2, True Mass, Primary Mass, Lens 2 Mass, Lens 3 Mass, Primary True Mass, Lens 2 True Mass, Lens 3 True Mass\n')
-        for i in range(len(IDs)):
-            f.write('{},{},{},{},{},{},{},{},{},{},{},{},{} \n'.format(IDs[i], 
-                                                                located_primary[i], located_lens2[i], located_lens3[i], 
-                                                                total_mass[i], candidate_number[i], chi_scores[i], 
-                                                                true_mass[i], primary_mass[i], lens2_mass[i], 
-                                                                lens3_mass[i], primary_true_mass[i], lens2_true_mass[i], 
-                                                                lens3_true_mass[i]))
-    
-    # Plot the results
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    ax = ax.flatten()
-
-    # Plot the total mass
-    ax[0].scatter(true_mass, total_mass, color='black')
-    ax[0].plot(true_mass, true_mass, color='red', linestyle='--')
-    ax[0].set_xscale('log')
-    ax[0].set_yscale('log')
-    ax[0].set_xlabel('True Mass [$M_\odot$]')
-    ax[0].set_ylabel('Inferred Mass [$M_\odot$]')
-    ax[0].set_title('Total Mass Inference')
-    ax[0].set_aspect('equal', adjustable='box')
-    ax[0].set_xlim([1e13, 1e15])
-    ax[0].set_ylim([1e13, 1e15])
-
-    # Plot correlation between true and inferred mass for each lens
-    ax[1].scatter(primary_true_mass, primary_mass, color='black')
-    ax[1].plot(primary_true_mass, primary_true_mass, color='red', linestyle='--')
-    ax[1].set_xscale('log')
-    ax[1].set_yscale('log')
-    ax[1].set_xlabel('True Mass [$M_\odot$]')
-    ax[1].set_ylabel('Inferred Mass [$M_\odot$]')
-    ax[1].set_title('Primary Lens Mass Inference')
-    ax[1].set_aspect('equal', adjustable='box')
-
-    ax[2].scatter(lens2_true_mass, lens2_mass, color='black')
-    ax[2].plot(lens2_true_mass, lens2_true_mass, color='red', linestyle='--')
-    ax[2].set_xscale('log')
-    ax[2].set_yscale('log')
-    ax[2].set_xlabel('True Mass [$M_\odot$]')
-    ax[2].set_ylabel('Inferred Mass [$M_\odot$]')
-    ax[2].set_title('Lens 2 Mass Inference')
-    ax[2].set_aspect('equal', adjustable='box')
-
-    ax[3].scatter(lens3_true_mass, lens3_mass, color='black')
-    ax[3].plot(lens3_true_mass, lens3_true_mass, color='red', linestyle='--')
-    ax[3].set_xscale('log')
-    ax[3].set_yscale('log')
-    ax[3].set_xlabel('True Mass [$M_\odot$]')
-    ax[3].set_ylabel('Inferred Mass [$M_\odot$]')
-    ax[3].set_title('Lens 3 Mass Inference')
-    ax[3].set_aspect('equal', adjustable='box')
-
-    plt.tight_layout()
-    plt.savefig('Images/MDARK/pipeline_visualization/Mass_Inference.png')
-    plt.show()
 
     return
 
