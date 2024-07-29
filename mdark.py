@@ -9,7 +9,6 @@ from astropy.cosmology import Planck15 as cosmo
 from multiprocessing import Pool
 import time
 import os
-import scipy.optimize as opt
 import copy
 
 dir = 'MDARK/'
@@ -705,6 +704,9 @@ def random_realization_test(Ntrials, Nlens, Nsource, xmax, file_name):
     ml[0] = 10**14
     ml[1:] = 10**13
 
+    xl += 10
+    yl += 10 # Offset the lenses by 10 arcseconds, to make sure the pipeline doesn't just favor the center
+
     halos = pipeline.Halo(xl, yl, np.zeros(Nlens), np.zeros(Nlens), ml, 0.194, np.zeros(Nlens))
     halos.calculate_concentration()
 
@@ -783,6 +785,7 @@ def interpret_rr_results(results_file, xmax, Nlens):
     # Now plot the results - 4 histograms
 
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle('Random Realization Test /n {} Lenses, {} Sources'.format(Nlens, len(xlens)))
     ax = ax.flatten()
     data = [xlens, ylens, log_mass, chi2]
     xlabels = ['x', 'y', 'log_mass', 'chi2']
@@ -1173,9 +1176,10 @@ def visualize_initial_optimization():
 # --------------------------------------------
 
 if __name__ == '__main__':
+    '''
     N_lens = [1,2]
     Nsource = 100
-    Ntrials = 1000
+    Ntrials = 100
     xmax = 50
     for Nlens in N_lens:
         start = time.time()
@@ -1184,15 +1188,12 @@ if __name__ == '__main__':
         interpret_rr_results(file_name, xmax, Nlens)
         stop = time.time()
         print('Time taken for Nlens = {}: {}'.format(Nlens, stop - start))
-    
-    # map_chi2_space()
-    # visualize_initial_guesses()
-    # visualize_initial_optimization()
-    # raise ValueError('This script is not meant to be run as a standalone script')
-    
-    # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
+    '''
+
+    visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
+
     # Run a set of tests with varying scales and lens/source numbers
-    #simple_nfw_test(1, 10, 10)
+    # simple_nfw_test(1, 10, 10)
     # simple_nfw_test(2, 10, 10)
     # start = time.time()
     # simple_nfw_test(1, 100, 50)
