@@ -498,8 +498,6 @@ def build_lensing_field(halos, z, Nsource = None):
     halos.x *= (3.086 * 10**22 / d) * 206265
     halos.y *= (3.086 * 10**22 / d) * 206265
 
-    lenses = halos # Placeholder for the lenses
-
     # Center the lenses at (0, 0)
     # This is a necessary step for the pipeline
     # Let the centroid be the location of the most massive halo
@@ -508,21 +506,21 @@ def build_lensing_field(halos, z, Nsource = None):
 
     largest_halo = np.argmax(halos.mass)
     centroid = [halos.x[largest_halo], halos.y[largest_halo]]
-    lenses.x -= centroid[0] 
-    lenses.y -= centroid[1] 
+    halos.x -= centroid[0] 
+    halos.y -= centroid[1] 
 
-    xmax = np.max((lenses.x**2 + lenses.y**2)**0.5)
+    xmax = np.max((halos.x**2 + halos.y**2)**0.5)
     
     # Don't allow the field of view to be larger than 2 arcminutes - or smaller than 1 arcminute
-    xmax = np.min([xmax, 3*60])
+    xmax = np.min([xmax, 2*60])
     xmax = np.max([xmax, 1*60])
 
     # Generate a set of background galaxies
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
+    sources = utils.createSources(halos, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
 
-    return lenses, sources, xmax
+    return halos, sources, xmax
 
 
 def build_test_set(Nclusters, z, file_name):
@@ -821,7 +819,7 @@ def visualize_fits(ID_file):
     # Make sure the IDs are integers
     IDs = [int(ID) for ID in IDs]
     # Just grab the first N
-    IDs = IDs[:5]
+    IDs = IDs[:20]
     zs = [0.194, 0.391, 0.586, 0.782, 0.977]
     start = time.time()
     halos = find_halos(IDs, zs[0])
@@ -1015,6 +1013,91 @@ def visualize_initial_optimization():
     plt.show()
 
 
+def simple_nfw_test(Nlens, Nsource, xmax):
+    # Create a simple lensing field and test the pipeline on it
+
+    # Create a set of lenses
+    x = np.random.uniform(-xmax, xmax, Nlens)
+    y = np.random.uniform(-xmax, xmax, Nlens)
+    mass = np.random.uniform(1e13, 1e15, Nlens)
+    concentration = np.random.uniform(1, 10, Nlens)
+    # Set the first lens to be at the center
+    x[0] = 0
+    y[0] = 0
+    mass[0] = 1e14
+
+    halos = pipeline.Halo(x, y, np.zeros_like(x), concentration, mass, 0.194, np.zeros_like(x))
+
+    # Create a set of sources
+    xs = np.random.uniform(-xmax, xmax, Nsource)
+    ys = np.random.uniform(-xmax, xmax, Nsource)
+    # Distribute sources uniformly in a grid (if Nsource is 1, place it randomly)
+    '''
+    if Nsource == 1:
+        xs = np.random.uniform(-xmax, xmax, Nsource)
+        ys = np.random.uniform(-xmax, xmax, Nsource)
+    else:
+        n = int(np.sqrt(Nsource))
+        x = np.linspace(-xmax, xmax, n)
+        y = np.linspace(-xmax, xmax, n)
+        xs, ys = np.meshgrid(x, y)
+        xs = xs.flatten()
+        ys = ys.flatten()
+        # Update Nsource
+        Nsource = len(xs)
+    '''
+    sig_s = np.ones(Nsource) * 0.1
+    sig_f = np.ones(Nsource) * 0.01
+    sig_g = np.ones(Nsource) * 0.02
+    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
+    sources.apply_noise()
+    sources.apply_NFW_lensing(halos)
+    sources.filter_sources()
+
+    # Now run the pipeline (and plot it)
+
+    # Arrange a plot with 6 subplots in 2 rows
+    fig, axarr = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
+
+    use_flags = [True, True, True]  # Use all signals
+
+    # Step 1: Generate initial list of lenses from source guesses
+    lenses = sources.generate_initial_guess(z_l = 0.194, lens_type='NFW')
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(lenses, halos, 'Initial Guesses', reducedchi2, xmax, ax=axarr[0,0], legend=True)
+
+    # Step 2: Optimize guesses with local minimization
+    lenses.optimize_lens_positions(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(lenses, halos, 'Initial Optimization', reducedchi2, xmax, ax=axarr[0,1], legend=False)
+
+    # Step 3: Filter out lenses that are too far from the source population
+    lenses.filter_lens_positions(sources, xmax)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(lenses, halos, 'Filtering', reducedchi2, xmax, ax=axarr[0,2], legend=False)
+
+    # Step 4: Iterative elimination
+    lenses.iterative_elimination(sources, reducedchi2, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(lenses, halos, 'Lens Number Selection', reducedchi2, xmax, ax=axarr[1,0], legend=False)
+
+    # Step 5: Merge lenses that are too close to each other
+    ns = len(sources.x) / (np.pi * xmax**2)
+    merger_threshold = (1/np.sqrt(ns))
+    lenses.merge_close_lenses(merger_threshold=merger_threshold)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
+
+    # Step 6: Final minimization
+    lenses.full_minimization(sources, use_flags)
+    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
+    _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False)
+
+    fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$'.format(np.sum(halos.mass), np.sum(lenses.mass)))
+    plt.savefig('Images/test_cluster_Nlens_{}_Nsource_{}.png'.format(Nlens, Nsource))
+
+    print('Finished test...')
+
 # --------------------------------------------
 # Main Functions
 # --------------------------------------------
@@ -1034,17 +1117,10 @@ if __name__ == '__main__':
         print('Time taken for Nlens = {}: {}'.format(Nlens, stop - start))
     '''
 
+    # simple_nfw_test(1, 100, 50)
+    # plt.show()
     visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
 
-    # Run a set of tests with varying scales and lens/source numbers
-    # simple_nfw_test(1, 10, 10)
-    # simple_nfw_test(2, 10, 10)
-    # start = time.time()
-    # simple_nfw_test(1, 100, 50)
-    # simple_nfw_test(2, 100, 50)
-    # stop = time.time()
-    # print('Time taken: {}'.format(stop - start))
-    # plt.show()
     raise ValueError('This script is not meant to be run as a standalone script')
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]

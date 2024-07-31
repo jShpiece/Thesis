@@ -502,6 +502,15 @@ class Halo:
         best_result = None
         best_params = guess
 
+        learning_rates = [0.1] 
+        num_iterations = 100
+        beta1 = 0.9
+        beta2 = 0.999
+
+        result, _ = minimizer.adam_optimizer(chi2wrapper4, guess, learning_rates, num_iterations, beta1, beta2, params=params)
+        self.mass = result
+
+        '''
         for _ in range(max_attempts):
             result = opt.minimize(
                 chi2wrapper4, guess, args=params,
@@ -513,6 +522,7 @@ class Halo:
                 best_result = result
                 best_params = result.x
         self.mass = best_params
+        '''
 
 
 # ------------------------------
