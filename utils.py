@@ -60,7 +60,7 @@ def create_gaussian_kernel(stamp_size, sigma):
 # Chi-Squared Utility Functions
 # ------------------------
 
-def compute_source_weights(lenses, sources, r_frac = 0.4):
+def compute_source_weights(lenses, sources, r_frac = 0.7):
     # Calculate gaussian weights for each lens-source pair based on the distance between them
 
     xl, yl = lenses.x, lenses.y
@@ -79,7 +79,7 @@ def compute_source_weights(lenses, sources, r_frac = 0.4):
     # Set r0 as the distance at the calculated index
     r0 = sorted_distances[index]
     
-    weights = np.exp(-r**2 / r0**2)
+    weights = np.exp(- (r / (r0))**2)
     # Check if there are any nan values in the weights - if so, set them to 0 (also figure out why this is happening)
     
     if np.isnan(weights).any():

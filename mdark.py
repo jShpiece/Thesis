@@ -818,8 +818,8 @@ def visualize_fits(ID_file):
     IDs = pd.read_csv(ID_file)['ID'].values
     # Make sure the IDs are integers
     IDs = [int(ID) for ID in IDs]
-    # Just grab the first N
-    IDs = IDs[:20]
+    # Just grab the last 5 IDs
+    IDs = IDs[-5:]
     zs = [0.194, 0.391, 0.586, 0.782, 0.977]
     start = time.time()
     halos = find_halos(IDs, zs[0])
@@ -908,33 +908,6 @@ def visualize_initial_optimization():
     
     # Optimize 
     points = lenses.optimize_lens_positions(sources, [True, True, True])
-    '''
-    chi_2_vals = []
-    halo.update_chi2_values(sources, [True, True, True])
-    true_chi2 = halo.chi2
-    chi_2_vals.append(true_chi2[0])
-
-    for i in range(len(points)):
-        current_point = points[i]
-        final_point = current_point[-1]
-        lens = pipeline.Halo(final_point[0], final_point[1], np.zeros_like(final_point[0]), np.zeros_like(final_point[0]), final_point[2], 0.194, np.zeros_like(final_point[0]))
-        lens.calculate_concentration()
-        one_source = pipeline.Source(xs[i], ys[i], 
-                                    np.zeros_like(xs[i]), np.zeros_like(xs[i]), np.zeros_like(xs[i]), np.zeros_like(xs[i]), np.zeros_like(xs[i]), np.zeros_like(xs[i]),
-                                    np.ones_like(xs[i]) * 0.1, np.ones_like(xs[i]) * 0.01, np.ones_like(xs[i]) * 0.02)
-        one_source.apply_NFW_lensing(halo)
-        lens.update_chi2_values(sources, [True, True, True])
-        chi_2_vals.append(lens.chi2[0])
-    
-    print('Chi2 values: ', chi_2_vals)
-    plt.figure()
-    x = np.linspace(0, len(chi_2_vals), len(chi_2_vals))
-    plt.plot(x, chi_2_vals, marker='o')
-    plt.xlabel('Lens Num')
-    plt.ylabel('Chi2 Value')
-    plt.title('Chi2 Value after Optimization')
-    plt.show()
-    '''
     print('Optimization complete...')
     def plot_optimization_path(points, true_value):
         fig = plt.figure()
@@ -985,54 +958,33 @@ def visualize_initial_optimization():
     ax.legend(loc='best')
     ax.set_title('Evaluation of Initial Optimization \n Of {} lenses, {} were brought within 5'' of a halo'.format(N, np.sum(halo_found)), fontsize=10)
     plt.savefig('Images/initial_optimization_2lenses.png')
-    
-    
-    assert len(lenses.mass) == N, 'Masses not computed for all lenses'
-    assert np.all(lenses.mass > 0), 'Masses are not positive'
-    '''
-    # Plot the mass distribution of the lenses as a histogram
-    plt.figure()
-    plt.hist(np.log10(lenses.mass), bins=10, color='blue', alpha=0.5, label='Optimized Masses')
-    plt.axvline(x=14, color='red', linestyle='--', label='True Mass')
-    plt.xlabel('Mass (log scale)')
-    plt.ylabel('Frequency')
-    plt.title('Mass Distribution of Lenses')
-    plt.legend()
-    plt.savefig('Images/initial_optimization_masses.png')
-
-    # Plot mass distribution as a function of distance from the halo
-    plt.figure()
-    plt.scatter(r, np.log10(lenses.mass), color='blue', label='Optimized Masses')
-    plt.axhline(y=np.log10(1e14), color='red', linestyle='--', label='True Mass')
-    plt.xlabel('Distance from Halo')
-    plt.ylabel('Mass (log scale)')
-    plt.title('Mass Distribution of Lenses as a Function of Distance from Halo')
-    plt.legend()
-    plt.savefig('Images/initial_optimization_masses_distance.png')
-    '''
     plt.show()
 
 
-def simple_nfw_test(Nlens, Nsource, xmax):
+def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     # Create a simple lensing field and test the pipeline on it
 
     # Create a set of lenses
-    x = np.random.uniform(-xmax, xmax, Nlens)
-    y = np.random.uniform(-xmax, xmax, Nlens)
-    mass = np.random.uniform(1e13, 1e15, Nlens)
+    if Nlens == 1:
+        x = np.array([0])
+        y = np.array([0])
+    elif Nlens == 2:
+        x = np.linspace(-xmax/2, xmax/2, Nlens)
+        y = np.array([0, 0])
+    else:
+        x = np.linspace(-xmax/2, xmax/2, Nlens)
+        y = np.linspace(-xmax/2, xmax/2, Nlens)
+    mass = np.ones(Nlens) * halo_mass
     concentration = np.random.uniform(1, 10, Nlens)
-    # Set the first lens to be at the center
-    x[0] = 0
-    y[0] = 0
-    mass[0] = 1e14
+
 
     halos = pipeline.Halo(x, y, np.zeros_like(x), concentration, mass, 0.194, np.zeros_like(x))
 
     # Create a set of sources
-    xs = np.random.uniform(-xmax, xmax, Nsource)
-    ys = np.random.uniform(-xmax, xmax, Nsource)
+    # xs = np.random.uniform(-xmax, xmax, Nsource)
+    # ys = np.random.uniform(-xmax, xmax, Nsource)
     # Distribute sources uniformly in a grid (if Nsource is 1, place it randomly)
-    '''
+    
     if Nsource == 1:
         xs = np.random.uniform(-xmax, xmax, Nsource)
         ys = np.random.uniform(-xmax, xmax, Nsource)
@@ -1043,9 +995,8 @@ def simple_nfw_test(Nlens, Nsource, xmax):
         xs, ys = np.meshgrid(x, y)
         xs = xs.flatten()
         ys = ys.flatten()
-        # Update Nsource
         Nsource = len(xs)
-    '''
+    
     sig_s = np.ones(Nsource) * 0.1
     sig_f = np.ones(Nsource) * 0.01
     sig_g = np.ones(Nsource) * 0.02
@@ -1094,7 +1045,12 @@ def simple_nfw_test(Nlens, Nsource, xmax):
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False)
 
     fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$'.format(np.sum(halos.mass), np.sum(lenses.mass)))
-    plt.savefig('Images/test_cluster_Nlens_{}_Nsource_{}.png'.format(Nlens, Nsource))
+    if halo_mass == 1e14:
+        size = 'large'
+    else:
+        size = 'small'
+    plot_name = 'Images/nfw_test_Nlens_{}_{}.png'.format(Nlens, size)
+    plt.savefig(plot_name)
 
     print('Finished test...')
 
@@ -1117,9 +1073,11 @@ if __name__ == '__main__':
         print('Time taken for Nlens = {}: {}'.format(Nlens, stop - start))
     '''
 
-    # simple_nfw_test(1, 100, 50)
-    # plt.show()
-    visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
+    simple_nfw_test(1, 100, 50, 1e14)
+    simple_nfw_test(2, 100, 50, 1e14)
+    simple_nfw_test(1, 100, 50, 1e13)
+    simple_nfw_test(2, 100, 50, 1e13)
+    # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
 
     raise ValueError('This script is not meant to be run as a standalone script')
     # Initialize file paths

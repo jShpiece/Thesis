@@ -475,8 +475,7 @@ class Halo:
 
     def iterative_elimination(self, sources, reducedchi2, use_flags):
         # Iteratively eliminate lenses that do not improve the chi^2 value
-        # lens_floors = np.arange(1, len(self.x) + 1)
-        max_lenses = np.min([len(self.x) + 1, 100]) # Maximum number of lenses to consider
+        max_lenses = np.min([len(self.x) + 1, 1000]) # Maximum number of lenses to consider
         lens_floors = np.arange(1, max_lenses)
         best_dist = np.abs(reducedchi2 - 1)
         best_lenses = self
@@ -709,6 +708,9 @@ def print_step_info(flags,message,lenses,reducedchi2):
 
 def chi2wrapper(guess, params):
     # Wrapper function for chi2 to allow for minimization for a single lens object
+    # For the SIS model
+    # Guess = [x, y, mass]
+    # Params = [sources, use_flags]
     lenses = Lens(guess[0], guess[1], guess[2], [0])
     return calculate_chi_squared(params[0],lenses, params[1])
 
@@ -728,7 +730,6 @@ def chi2wrapper3(guess, params):
     # Guess = [x, y, mass]
     # Params = [source, use_flags, concentration, redshift]
     lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
-    #lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], params[4], params[3], [0]) # Try a run with mass as a parameter instead of a guess
     lenses.calculate_concentration() # The concentration needs to be updated, because the mass will change during optimization
     return assign_halo_chi2_values(lenses, params[0], params[1])
 
@@ -755,6 +756,15 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     The lensing field is represented by a set of lenses - with positions and Einstein radii. 
     The lenses are modeled as Singular Isothermal Spheres (SIS) by default, but can be
     modeled as NFW halos as well.
+    Parameters:
+    - sources (Source): An object containing source properties and their uncertainties.
+    - xmax (float): The maximum distance from the center of the field to consider for lenses.
+    - flags (bool): Whether to print out step information.
+    - use_flags (list of bool): Flags indicating which lensing effects to include [use_shear, use_flexion, use_g_flexion].
+    - lens_type (str): The type of lens to use - 'SIS' or 'NFW'.
+    Returns:
+    - lenses (Lens): An object representing the lenses that best fit the source properties.
+    - reducedchi2 (float): The reduced chi-squared value for the best fit.
     '''
 
     # Initialize candidate lenses from source guesses
