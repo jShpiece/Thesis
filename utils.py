@@ -4,6 +4,7 @@ from astropy.constants import c, G
 from astropy import units as u
 import scipy.ndimage
 import pipeline
+from itertools import combinations
 
 # ------------------------
 # Terminal Utility Functions
@@ -60,7 +61,7 @@ def create_gaussian_kernel(stamp_size, sigma):
 # Chi-Squared Utility Functions
 # ------------------------
 
-def compute_source_weights(lenses, sources, r_frac = 0.7):
+def compute_source_weights(lenses, sources, r_frac = 0.4):
     # Calculate gaussian weights for each lens-source pair based on the distance between them
 
     xl, yl = lenses.x, lenses.y
@@ -80,13 +81,7 @@ def compute_source_weights(lenses, sources, r_frac = 0.7):
     r0 = sorted_distances[index]
     
     weights = np.exp(- (r / (r0))**2)
-    # Check if there are any nan values in the weights - if so, set them to 0 (also figure out why this is happening)
     
-    if np.isnan(weights).any():
-        print(lenses.x, lenses.y)
-        weights = np.nan_to_num(weights, nan=0.0)
-        assert not np.isnan(weights).any(), "There are still nan values in the weights"
-
     # Normalize the weights
     if np.sum(weights, axis=1).any() == 0:
         weights = np.ones_like(weights)
@@ -97,9 +92,13 @@ def compute_source_weights(lenses, sources, r_frac = 0.7):
     
     # print('Weights:', weights)
     assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
-    # weights = np.ones_like(weights)
+    
+    weights = np.ones_like(weights)
     return weights
 
+
+def find_combinations(values, k):
+    return list(combinations(values, k))
 
 # ------------------------
 # Lensing Utility Functions
@@ -190,7 +189,7 @@ def mass_sheet_transformation(kappa, k):
     return k*kappa + (1 - k)
 
 
-def calculate_lensing_signals_nfw(lenses, sources):
+def calculate_lensing_signals_sis(lenses, sources):
     dx = sources.x - lenses.x[:, np.newaxis]
     dy = sources.y - lenses.y[:, np.newaxis]
     r = np.sqrt(dx**2 + dy**2)

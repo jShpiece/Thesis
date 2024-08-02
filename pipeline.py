@@ -372,12 +372,12 @@ class Halo:
         chi2_values = np.zeros(len(self.x))
         if len(self.x) == 1:
             # Only one lens - calculate the chi2 value for this lens
-            chi2_values[0] = assign_halo_chi2_values(self, sources, use_flags)
+            chi2_values[0] = calculate_chi_squared(sources, self, use_flags, lensing='NFW', use_weights=True)
         else:
             for i in range(len(self.x)):
                 # Only pass in the i-th lens
                 one_halo = Halo(self.x[i], self.y[i], self.z[i], self.concentration[i], self.mass[i], self.redshift, [0])
-                chi2_values[i] = assign_halo_chi2_values(one_halo, sources, use_flags)
+                chi2_values[i] = calculate_chi_squared(sources, one_halo, use_flags, lensing='NFW', use_weights=True)
         self.chi2 = chi2_values
         dof = calc_degrees_of_freedom(sources, self, use_flags)
         if dof == 0:
@@ -460,29 +460,51 @@ class Halo:
                 i += 1
 
 
-    def select_lowest_chi2(self, lens_floor=1):
-        # Function that enables the iterative elimination of lenses
-        # Select the 'lens_floor' lenses with the lowest chi^2 values
-        
-        # Sort the lenses by chi^2 value
-        sorted_indices = np.argsort(self.chi2)
-        self.x, self.y, self.mass, self.concentration, self.chi2 = self.x[sorted_indices], self.y[sorted_indices], self.mass[sorted_indices], self.concentration[sorted_indices], self.chi2[sorted_indices]
-
-        # Select the 'lens_floor' lenses with the lowest chi^2 values
-        if len(self.x) > lens_floor:
-            self.x, self.y, self.z, self.mass, self.concentration, self.chi2 = self.x[:lens_floor], self.y[:lens_floor], self.z[:lens_floor], self.mass[:lens_floor], self.concentration[:lens_floor], self.chi2[:lens_floor]
-
-
     def iterative_elimination(self, sources, reducedchi2, use_flags):
         # Iteratively eliminate lenses that do not improve the chi^2 value
+
+        def select_lowest_chi2(x, y, mass, concentration, chi2, lens_floor=1):
+            # Function that enables the iterative elimination of lenses
+            sorted_indices = np.argsort(chi2)
+            x, y, mass, concentration, chi2 = x[sorted_indices], y[sorted_indices], mass[sorted_indices], concentration[sorted_indices], chi2[sorted_indices]
+            if len(x) > lens_floor:
+                x, y, mass, concentration, chi2 = x[:lens_floor], y[:lens_floor], mass[:lens_floor], concentration[:lens_floor], chi2[:lens_floor]
+
+            return x, y, mass, concentration, chi2
+        
+        def check_combinations(x, y, mass, concentration, chi2, ceil=5):
+            # Check all possible combinations of lenses up to a certain number
+            # Return the combination with the lowest chi2 value
+            best_chi2 = np.inf
+            best_x, best_y, best_mass, best_concentration = x, y, mass, concentration
+
+            for i in range(2, ceil):
+                # Check every combination of i lenses
+                allowed_combinations = utils.find_combinations(range(len(x)), i) # This will return a list of tuples, which are the indices of the lenses to consider
+                if allowed_combinations is None:
+                    print('No combinations found: {}'.format(i))
+                    continue
+                for combination in allowed_combinations:
+                    # Clone the lenses object
+                    test_x, test_y, test_mass, test_concentration, test_chi2 = x[list(combination)], y[list(combination)], mass[list(combination)], concentration[list(combination)], chi2[list(combination)]
+                    test_lenses = Halo(test_x, test_y, np.zeros_like(test_x), test_concentration, test_mass, self.redshift, test_chi2)
+                    reducedchi2 = test_lenses.update_chi2_values(sources, use_flags)
+                    if reducedchi2 < best_chi2:
+                        best_x, best_y, best_mass, best_concentration, best_chi2 = test_x, test_y, test_mass, test_concentration, reducedchi2
+            return best_x, best_y, best_mass, best_concentration, best_chi2
+
         max_lenses = np.min([len(self.x) + 1, 1000]) # Maximum number of lenses to consider
         lens_floors = np.arange(1, max_lenses)
         best_dist = np.abs(reducedchi2 - 1)
         best_lenses = self
         for lens_floor in lens_floors:
             # Clone the lenses object
-            test_lenses = Halo(self.x, self.y, self.z, self.concentration, self.mass, self.redshift, self.chi2)
-            test_lenses.select_lowest_chi2(lens_floor=lens_floor)
+            x, y, mass, concentration, chi2 = select_lowest_chi2(self.x, self.y, self.mass, self.concentration, self.chi2, lens_floor=lens_floor)
+            if len(x) < 20: # If there are more than 20 lenses, checking all combinations will be too slow
+                x, y, mass, concentration, chi2 = check_combinations(x, y, mass, concentration, chi2)
+
+            test_lenses = Halo(x, y, np.zeros_like(x), concentration, mass, self.redshift, chi2)
+
 
             reducedchi2 = test_lenses.update_chi2_values(sources, use_flags)
             new_dist = np.abs(reducedchi2 - 1)
@@ -495,11 +517,8 @@ class Halo:
 
 
     def full_minimization(self, sources, use_flags):
-        guess = self.mass
+        guess = np.log10(self.mass)
         params = [self.x, self.y, self.redshift, self.concentration, sources, use_flags]
-        max_attempts = 5  # Number of optimization attempts with different initial guesses
-        best_result = None
-        best_params = guess
 
         learning_rates = [0.1] 
         num_iterations = 100
@@ -507,21 +526,7 @@ class Halo:
         beta2 = 0.999
 
         result, _ = minimizer.adam_optimizer(chi2wrapper4, guess, learning_rates, num_iterations, beta1, beta2, params=params)
-        self.mass = result
-
-        '''
-        for _ in range(max_attempts):
-            result = opt.minimize(
-                chi2wrapper4, guess, args=params,
-                method='Powell',  
-                tol=1e-8,  
-                options={'maxiter': 1000}
-            )
-            if best_result is None or result.fun < best_result.fun:
-                best_result = result
-                best_params = result.x
-        self.mass = best_params
-        '''
+        self.mass = 10**result
 
 
 # ------------------------------
@@ -546,7 +551,7 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
     return dof
 
 
-def calculate_chi_squared(sources, lenses, flags, lensing='SIS') -> float:
+def calculate_chi_squared(sources, lenses, flags, lensing='SIS', use_weights = False) -> float:
     """
     Calculate the chi-squared statistic for the deviation of lensed source properties from their original values,
     considering specified lensing effects and adding penalties for certain lens properties.
@@ -577,6 +582,8 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS') -> float:
         source_clone.apply_SIS_lensing(lenses)
     elif lensing == 'NFW':
         source_clone.apply_NFW_lensing(lenses)
+    else:
+        raise ValueError("Invalid lensing model: {}".format(lensing))
 
     # Calculate chi-squared for each lensing signal component
     chi_squared_components = {
@@ -586,13 +593,19 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS') -> float:
     }
 
     # Sum the chi-squared values, considering only the enabled lensing effects
-    total_chi_squared = 0
+    total_chi_squared = np.zeros_like(sources.x)
     if use_shear:
         total_chi_squared += np.sum(chi_squared_components['shear'])
     if use_flexion:
         total_chi_squared += np.sum(chi_squared_components['flexion'])
     if use_g_flexion:
         total_chi_squared += np.sum(chi_squared_components['g_flexion'])
+
+    if use_weights:
+        weights = utils.compute_source_weights(lenses, sources)
+        total_chi_squared = np.sum(weights * total_chi_squared)
+    else:
+        total_chi_squared = np.sum(total_chi_squared)
 
     # Calculate and add penalties for the lenses
     if lensing == 'SIS':
@@ -602,96 +615,6 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS') -> float:
 
     # Return the total chi-squared including penalties
     return total_chi_squared + penalty
-
-
-def assign_lens_chi2_values(lenses, sources, use_flags):
-    # Given a single lens object, assign a weighted chi2 value based on source distances
-    xl = lenses.x
-    yl = lenses.y
-    assert len(xl) == len(yl), "The x and y arrays must have the same length."
-    assert xl.ndim == yl.ndim == 1, "The x and y arrays must be 1D."
-    assert len(xl) == 1, "Only one lens is allowed."
-
-    xs = sources.x
-    ys = sources.y
-
-    r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2 + 0.01**2) # Add a small value to avoid division by zero
-    # Choose a characteristic distance such that 1/5 of the sources are within this distance
-    # Calculate distances from the current lens to all sources
-    distances = np.sqrt((xl - xs)**2 + (yl - ys)**2)
-    
-    # Sort distances
-    sorted_distances = np.sort(distances)
-    
-    # Determine the index for the desired fraction
-    index = int(len(sorted_distances) * (0.1))
-    
-    # Set r0 as the distance at the calculated index
-    r0 = sorted_distances[index]
-
-    weights = np.exp(-r**2 / r0**2)
-    # Normalize the weights
-    weights /= np.sum(weights, axis=1)[:, None]
-    assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
-    assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
-
-    # Unpack flags for clarity
-    use_shear, use_flexion, use_g_flexion = use_flags
-
-    # Initialize a clone of sources with zeroed lensing signals
-    source_clone = Source(
-        x=sources.x, y=sources.y,
-        e1=np.zeros_like(sources.e1), e2=np.zeros_like(sources.e2),
-        f1=np.zeros_like(sources.f1), f2=np.zeros_like(sources.f2),
-        g1=np.zeros_like(sources.g1), g2=np.zeros_like(sources.g2),
-        sigs=sources.sigs, sigf=sources.sigf, sigg=sources.sigg
-    )
-
-    source_clone.apply_SIS_lensing(lenses)
-
-    # Weigh the chi^2 values by the distance of each source from each lens
-    total_chi_squared = 0
-    for i in range(len(source_clone.x)):
-        # Get the chi2 values for each source, weighted by the source-lens distance
-        shear_chi2 = ((sources.e1[i] - source_clone.e1[i]) / sources.sigs[i])**2 + ((sources.e2[i] - source_clone.e2[i]) / sources.sigs[i])**2
-        flexion_chi2 = ((sources.f1[i] - source_clone.f1[i]) / sources.sigf[i])**2 + ((sources.f2[i] - source_clone.f2[i]) / sources.sigf[i])**2
-        g_flexion_chi2 = ((sources.g1[i] - source_clone.g1[i]) / sources.sigg[i])**2 + ((sources.g2[i] - source_clone.g2[i]) / sources.sigg[i])**2
-        total_chi_squared += weights[:, i].dot(shear_chi2*use_shear + flexion_chi2*use_flexion + g_flexion_chi2*use_g_flexion)
-
-    return total_chi_squared[0]
-
-
-def assign_halo_chi2_values(lenses, sources, use_flags):
-    # Given a single lens object, assign a weighted chi2 value based on source distances
-
-    weights = utils.compute_source_weights(lenses, sources)    
-    # Unpack flags for clarity
-    use_shear, use_flexion, use_g_flexion = use_flags
-
-    # Initialize a clone of sources with zeroed lensing signals
-    source_clone = Source(
-        x=sources.x, y=sources.y,
-        e1=np.zeros_like(sources.e1), e2=np.zeros_like(sources.e2),
-        f1=np.zeros_like(sources.f1), f2=np.zeros_like(sources.f2),
-        g1=np.zeros_like(sources.g1), g2=np.zeros_like(sources.g2),
-        sigs=sources.sigs, sigf=sources.sigf, sigg=sources.sigg
-    )
-
-    source_clone.apply_NFW_lensing(lenses)
-
-    # Weigh the chi^2 values by the distance of each source from each lens
-    total_chi_squared = 0
-    for i in range(len(source_clone.x)):
-        # Calculate chi2 for each component
-        shear_chi2 = ((sources.e1[i] - source_clone.e1[i]) / sources.sigs[i])**2 + ((sources.e2[i] - source_clone.e2[i]) / sources.sigs[i])**2
-        flexion_chi2 = ((sources.f1[i] - source_clone.f1[i]) / sources.sigf[i])**2 + ((sources.f2[i] - source_clone.f2[i]) / sources.sigf[i])**2
-        g_flexion_chi2 = ((sources.g1[i] - source_clone.g1[i]) / sources.sigg[i])**2 + ((sources.g2[i] - source_clone.g2[i]) / sources.sigg[i])**2
-        
-        # Ensure correct shape for weights
-        chi2_sum = shear_chi2 * use_shear + flexion_chi2 * use_flexion + g_flexion_chi2 * use_g_flexion
-        total_chi_squared += weights[:, i].dot(chi2_sum)
-
-    return total_chi_squared[0]
 
 # ------------------------------
 # Helper functions
@@ -731,7 +654,7 @@ def chi2wrapper3(guess, params):
     # Params = [source, use_flags, concentration, redshift]
     lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
     lenses.calculate_concentration() # The concentration needs to be updated, because the mass will change during optimization
-    return assign_halo_chi2_values(lenses, params[0], params[1])
+    return calculate_chi_squared(params[0], lenses, params[1], lensing = 'NFW', use_weights=True)
 
 
 def chi2wrapper4(guess, params):
@@ -740,7 +663,7 @@ def chi2wrapper4(guess, params):
     # This time, the lens object contains the full set of lenses
     # Guess = [mass1, mass2, ...]
     # Params = [x, y, redshift, concentration, sources, use_flags]
-    lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], guess, params[2], [0])
+    lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], [0])
     dof = calc_degrees_of_freedom(params[4], lenses, params[5])
     # Return the reduced chi^2 value - 1, to be minimized
     return np.abs(calculate_chi_squared(params[4], lenses, params[5], lensing='NFW') / dof - 1)

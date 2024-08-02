@@ -963,7 +963,7 @@ def visualize_initial_optimization():
 
 def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     # Create a simple lensing field and test the pipeline on it
-
+    start = time.time()
     # Create a set of lenses
     if Nlens == 1:
         x = np.array([0])
@@ -1047,12 +1047,46 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$'.format(np.sum(halos.mass), np.sum(lenses.mass)))
     if halo_mass == 1e14:
         size = 'large'
-    else:
+    elif halo_mass == 1e13:
+        size = 'medium'
+    elif halo_mass == 1e12:
         size = 'small'
+    else:
+        size = 'other'
     plot_name = 'Images/nfw_test_Nlens_{}_{}.png'.format(Nlens, size)
     plt.savefig(plot_name)
+    stop = time.time()
 
-    print('Finished test...')
+    # Check - did we beat the true chi2?
+    true_chi2 = halos.update_chi2_values(sources, use_flags)
+    print('Finished test: {} seconds'.format(stop - start))
+    print('Final chi2 beats true chi2: {}'.format(reducedchi2 < true_chi2))
+    if reducedchi2 < true_chi2:
+        print('True chi2: {}, Final chi2: {}'.format(true_chi2, reducedchi2))
+    '''
+    if reducedchi2 < true_chi2:
+        print('True chi2: {}, Final chi2: {}'.format(true_chi2, reducedchi2))
+        # Let's investigate the area around the located lenses - are we in a local minimum?
+        # Do this by adding a small perturbation to the lens parameters and seeing if the chi2 increases
+        # If it does, we are in a local minimum
+        perturbation = 0.01
+        # Build perturbation matrices for dx, dy, and dlogmass
+        dx = [perturbation, 0, -perturbation, 0]
+        dy = [0, perturbation, 0, -perturbation]
+        dlogmass = [perturbation, 0, -perturbation, 0]
+        for i in range(len(lenses.x)):
+            for j in range(4):
+                lens_copy = copy.deepcopy(lenses)
+                lens_copy.x[i] += dx[j]
+                lens_copy.y[i] += dy[j]
+                lens_copy.mass[i] *= 10**dlogmass[j]
+                chi2 = lens_copy.update_chi2_values(sources, use_flags)
+                if chi2 < reducedchi2:
+                    print('Perturbation {} improved chi2'.format(j))
+                    print('New chi2: {}'.format(chi2))
+    '''
+    return
+
 
 # --------------------------------------------
 # Main Functions
@@ -1073,10 +1107,13 @@ if __name__ == '__main__':
         print('Time taken for Nlens = {}: {}'.format(Nlens, stop - start))
     '''
 
-    simple_nfw_test(1, 100, 50, 1e14)
-    simple_nfw_test(2, 100, 50, 1e14)
-    simple_nfw_test(1, 100, 50, 1e13)
-    simple_nfw_test(2, 100, 50, 1e13)
+    masses = [1e14, 1e13, 1e12]
+    lens_numbers = [1, 2]
+
+    for mass in masses:
+        for Nlens in lens_numbers:
+            simple_nfw_test(Nlens, 100, 50, mass)
+
     # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
 
     raise ValueError('This script is not meant to be run as a standalone script')
