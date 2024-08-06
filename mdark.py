@@ -97,7 +97,7 @@ def _plot_results(halo, true_halo, title, reducedchi2, xmax, ax=None, legend=Tru
     # Set labels and title
     ax.set_xlabel('X Position')
     ax.set_ylabel('Y Position')
-    ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.2f}'.format(reducedchi2))
+    ax.set_title(title + '\n' + r' $\chi_\nu^2$ = {:.5f}'.format(reducedchi2))
     ax.set_xlim(-xmax, xmax)
     ax.set_ylim(-xmax, xmax)
 
@@ -685,25 +685,19 @@ def single_realization(args):
     return candidate_lenses, candidate_chi2
 
 
-def random_realization_test(Ntrials, Nlens, Nsource, xmax, file_name):
+def random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name):
     # Run a test with a random realization of lenses and sources
     # This is a test of the pipeline, to see how well it can recover the true lenses
 
     # Generate the true lenses - place the first lens in the center, the rest place around it
     xl = np.zeros(Nlens)
     yl = np.zeros(Nlens)
-    ml = np.zeros(Nlens)
+    ml = np.zeros(Nlens) + mass # All lenses have the same mass
 
     for i in range(1, Nlens):
         theta = 2 * np.pi * i / Nlens
         xl[i] = xmax/2 * np.cos(theta)
         yl[i] = xmax/2 * np.sin(theta)
-
-    ml[0] = 10**14
-    ml[1:] = 10**13
-
-    xl += 10
-    yl += 10 # Offset the lenses by 10 arcseconds, to make sure the pipeline doesn't just favor the center
 
     halos = pipeline.Halo(xl, yl, np.zeros(Nlens), np.zeros(Nlens), ml, 0.194, np.zeros(Nlens))
     halos.calculate_concentration()
@@ -746,7 +740,7 @@ def random_realization_test(Ntrials, Nlens, Nsource, xmax, file_name):
     return
 
 
-def interpret_rr_results(results_file, xmax, Nlens):
+def interpret_rr_results(results_file, xmax, Nlens, mass):
     # Read in the results file and interpret the results
     results = pd.read_csv(results_file)
     xlens = results['x'].values
@@ -770,15 +764,21 @@ def interpret_rr_results(results_file, xmax, Nlens):
     # Reproduce the true lenses
     xl = np.zeros(Nlens)
     yl = np.zeros(Nlens)
-    ml = np.zeros(Nlens)
+    ml = np.zeros(Nlens) + mass # All lenses have the same mass
 
     for i in range(1, Nlens):
         theta = 2 * np.pi * i / Nlens
         xl[i] = xmax/2 * np.cos(theta)
         yl[i] = xmax/2 * np.sin(theta)
 
-    ml[0] = 10**14
-    ml[1:] = 10**13
+    if mass == 1e14:
+        size = 'large'
+    elif mass == 1e13:
+        size = 'medium'
+    elif mass == 1e12:
+        size = 'small'
+    else:
+        size = 'other'
 
     # Now plot the results - 4 histograms
 
@@ -807,12 +807,68 @@ def interpret_rr_results(results_file, xmax, Nlens):
         ax[i].set_title(titles[i])
         
     fig.tight_layout()
-    plt.savefig('Images/rr_results_{}.png'.format(Nlens))
+    plt.savefig('Images/rr_results_{}_{}.png'.format(Nlens, size))
 
 
 # --------------------------------------------
 # Debugging Functions
 # --------------------------------------------
+
+def map_chi2_space(mass):
+    # Create a single halo, a set of sources, and place a test lens everywhere in space, getting the chi2 value for each lens. 
+    # Get a sense of how chi2 varies around the halo
+
+    # Create a single halo
+    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([mass]), 0.194, np.array([0]))
+    halo.calculate_concentration()
+    xmax = 50
+    N = 100
+    rs = np.sqrt(np.random.random(N)) * xmax  
+    thetas = np.random.random(N) * 2 * np.pi
+    xs = rs * np.cos(thetas)
+    ys = rs * np.sin(thetas)
+
+    sources = pipeline.Source(xs, ys,
+                            np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
+                            np.ones_like(xs) * 0.1, np.ones_like(xs) * 0.01, np.ones_like(xs) * 0.02)
+    sources.apply_noise()
+    sources.apply_NFW_lensing(halo)
+    sources.filter_sources(xmax)
+
+    xgrid = np.linspace(-xmax/10, xmax/10, 50)
+    ygrid = np.linspace(-xmax/10, xmax/10, 50)
+    mass_grid = np.linspace(np.log10(mass) - 1, np.log10(mass) + 1, 50)
+
+    chi2_values = np.zeros((len(xgrid), len(ygrid), len(mass_grid)))
+    for i in range(len(xgrid)):
+        for j in range(len(ygrid)):
+            for k in range(len(mass_grid)):
+                lens = pipeline.Halo(np.array([xgrid[i]]), np.array([ygrid[j]]), np.array([0]), np.array([5]), np.array([10**mass_grid[k]]), 0.194, np.array([0]))
+                lens.calculate_concentration()
+                reduced_chi2 = lens.update_chi2_values(sources, [True, True, True])
+                chi2_values[i, j, k] = reduced_chi2
+
+    # Clip the chi2 values - we don't care about the really high values
+    chi2_values = np.clip(chi2_values, 0, 2)
+    # Locate the minimum chi2 value
+    min_index = np.unravel_index(np.argmin(chi2_values), chi2_values.shape)
+    # Get the true chi2 value
+    true_chi2 = halo.update_chi2_values(sources, [True, True, True])
+    # Now plot the location of the true lens and the minimum chi2 value, in 3D
+    fig = plt.figure()
+    fig.suptitle('Chi2 Space around a Single Halo: Mass = {:.2e}'.format(mass))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(xgrid[min_index[0]], ygrid[min_index[1]], mass_grid[min_index[2]], color='red', label='Minimum Chi2: {:.3f}'.format(chi2_values[min_index]))
+    ax.scatter(0, 0, np.log10(mass), color='blue', label='True Lens: {:.3f}'.format(true_chi2))
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('log(Mass)')
+    ax.legend()
+    # Choose a default view
+    ax.view_init(elev=30, azim=30)
+    plt.savefig('Images/chi2_space_{}.png'.format(np.round(np.log10(mass), 2)))
+    plt.show()
+
 
 def visualize_fits(ID_file):
     IDs = pd.read_csv(ID_file)['ID'].values
@@ -975,16 +1031,10 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
         x = np.linspace(-xmax/2, xmax/2, Nlens)
         y = np.linspace(-xmax/2, xmax/2, Nlens)
     mass = np.ones(Nlens) * halo_mass
-    concentration = np.random.uniform(1, 10, Nlens)
 
+    halos = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
+    halos.calculate_concentration()
 
-    halos = pipeline.Halo(x, y, np.zeros_like(x), concentration, mass, 0.194, np.zeros_like(x))
-
-    # Create a set of sources
-    # xs = np.random.uniform(-xmax, xmax, Nsource)
-    # ys = np.random.uniform(-xmax, xmax, Nsource)
-    # Distribute sources uniformly in a grid (if Nsource is 1, place it randomly)
-    
     if Nsource == 1:
         xs = np.random.uniform(-xmax, xmax, Nsource)
         ys = np.random.uniform(-xmax, xmax, Nsource)
@@ -1004,8 +1054,6 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     sources.apply_noise()
     sources.apply_NFW_lensing(halos)
     sources.filter_sources()
-
-    # Now run the pipeline (and plot it)
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
@@ -1061,30 +1109,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     true_chi2 = halos.update_chi2_values(sources, use_flags)
     print('Finished test: {} seconds'.format(stop - start))
     print('Final chi2 beats true chi2: {}'.format(reducedchi2 < true_chi2))
-    if reducedchi2 < true_chi2:
-        print('True chi2: {}, Final chi2: {}'.format(true_chi2, reducedchi2))
-    '''
-    if reducedchi2 < true_chi2:
-        print('True chi2: {}, Final chi2: {}'.format(true_chi2, reducedchi2))
-        # Let's investigate the area around the located lenses - are we in a local minimum?
-        # Do this by adding a small perturbation to the lens parameters and seeing if the chi2 increases
-        # If it does, we are in a local minimum
-        perturbation = 0.01
-        # Build perturbation matrices for dx, dy, and dlogmass
-        dx = [perturbation, 0, -perturbation, 0]
-        dy = [0, perturbation, 0, -perturbation]
-        dlogmass = [perturbation, 0, -perturbation, 0]
-        for i in range(len(lenses.x)):
-            for j in range(4):
-                lens_copy = copy.deepcopy(lenses)
-                lens_copy.x[i] += dx[j]
-                lens_copy.y[i] += dy[j]
-                lens_copy.mass[i] *= 10**dlogmass[j]
-                chi2 = lens_copy.update_chi2_values(sources, use_flags)
-                if chi2 < reducedchi2:
-                    print('Perturbation {} improved chi2'.format(j))
-                    print('New chi2: {}'.format(chi2))
-    '''
+    print('True chi2: {}, Final chi2: {}'.format(true_chi2, reducedchi2))
     return
 
 
@@ -1098,13 +1123,18 @@ if __name__ == '__main__':
     Nsource = 100
     Ntrials = 100
     xmax = 50
+    masses = [1e14, 1e13, 1e12]
     for Nlens in N_lens:
-        start = time.time()
-        file_name = 'Images/rr_Nlens_{}_Nsource_{}_Ntrials_{}.txt'.format(Nlens, Nsource, Ntrials)
-        random_realization_test(Ntrials, Nlens, Nsource, xmax, file_name)
-        interpret_rr_results(file_name, xmax, Nlens)
-        stop = time.time()
-        print('Time taken for Nlens = {}: {}'.format(Nlens, stop - start))
+        for mass in masses:
+            start = time.time()
+            size = 'large' if mass == 1e14 else 'medium' if mass == 1e13 else 'small' if mass == 1e12 else 'other'
+            file_name = 'Images/rr_Nlens_{}_Nsource_{}_size_{}.txt'.format(Nlens, Nsource, size)
+            random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name)
+            interpret_rr_results(file_name, xmax, Nlens, mass)
+            stop = time.time()
+            print('Time taken for Nlens = {}: {}'.format(Nlens, stop - start))
+    
+    raise ValueError('This script is not meant to be run as a standalone script')
     '''
 
     masses = [1e14, 1e13, 1e12]
@@ -1114,9 +1144,9 @@ if __name__ == '__main__':
         for Nlens in lens_numbers:
             simple_nfw_test(Nlens, 100, 50, mass)
 
+    raise ValueError('This script is not meant to be run as a standalone script')
     # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
 
-    raise ValueError('This script is not meant to be run as a standalone script')
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
     z_chosen = zs[0]

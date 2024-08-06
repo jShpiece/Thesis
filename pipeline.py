@@ -2,9 +2,15 @@ import numpy as np
 import scipy.optimize as opt
 from astropy import units as u
 from astropy.cosmology import WMAP9 as cosmo
-import utils
-import minimizer
+import utils # Homemade utility functions
+import minimizer # Homemade minimizer module
+
+# ------------------------------
+# Constants
+# ------------------------------
 M_solar = 1.989 * 10**30 # kg
+G = 6.67430 * 10**-11 # m^3 kg^-1 s^-2
+c = 299792458 # m/s
 
 # ------------------------------
 # Classes
@@ -134,7 +140,7 @@ class Lens:
             best_params = guess
             for _ in range(max_attempts):
                 result = opt.minimize(
-                    chi2wrapper, guess, args=([one_source, use_flags]), 
+                    chi2wrapper, guess, args=(['SIS','unconstrained',one_source, use_flags]), 
                     method='Nelder-Mead', 
                     tol=1e-8, 
                     options={'maxiter': 500}
@@ -227,14 +233,14 @@ class Lens:
 
     def full_minimization(self, sources, use_flags):
         guess = self.te
-        params = [self.x, self.y, sources, use_flags]
+        params = ['SIS','constrained',self.x, self.y, sources, use_flags]
         max_attempts = 5  # Number of optimization attempts with different initial guesses
         best_result = None
         best_params = guess
 
         for _ in range(max_attempts):
             result = opt.minimize(
-                chi2wrapper2, guess, args=params,
+                chi2wrapper, guess, args=params,
                 method='Powell',  
                 tol=1e-8,  
                 options={'maxiter': 1000}
@@ -251,12 +257,12 @@ class Lens:
         chi2_values = np.zeros(len(self.x))
         if len(self.x) == 1:
             # Only one lens - calculate the chi2 value for this lens
-            chi2_values[0] = assign_lens_chi2_values(self, sources, use_flags)
+            chi2_values[0] = calculate_chi_squared(sources, self, use_flags, lensing='SIS', use_weights=True)
         else:
             for i in range(len(self.x)):
                 # Only pass in the i-th lens
-                one_lens = Lens(self.x[i], self.y[i], self.te[i], np.empty_like(self.x))
-                chi2_values[i] = assign_lens_chi2_values(one_lens, sources, use_flags)
+                one_lens = Lens(self.x[i], self.y[i], self.te[i], [0])
+                chi2_values[i] = calculate_chi_squared(sources, one_lens, use_flags, lensing='SIS', use_weights=True)
         self.chi2 = chi2_values
         dof = calc_degrees_of_freedom(sources, self, use_flags)
         if dof == 0:
@@ -369,6 +375,9 @@ class Halo:
         # Given a set of sources, update the chi^2 values for each lens
 
         global_chi2 = calculate_chi_squared(sources, self, use_flags, lensing='NFW')
+        dof = calc_degrees_of_freedom(sources, self, use_flags)
+        reducedchi2 = global_chi2 / dof
+        
         chi2_values = np.zeros(len(self.x))
         if len(self.x) == 1:
             # Only one lens - calculate the chi2 value for this lens
@@ -379,11 +388,10 @@ class Halo:
                 one_halo = Halo(self.x[i], self.y[i], self.z[i], self.concentration[i], self.mass[i], self.redshift, [0])
                 chi2_values[i] = calculate_chi_squared(sources, one_halo, use_flags, lensing='NFW', use_weights=True)
         self.chi2 = chi2_values
-        dof = calc_degrees_of_freedom(sources, self, use_flags)
         if dof == 0:
             print('Degrees of freedom is zero')
             return global_chi2
-        return global_chi2 / dof
+        return reducedchi2
 
 
     def optimize_lens_positions(self, sources, use_flags):
@@ -402,9 +410,8 @@ class Halo:
                                 sources.g1[i], sources.g2[i],
                                 sources.sigs[i], sources.sigf[i], sources.sigg[i])
             guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
-            params = [sources, use_flags, self.concentration[i], self.redshift]
-            # result, trail = minimizer.gradient_descent(chi2wrapper3, guess, learning_rate, num_iterations, momentum, params)
-            result, trail = minimizer.adam_optimizer(chi2wrapper3, guess, learning_rates, num_iterations, beta1, beta2, params=params)
+            params = ['NFW','unconstrained',sources, use_flags, self.concentration[i], self.redshift]
+            result, trail = minimizer.adam_optimizer(chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params)
 
             self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
             # Now update the concentrations
@@ -518,14 +525,14 @@ class Halo:
 
     def full_minimization(self, sources, use_flags):
         guess = np.log10(self.mass)
-        params = [self.x, self.y, self.redshift, self.concentration, sources, use_flags]
+        params = ['NFW','constrained',self.x, self.y, self.redshift, self.concentration, sources, use_flags]
 
         learning_rates = [0.1] 
         num_iterations = 100
         beta1 = 0.9
         beta2 = 0.999
 
-        result, _ = minimizer.adam_optimizer(chi2wrapper4, guess, learning_rates, num_iterations, beta1, beta2, params=params)
+        result, _ = minimizer.adam_optimizer(chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params)
         self.mass = 10**result
 
 
@@ -533,18 +540,11 @@ class Halo:
 # Chi^2 functions
 # ------------------------------
 
-def eR_penalty_function(eR, limit=40.0, lambda_penalty_upper=1000.0):
-    # Soft limits - allow the Einstein radius to be negative
-    if np.abs(eR) > limit:
-        return lambda_penalty_upper * (np.abs(eR) - limit) ** 2
-
-    return 0.0
-
 
 def calc_degrees_of_freedom(sources, lenses, use_flags):
     # Compute the number of degrees of freedom for a given set of sources and lenses
-    # A source has 2 parameters per signal being used
-    # A lens has 3 parameters
+    # A source has 2 parameters per signal (use_flags tells us how many signals are used)
+    # A lens has 3 parameters (two positional, one 'strength')
     dof = ((2 * np.sum(use_flags)) * len(sources.x)) - (3 * len(lenses.x))
     if dof <= 0:
         return np.inf
@@ -560,6 +560,8 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS', use_weights = F
     - sources (Source): An object containing source properties and their uncertainties.
     - lenses (Lenses): An object representing the test lenses which affect the source properties.
     - flags (list of bool): Flags indicating which lensing effects to include [use_shear, use_flexion, use_g_flexion].
+    - lensing (str): The lensing model to use ('SIS' or 'NFW').
+    - use_weights (bool): Whether to weight the sources by lens-source distance in the chi-squared calculation.
 
     Returns:
     - float: The total chi-squared value including penalties.
@@ -594,18 +596,20 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS', use_weights = F
 
     # Sum the chi-squared values, considering only the enabled lensing effects
     total_chi_squared = np.zeros_like(sources.x)
-    if use_shear:
-        total_chi_squared += np.sum(chi_squared_components['shear'])
-    if use_flexion:
-        total_chi_squared += np.sum(chi_squared_components['flexion'])
-    if use_g_flexion:
-        total_chi_squared += np.sum(chi_squared_components['g_flexion'])
+    total_chi_squared += use_shear * chi_squared_components['shear'] + use_flexion * chi_squared_components['flexion'] + use_g_flexion * chi_squared_components['g_flexion']    
 
     if use_weights:
         weights = utils.compute_source_weights(lenses, sources)
         total_chi_squared = np.sum(weights * total_chi_squared)
     else:
         total_chi_squared = np.sum(total_chi_squared)
+
+    def eR_penalty_function(eR, limit=40.0, lambda_penalty_upper=1000.0):
+        # Soft limits - allow the Einstein radius to be negative
+        if np.abs(eR) > limit:
+            return lambda_penalty_upper * (np.abs(eR) - limit) ** 2
+
+        return 0.0
 
     # Calculate and add penalties for the lenses
     if lensing == 'SIS':
@@ -616,57 +620,49 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS', use_weights = F
     # Return the total chi-squared including penalties
     return total_chi_squared + penalty
 
-# ------------------------------
-# Helper functions
-# ------------------------------
-
-def print_step_info(flags,message,lenses,reducedchi2):
-    # Helper function to print out step information
-    if flags:
-        print(message)
-        print('Number of lenses: ', len(lenses.x))
-        if reducedchi2 is not None:
-            print('Chi^2: ', reducedchi2)
-
 
 def chi2wrapper(guess, params):
-    # Wrapper function for chi2 to allow for minimization for a single lens object
-    # For the SIS model
-    # Guess = [x, y, mass]
-    # Params = [sources, use_flags]
-    lenses = Lens(guess[0], guess[1], guess[2], [0])
-    return calculate_chi_squared(params[0],lenses, params[1])
+    """
+    Consolidated chi-squared wrapper function for various lensing models and constraints.
+    This wrapper is passed to the optimizer to minimize the chi-squared value.
+    
+    Args:
+        guess (list): List of guessed parameters.
+        params (list): List of parameters required for lensing models.
+        Different model types require different parameters, but all params must share the first two entries
+        which are the model type and constraint type
+        model_type (str): Type of lensing model ('SIS' or 'NFW').
+        constraint_type (str): Type of constraint ('unconstrained' or 'constrained').
+    
+    Returns:
+        float: Chi-squared value to be minimized.
+    """
 
-
-def chi2wrapper2(guess, params):
-    # Wrapper function for chi2 to allow constrained minimization - 
-    #    only the einstein radii are allowed to vary
-    # This time, the lens object contains the full set of lenses
-    lenses = Lens(params[0], params[1], guess, np.empty_like(params[0]))
-    dof = calc_degrees_of_freedom(params[2], lenses, params[3])
-    # Return the reduced chi^2 value - 1, to be minimized
-    return np.abs(calculate_chi_squared(params[2],lenses, params[3]) / dof - 1)
-
-
-def chi2wrapper3(guess, params):
-    # Wrapper function for chi2 to allow for minimization for a single lens object
-    # Guess = [x, y, mass]
-    # Params = [source, use_flags, concentration, redshift]
-    lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
-    lenses.calculate_concentration() # The concentration needs to be updated, because the mass will change during optimization
-    return calculate_chi_squared(params[0], lenses, params[1], lensing = 'NFW', use_weights=True)
-
-
-def chi2wrapper4(guess, params):
-    # Wrapper function for chi2 to allow constrained minimization - 
-    #    only the masses are allowed to vary
-    # This time, the lens object contains the full set of lenses
-    # Guess = [mass1, mass2, ...]
-    # Params = [x, y, redshift, concentration, sources, use_flags]
-    lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], [0])
-    dof = calc_degrees_of_freedom(params[4], lenses, params[5])
-    # Return the reduced chi^2 value - 1, to be minimized
-    return np.abs(calculate_chi_squared(params[4], lenses, params[5], lensing='NFW') / dof - 1)
+    model_type, constraint_type = params[0], params[1]
+    # Now shorten the params list to only include the relevant parameters (also means I don't need to rewrite anything)
+    params = params[2:]
+    
+    if model_type == 'SIS':
+        if constraint_type == 'unconstrained':
+            lenses = Lens(guess[0], guess[1], guess[2], [0])
+            return calculate_chi_squared(params[0], lenses, params[1], use_weights=True)
+        elif constraint_type == 'constrained':
+            lenses = Lens(params[0], params[1], guess, np.empty_like(params[0]))
+            dof = calc_degrees_of_freedom(params[2], lenses, params[3])
+            return np.abs(calculate_chi_squared(params[2], lenses, params[3]) / dof - 1)
+    
+    elif model_type == 'NFW':
+        if constraint_type == 'unconstrained':
+            lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
+            lenses.calculate_concentration()
+            return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=True)
+        elif constraint_type == 'constrained':
+            lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], [0])
+            dof = calc_degrees_of_freedom(params[4], lenses, params[5])
+            return np.abs(calculate_chi_squared(params[4], lenses, params[5], lensing='NFW') / dof - 1)
+        
+    else:
+        raise ValueError("Invalid lensing model: {}".format(model_type))
 
 # ------------------------------
 # Main function
@@ -689,6 +685,14 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     - lenses (Lens): An object representing the lenses that best fit the source properties.
     - reducedchi2 (float): The reduced chi-squared value for the best fit.
     '''
+
+    def print_step_info(flags,message,lenses,reducedchi2):
+        # Helper function to print out step information
+        if flags:
+            print(message)
+            print('Number of lenses: ', len(lenses.x))
+            if reducedchi2 is not None:
+                print('Chi^2: ', reducedchi2)
 
     # Initialize candidate lenses from source guesses
     lenses = sources.generate_initial_guess(lens_type)

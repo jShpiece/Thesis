@@ -249,7 +249,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
             # Note that the two statements are almost identical - switching arctanh and arctan, and 1-x and x-1
             sol = np.where(x < 1, 
                         1 - (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x))), # x < 1
-                        1 - (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (1 + x))) # x > 1
+                        1 - (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (1 + x))) # x >= 1
                         ) 
         return sol
     
@@ -294,8 +294,6 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     term_3 = radial_term_3(x)
     term_4 = radial_term_4(x)
 
-    # Compute the lensing signals
-
     # Begin with the distances and angles between the source and the halo
     dx = sources.x - halos.x[:, np.newaxis]
     dy = sources.y - halos.y[:, np.newaxis]
@@ -313,6 +311,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     flexion_mag = (-2 * flexion_s[:, np.newaxis]) * (((2 * x * term_1) / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Convert to arcseconds
     g_flexion_mag = (2 * flexion_s[:, np.newaxis] * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)) / 206265
 
+    # Sum over all halos, resulting array should have shape (n_sources,)
     shear_1 = np.sum(shear_mag * cos2phi, axis=0)
     shear_2 = np.sum(shear_mag * sin2phi, axis=0)
     flexion_1 = np.sum(flexion_mag * cos_phi, axis=0)
