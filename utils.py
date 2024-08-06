@@ -308,16 +308,16 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 
     # Compute lensing magnitudes (in arcseconds)
     shear_mag = - kappa_s[:, np.newaxis] * term_2
-    flexion_mag = (-2 * flexion_s[:, np.newaxis]) * (((2 * x * term_1) / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Convert to arcseconds
-    g_flexion_mag = (2 * flexion_s[:, np.newaxis] * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2)) / 206265
+    flex_mag = (-2 * flexion_s[:, np.newaxis]) * ((2 * x * term_1 / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Using Wright & Brainerd notation
+    g_flex_mag = (2 * flexion_s[:, np.newaxis]) * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2) / 206265
 
     # Sum over all halos, resulting array should have shape (n_sources,)
     shear_1 = np.sum(shear_mag * cos2phi, axis=0)
     shear_2 = np.sum(shear_mag * sin2phi, axis=0)
-    flexion_1 = np.sum(flexion_mag * cos_phi, axis=0)
-    flexion_2 = np.sum(flexion_mag * sin_phi, axis=0)
-    g_flexion_1 = np.sum(g_flexion_mag * cos3phi, axis=0)
-    g_flexion_2 = np.sum(g_flexion_mag * sin3phi, axis=0)
+    flexion_1 = np.sum(flex_mag * cos_phi, axis=0)
+    flexion_2 = np.sum(flex_mag * sin_phi, axis=0)
+    g_flexion_1 = np.sum(g_flex_mag * cos3phi, axis=0)
+    g_flexion_2 = np.sum(g_flex_mag * sin3phi, axis=0)
 
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 

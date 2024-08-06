@@ -1088,7 +1088,9 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
 
     # Step 6: Final minimization
-    lenses.full_minimization(sources, use_flags)
+    # Print the mass before minimization 
+    # print('Mass before minimization: {}'.format(np.log10(np.sum(lenses.mass))))
+    # lenses.full_minimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False)
 
