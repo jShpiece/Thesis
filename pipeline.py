@@ -344,7 +344,15 @@ class Halo:
 
     def calc_delta_c(self):
         # Compute the characteristic density contrast for each halo
-        return (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - self.concentration / (1 + self.concentration))
+        try:
+            delta_c = (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - self.concentration / (1 + self.concentration))
+        except RuntimeWarning:
+            print('RuntimeWarning: invalid value encountered in log')
+            print('Concentration: {}'.format(self.concentration))
+            print('Mass: {}'.format(self.mass))
+            # delta_c = np.nan
+        return delta_c
+        # return (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - self.concentration / (1 + self.concentration))
 
 
     def calc_corresponding_einstein_radius(self, source_redshift):
@@ -526,14 +534,9 @@ class Halo:
     def full_minimization(self, sources, use_flags):
         guess = np.log10(self.mass)
         params = ['NFW','constrained',self.x, self.y, self.redshift, self.concentration, sources, use_flags]
-
-        learning_rates = [0.1] 
-        num_iterations = 100
-        beta1 = 0.9
-        beta2 = 0.999
-
-        result, _ = minimizer.adam_optimizer(chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params)
+        result = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.1, num_iterations=100, params=params)
         self.mass = 10**result
+        
 
 
 # ------------------------------
@@ -639,7 +642,6 @@ def chi2wrapper(guess, params):
     """
 
     model_type, constraint_type = params[0], params[1]
-    # Now shorten the params list to only include the relevant parameters (also means I don't need to rewrite anything)
     params = params[2:]
     
     if model_type == 'SIS':
@@ -657,9 +659,14 @@ def chi2wrapper(guess, params):
             lenses.calculate_concentration()
             return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=True)
         elif constraint_type == 'constrained':
-            lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], [0])
+            # Check for overflow in the mass
+            if guess > 20:
+                return np.inf
+            lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
+            lenses.calculate_concentration() # Update the concentration based on the new mass
             dof = calc_degrees_of_freedom(params[4], lenses, params[5])
-            return np.abs(calculate_chi_squared(params[4], lenses, params[5], lensing='NFW') / dof - 1)
+            # return np.abs(calculate_chi_squared(params[4], lenses, params[5], lensing='NFW') / dof - 1)
+            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=True)
         
     else:
         raise ValueError("Invalid lensing model: {}".format(model_type))

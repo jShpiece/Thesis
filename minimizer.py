@@ -3,6 +3,7 @@ import numpy as np
 Custom implementation of the Adam optimizer for minimizing a function of multiple variables.
 Written to handle minimization of the chi-squared function for NFW lensing profile fitting.
 '''
+
 def numerical_gradient(func, x, params, epsilon=1e-8):
     '''
     Compute the numerical gradient of a function at a given point x.
@@ -22,7 +23,6 @@ def numerical_gradient(func, x, params, epsilon=1e-8):
         x_plus[i] += epsilon
         x_minus[i] -= epsilon
         grad[i] = (func(x_plus, params) - func(x_minus, params)) / (2 * epsilon)
-        # grad[i] = (func(x_plus) - func(x_minus)) / (2*epsilon)
     return grad
 
 
@@ -39,21 +39,29 @@ def smooth_gradient(grads, beta, grad_avg=None):
     return grad_avg
 
 
+def gradient_descent(func, initial_x, learning_rate, num_iterations, params):
+    x = initial_x
+    for i in range(num_iterations):
+        grad = numerical_gradient(func, x, params)
+        x = x - learning_rate * grad
+    return x
+
+
 def adam_optimizer(func, initial_x, learning_rates, max_iterations=1000, beta1=0.9, beta2=0.999, tol=1e-6, params=None):
     '''
     Minimize a function using the Adam optimizer.
     Parameters:
-    func: Function to minimize.
-    initial_x: Initial guess for the minimizer.
-    learning_rates: Learning rates for each parameter.
-    max_iterations: Maximum number of iterations to run.
-    beta1: Exponential decay rate for the first moment estimates.
-    beta2: Exponential decay rate for the second raw moment estimates.
-    tol: Tolerance for convergence.
-    params: Additional parameters to pass to the function.
+        func: Function to minimize.
+        initial_x: Initial guess for the minimizer.
+        learning_rates: Learning rates for each parameter.
+        max_iterations: Maximum number of iterations to run.
+        beta1: Exponential decay rate for the first moment estimates.
+        beta2: Exponential decay rate for the second raw moment estimates.
+        tol: Tolerance for convergence.
+        params: Additional parameters to pass to the function.
     Returns:
-    x: Final value of the minimizer.
-    points: List of points visited during optimization.
+        x: Final value of the minimizer.
+        points: List of points visited during optimization.
     '''
 
     x = np.asarray(initial_x, dtype=float)

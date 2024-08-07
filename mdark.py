@@ -1017,6 +1017,88 @@ def visualize_initial_optimization():
     plt.show()
 
 
+def visualize_final_minimization(Nlens, Nsource, xmax, halo_mass):
+    # Create a simple lensing field and test the pipeline on it
+    start = time.time()
+    # Create a set of lenses
+    if Nlens == 1:
+        x = np.array([0])
+        y = np.array([0])
+    elif Nlens == 2:
+        x = np.linspace(-xmax/2, xmax/2, Nlens)
+        y = np.array([0, 0])
+    else:
+        x = np.linspace(-xmax/2, xmax/2, Nlens)
+        y = np.linspace(-xmax/2, xmax/2, Nlens)
+    mass = np.ones(Nlens) * halo_mass
+
+    halos = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
+    halos.calculate_concentration()
+
+    if Nsource == 1:
+        xs = np.random.uniform(-xmax, xmax, Nsource)
+        ys = np.random.uniform(-xmax, xmax, Nsource)
+    else:
+        n = int(np.sqrt(Nsource))
+        xs = np.linspace(-xmax, xmax, n)
+        ys = np.linspace(-xmax, xmax, n)
+        xs, ys = np.meshgrid(xs, ys)
+        xs = xs.flatten()
+        ys = ys.flatten()
+        Nsource = len(xs)
+    
+    sig_s = np.ones(Nsource) * 0.1
+    sig_f = np.ones(Nsource) * 0.01
+    sig_g = np.ones(Nsource) * 0.02
+    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
+    sources.apply_noise()
+    sources.apply_NFW_lensing(halos)
+    sources.filter_sources()
+
+    # Now, create a set of lenses at the correct positions, with a range of masses
+    # We will then test the final minimization step on these lenses, and see the resultant mass
+    input_masses = np.logspace(11, 15, 1000)
+    output_masses = np.zeros_like(input_masses)
+    chi2_vals = np.zeros_like(input_masses)
+    for i in range(len(input_masses)):
+        mass = np.ones(Nlens) * input_masses[i]
+        lenses = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
+        lenses.calculate_concentration()
+        chi2_reduced = lenses.update_chi2_values(sources, [True, True, True])
+        lenses.full_minimization(sources, [True, True, True])
+        output_masses[i] = np.sum(lenses.mass)
+        chi2_vals[i] = chi2_reduced
+
+    # Plot the results
+    fig, ax = plt.subplots(1, 2, figsize=(10, 10))
+    fig.suptitle('Testing the Final Minimization')
+    ax[0].plot(input_masses, output_masses, label='Recovered Mass')
+    ax[0].axhline(halo_mass, color='red', linestyle='--', label='True Mass')
+    ax[0].set_xscale('log')
+    ax[0].set_yscale('log')
+    ax[0].set_xlim([1e11, 1e15])
+    ax[0].set_ylim([1e11, 1e15])
+    ax[0].set_xlabel('True Mass')
+    ax[0].set_ylabel('Recovered Mass')
+    ax[0].set_title('How Well Do We Fit Mass?')
+    ax[0].legend()
+
+    # Plot the chi2 values
+    ax[1].plot(input_masses, chi2_vals, label='Reduced Chi2')
+    ax[1].axvline(halo_mass, color='red', linestyle='--', label='True Mass')
+    ax[1].set_xscale('log')
+    ax[1].set_xlabel('Input Mass')
+    ax[1].set_ylabel('Reduced Chi2')
+    ax[1].set_title('Chi2 Space')
+    ax[1].legend()
+
+    plt.tight_layout()
+
+    plt.savefig('Images/final_minimization_chi2_test_mass_{}.png'.format(np.log10(halo_mass)))
+    stop = time.time()
+    print('Finished test: {} seconds'.format(stop - start))
+
+
 def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     # Create a simple lensing field and test the pipeline on it
     start = time.time()
@@ -1107,11 +1189,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     plt.savefig(plot_name)
     stop = time.time()
 
-    # Check - did we beat the true chi2?
-    true_chi2 = halos.update_chi2_values(sources, use_flags)
     print('Finished test: {} seconds'.format(stop - start))
-    print('Final chi2 beats true chi2: {}'.format(reducedchi2 < true_chi2))
-    print('True chi2: {}, Final chi2: {}'.format(true_chi2, reducedchi2))
     return
 
 
@@ -1138,7 +1216,11 @@ if __name__ == '__main__':
     
     raise ValueError('This script is not meant to be run as a standalone script')
     '''
+    visualize_final_minimization(1, 100, 50, 1e14)
+    visualize_final_minimization(1, 100, 50, 1e13)
+    visualize_final_minimization(1, 100, 50, 1e12)
 
+    raise ValueError('This script is not meant to be run as a standalone script')
     masses = [1e14, 1e13, 1e12]
     lens_numbers = [1, 2]
 
