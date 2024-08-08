@@ -1226,8 +1226,8 @@ if __name__ == '__main__':
     '''
 
     masses = [1e14, 1e13, 1e12]
-    lens_numbers = [1, 2]
-    noise_use = [True, False]
+    lens_numbers = [1]
+    noise_use = [True]
 
     for mass in masses:
         for Nlens in lens_numbers:
