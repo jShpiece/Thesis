@@ -419,12 +419,10 @@ class Halo:
                                 sources.sigs[i], sources.sigf[i], sources.sigg[i])
             guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
             params = ['NFW','unconstrained',sources, use_flags, self.concentration[i], self.redshift]
-            result, trail = minimizer.adam_optimizer(chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params)
+            result = minimizer.adam_optimizer(chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params)
 
             self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
-            # Now update the concentrations
-            self.calculate_concentration()
-        return trail
+            self.calculate_concentration() # Remember to update the concentration parameter
 
 
     def filter_lens_positions(self, sources, xmax, threshold_distance=0.5):
@@ -487,6 +485,13 @@ class Halo:
 
             return x, y, mass, concentration, chi2
         
+        def filter_combinations(combinations):
+            # We only need to keep 'unique' combinations - there's no difference between [1, 2] and [2, 1]
+            # We can sort the combinations and then use np.unique to get the unique combinations
+            sorted_combinations = np.sort(combinations, axis=1)
+            unique_combinations = np.unique(sorted_combinations, axis=0)
+            return unique_combinations
+        
         def check_combinations(x, y, mass, concentration, chi2, ceil=5):
             # Check all possible combinations of lenses up to a certain number
             # Return the combination with the lowest chi2 value
@@ -496,9 +501,10 @@ class Halo:
             for i in range(2, ceil):
                 # Check every combination of i lenses
                 allowed_combinations = utils.find_combinations(range(len(x)), i) # This will return a list of tuples, which are the indices of the lenses to consider
-                if allowed_combinations is None:
-                    print('No combinations found: {}'.format(i))
+                if allowed_combinations is None or len(allowed_combinations) == 0:
+                    # If there are no allowed combinations, continue
                     continue
+                allowed_combinations = filter_combinations(allowed_combinations)
                 for combination in allowed_combinations:
                     # Clone the lenses object
                     test_x, test_y, test_mass, test_concentration, test_chi2 = x[list(combination)], y[list(combination)], mass[list(combination)], concentration[list(combination)], chi2[list(combination)]
@@ -536,13 +542,10 @@ class Halo:
         params = ['NFW','constrained',self.x, self.y, self.redshift, self.concentration, sources, use_flags]
         result = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.1, num_iterations=100, params=params)
         self.mass = 10**result
-        
-
 
 # ------------------------------
 # Chi^2 functions
 # ------------------------------
-
 
 def calc_degrees_of_freedom(sources, lenses, use_flags):
     # Compute the number of degrees of freedom for a given set of sources and lenses
@@ -664,9 +667,7 @@ def chi2wrapper(guess, params):
                 return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
-            dof = calc_degrees_of_freedom(params[4], lenses, params[5])
-            # return np.abs(calculate_chi_squared(params[4], lenses, params[5], lensing='NFW') / dof - 1)
-            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=True)
+            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW')
         
     else:
         raise ValueError("Invalid lensing model: {}".format(model_type))

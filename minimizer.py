@@ -40,10 +40,17 @@ def smooth_gradient(grads, beta, grad_avg=None):
 
 
 def gradient_descent(func, initial_x, learning_rate, num_iterations, params):
+    # A simple gradient descent optimizer
     x = initial_x
     for i in range(num_iterations):
         grad = numerical_gradient(func, x, params)
+        grad = clip_gradients(grad, 1) # Clip gradients to avoid large steps
+        prev_x = x
         x = x - learning_rate * grad
+        # Check for convergence
+        if np.linalg.norm(x - prev_x) < 1e-6:
+            break
+        # print(f'Iteration {i + 1}: x = {x}, f(x) = {func(x, params)}')
     return x
 
 
@@ -69,7 +76,6 @@ def adam_optimizer(func, initial_x, learning_rates, max_iterations=1000, beta1=0
     m = np.zeros_like(x)
     v = np.zeros_like(x)
     t = 0
-    points = []  # To store the points for visualization
     prev_func_val = func(x, params)
     grad_avg = np.zeros_like(x)
     
@@ -83,7 +89,6 @@ def adam_optimizer(func, initial_x, learning_rates, max_iterations=1000, beta1=0
         m_hat = m / (1 - beta1 ** t) # Bias correction
         v_hat = v / (1 - beta2 ** t) # Bias correction
         x -= learning_rates * m_hat / (np.sqrt(v_hat) + 1e-2) # Update parameters
-        points.append(np.copy(x))  # Store the current point
         
         # Check for convergence
         current_func_val = func(x, params)
@@ -92,4 +97,4 @@ def adam_optimizer(func, initial_x, learning_rates, max_iterations=1000, beta1=0
         prev_func_val = current_func_val
         
 
-    return x, points
+    return x

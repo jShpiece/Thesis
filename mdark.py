@@ -1057,12 +1057,12 @@ def visualize_final_minimization(Nlens, Nsource, xmax, halo_mass):
 
     # Now, create a set of lenses at the correct positions, with a range of masses
     # We will then test the final minimization step on these lenses, and see the resultant mass
-    input_masses = np.logspace(11, 15, 1000)
+    input_masses = np.logspace(11, 15, 200)
     output_masses = np.zeros_like(input_masses)
     chi2_vals = np.zeros_like(input_masses)
     for i in range(len(input_masses)):
         mass = np.ones(Nlens) * input_masses[i]
-        lenses = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
+        lenses = pipeline.Halo(x + 0.5, y + 0.5, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
         lenses.calculate_concentration()
         chi2_reduced = lenses.update_chi2_values(sources, [True, True, True])
         lenses.full_minimization(sources, [True, True, True])
@@ -1071,16 +1071,20 @@ def visualize_final_minimization(Nlens, Nsource, xmax, halo_mass):
 
     # Plot the results
     fig, ax = plt.subplots(1, 2, figsize=(10, 10))
-    fig.suptitle('Testing the Final Minimization')
+    fig.suptitle('Testing the Final Minimization: Offset')
     ax[0].plot(input_masses, output_masses, label='Recovered Mass')
+    # If we are successful, all the output_masses should match halo_mass
+    # Let's get the average of the output_masses (removing outliers (occassionally a fit might be pushed down to 1e-10))
+    output_masses = output_masses[output_masses > 1e10]
+    fit_mass = np.mean(output_masses)
     ax[0].axhline(halo_mass, color='red', linestyle='--', label='True Mass')
     ax[0].set_xscale('log')
     ax[0].set_yscale('log')
-    ax[0].set_xlim([1e11, 1e15])
-    ax[0].set_ylim([1e11, 1e15])
+    # ax[0].set_xlim([1e11, 1e15])
+    # ax[0].set_ylim([1e11, 1e15])
     ax[0].set_xlabel('True Mass')
     ax[0].set_ylabel('Recovered Mass')
-    ax[0].set_title('How Well Do We Fit Mass?')
+    ax[0].set_title('Mass Recovery: Average Mass = {:.2e} \n Within {:.2f}% of True Mass'.format(fit_mass, np.abs(fit_mass - halo_mass) / halo_mass * 100))
     ax[0].legend()
 
     # Plot the chi2 values
@@ -1094,12 +1098,12 @@ def visualize_final_minimization(Nlens, Nsource, xmax, halo_mass):
 
     plt.tight_layout()
 
-    plt.savefig('Images/final_minimization_chi2_test_mass_{}.png'.format(np.log10(halo_mass)))
+    plt.savefig('Images/NFW_tests/final_opt/mass_test_{}_offset.png'.format(np.log10(halo_mass)))
     stop = time.time()
     print('Finished test: {} seconds'.format(stop - start))
 
 
-def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
+def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
     # Create a simple lensing field and test the pipeline on it
     start = time.time()
     # Create a set of lenses
@@ -1133,7 +1137,11 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
     sig_f = np.ones(Nsource) * 0.01
     sig_g = np.ones(Nsource) * 0.02
     sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
-    sources.apply_noise()
+    if use_noise:
+        sources.apply_noise()
+        noisy = 'noisy'
+    else:
+        noisy = 'noiseless'
     sources.apply_NFW_lensing(halos)
     sources.filter_sources()
 
@@ -1185,7 +1193,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass):
         size = 'small'
     else:
         size = 'other'
-    plot_name = 'Images/nfw_test_Nlens_{}_{}.png'.format(Nlens, size)
+    plot_name = 'Images/NFW_tests/standard_tests/{}_Nlens_{}_{}.png'.format(size,Nlens,noisy)
     plt.savefig(plot_name)
     stop = time.time()
 
@@ -1216,17 +1224,15 @@ if __name__ == '__main__':
     
     raise ValueError('This script is not meant to be run as a standalone script')
     '''
-    visualize_final_minimization(1, 100, 50, 1e14)
-    visualize_final_minimization(1, 100, 50, 1e13)
-    visualize_final_minimization(1, 100, 50, 1e12)
 
-    raise ValueError('This script is not meant to be run as a standalone script')
     masses = [1e14, 1e13, 1e12]
     lens_numbers = [1, 2]
+    noise_use = [True, False]
 
     for mass in masses:
         for Nlens in lens_numbers:
-            simple_nfw_test(Nlens, 100, 50, mass)
+            for noise in noise_use:
+                simple_nfw_test(Nlens, 100, 50, mass, use_noise=noise)
 
     raise ValueError('This script is not meant to be run as a standalone script')
     # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
