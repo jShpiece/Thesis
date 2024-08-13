@@ -1043,10 +1043,9 @@ def visualize_final_minimization(halo_mass, use_noise=True, offset=0):
 
     # Now, create a set of lenses at the correct positions, with a range of masses
     # We will then test the final minimization step on these lenses, and see the resultant mass
-    input_masses = np.logspace(11, 15, 100)
+    input_masses = np.logspace(11, 15, 10)
     output_masses = np.zeros_like(input_masses)
     chi2_vals = np.zeros_like(input_masses)
-    errors = np.zeros_like(input_masses)
     for i in range(len(input_masses)):
         mass = np.ones(Nlens) * input_masses[i]
         lenses = pipeline.Halo(x+offset, y+offset, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
@@ -1055,7 +1054,6 @@ def visualize_final_minimization(halo_mass, use_noise=True, offset=0):
         lenses.full_minimization(sources, [True, True, True])
         output_masses[i] = np.sum(lenses.mass)
         chi2_vals[i] = chi2_reduced
-        errors[i] = np.abs(output_masses[i] - halo_mass) / halo_mass * 100
 
     # Make labels for the plot
     if halo_mass == 1e14:
@@ -1072,10 +1070,38 @@ def visualize_final_minimization(halo_mass, use_noise=True, offset=0):
     else:
         noise = 'noiseless'
 
+    errors = np.empty(len(input_masses))
+    # Perform a jackknife test to get the error
+    # Remove one source at a time, repeat the minimization, and see the mass that is recovered
+    # Scatter in the recovered mass is the error
+    for i in range(len(input_masses)):
+        error = []
+        for j in range(Nsource):
+            sources_copy = copy.deepcopy(sources)
+            sources_copy.x = np.delete(sources_copy.x, j)
+            sources_copy.y = np.delete(sources_copy.y, j)
+            sources_copy.e1 = np.delete(sources_copy.e1, j)
+            sources_copy.e2 = np.delete(sources_copy.e2, j)
+            sources_copy.f1 = np.delete(sources_copy.f1, j)
+            sources_copy.f2 = np.delete(sources_copy.f2, j)
+            sources_copy.g1 = np.delete(sources_copy.g1, j)
+            sources_copy.g2 = np.delete(sources_copy.g2, j)
+            sources_copy.sigs = np.delete(sources_copy.sigs, j)
+            sources_copy.sigf = np.delete(sources_copy.sigf, j)
+            sources_copy.sigg = np.delete(sources_copy.sigg, j)
+
+            lenses = pipeline.Halo(x+offset, y+offset, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
+            lenses.calculate_concentration()
+            lenses.full_minimization(sources_copy, [True, True, True])
+            output_mass = np.sum(lenses.mass)
+            error.append(output_mass)
+        errors[i] = np.std(error)
 
     # Plot the results
     fig, ax = plt.subplots(1, 3, figsize=(15, 10))
     fig.suptitle('Testing the Final Minimization: {}'.format(noise))
+    # Plot the mass with error bars
+    # ax[0].errorbar(input_masses, output_masses, yerr=errors, label='Recovered Mass')
     ax[0].plot(input_masses, output_masses, label='Recovered Mass')
     ax[0].axhline(halo_mass, color='red', linestyle='--', label='True Mass')
     ax[0].set_xscale('log')
@@ -1108,7 +1134,7 @@ def visualize_final_minimization(halo_mass, use_noise=True, offset=0):
     plt.savefig('Images/NFW_tests/final_opt/{}_{}_offset_{}.png'.format(size, noise, offset))
     plt.close()
 
-    return np.mean(errors)
+    return
 
 
 def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
@@ -1266,26 +1292,13 @@ def process_md_set():
 
 
 if __name__ == '__main__':
-    mass = [1e12]
+    mass = [1e12, 1e13, 1e14]
     use_noise = [True]
     offsets = [0]
-
-    # Run the final optimization tests, storing the errors for each mass
     for m in mass:
-        errors = []
         for noise in use_noise:
             for offset in offsets:
-                for _ in range(100):
-                    error = visualize_final_minimization(m, noise, offset)
-                    errors.append(error)
-        
-        # Plot the errors as a histogram
-        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-        fancy_hist(errors, ax=ax, bins='scott', color='black', histtype='step', density=True, label = 'Mean Error: {:.2f}'.format(np.mean(errors)))
-        ax.set_xlabel('Error (%)')
-        ax.set_ylabel('Probability Density')
-        ax.set_title('Error Distribution for Mass = {:.2e}'.format(m))
-        plt.savefig('Images/NFW_tests/final_opt/error_distribution_{}.png'.format(np.log10(m)))
+                visualize_final_minimization(m, noise, offset)
 
     # run_simple_tests()
     # run_rr_tests()
