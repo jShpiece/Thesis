@@ -748,13 +748,6 @@ def interpret_rr_results(results_file, xmax, Nlens, mass):
     log_mass = results['log_mass'].values
     chi2 = results['chi2'].values
     
-    # Concatenate the results, so that each of the four arrays is just a list of values
-    '''
-    xlens = np.concatenate(xlens)
-    ylens = np.concatenate(ylens)
-    log_mass = np.concatenate(log_mass)
-    chi2 = np.concatenate(chi2)
-    '''
     # Check for NANs, if so, remove them
     xlens = xlens[~np.isnan(xlens)]
     ylens = ylens[~np.isnan(ylens)]
@@ -807,7 +800,7 @@ def interpret_rr_results(results_file, xmax, Nlens, mass):
         ax[i].set_title(titles[i])
         
     fig.tight_layout()
-    plt.savefig('Images/rr_results_{}_{}.png'.format(Nlens, size))
+    plt.savefig('Images/NFW_tests/random_realization/Nlens_{}_{}.png'.format(Nlens, size))
 
 
 # --------------------------------------------
@@ -1017,90 +1010,105 @@ def visualize_initial_optimization():
     plt.show()
 
 
-def visualize_final_minimization(Nlens, Nsource, xmax, halo_mass):
+def visualize_final_minimization(halo_mass, use_noise=True, offset=0):
     # Create a simple lensing field and test the pipeline on it
-    start = time.time()
+    Nlens = 1
+    Nsource = 100
+    xmax = 50
+
     # Create a set of lenses
-    if Nlens == 1:
-        x = np.array([0])
-        y = np.array([0])
-    elif Nlens == 2:
-        x = np.linspace(-xmax/2, xmax/2, Nlens)
-        y = np.array([0, 0])
-    else:
-        x = np.linspace(-xmax/2, xmax/2, Nlens)
-        y = np.linspace(-xmax/2, xmax/2, Nlens)
+    x = np.array([0])
+    y = np.array([0])
     mass = np.ones(Nlens) * halo_mass
 
     halos = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
     halos.calculate_concentration()
 
-    if Nsource == 1:
-        xs = np.random.uniform(-xmax, xmax, Nsource)
-        ys = np.random.uniform(-xmax, xmax, Nsource)
-    else:
-        n = int(np.sqrt(Nsource))
-        xs = np.linspace(-xmax, xmax, n)
-        ys = np.linspace(-xmax, xmax, n)
-        xs, ys = np.meshgrid(xs, ys)
-        xs = xs.flatten()
-        ys = ys.flatten()
-        Nsource = len(xs)
-    
+    # Create a set of sources (in grid form)
+    n = int(np.sqrt(Nsource))
+    xs = np.linspace(-xmax, xmax, n)
+    ys = np.linspace(-xmax, xmax, n)
+    xs, ys = np.meshgrid(xs, ys)
+    xs = xs.flatten()
+    ys = ys.flatten()
+    Nsource = len(xs)
     sig_s = np.ones(Nsource) * 0.1
     sig_f = np.ones(Nsource) * 0.01
     sig_g = np.ones(Nsource) * 0.02
     sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
-    sources.apply_noise()
+    if use_noise:
+        sources.apply_noise()
     sources.apply_NFW_lensing(halos)
     sources.filter_sources()
 
     # Now, create a set of lenses at the correct positions, with a range of masses
     # We will then test the final minimization step on these lenses, and see the resultant mass
-    input_masses = np.logspace(11, 15, 200)
+    input_masses = np.logspace(11, 15, 100)
     output_masses = np.zeros_like(input_masses)
     chi2_vals = np.zeros_like(input_masses)
+    errors = np.zeros_like(input_masses)
     for i in range(len(input_masses)):
         mass = np.ones(Nlens) * input_masses[i]
-        lenses = pipeline.Halo(x + 0.5, y + 0.5, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
+        lenses = pipeline.Halo(x+offset, y+offset, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
         lenses.calculate_concentration()
         chi2_reduced = lenses.update_chi2_values(sources, [True, True, True])
         lenses.full_minimization(sources, [True, True, True])
         output_masses[i] = np.sum(lenses.mass)
         chi2_vals[i] = chi2_reduced
+        errors[i] = np.abs(output_masses[i] - halo_mass) / halo_mass * 100
+
+    # Make labels for the plot
+    if halo_mass == 1e14:
+        size = 'large'
+    elif halo_mass == 1e13:
+        size = 'medium'
+    elif halo_mass == 1e12:
+        size = 'small'
+    else:
+        size = 'other'
+    
+    if use_noise:
+        noise = 'noisy'
+    else:
+        noise = 'noiseless'
+
 
     # Plot the results
-    fig, ax = plt.subplots(1, 2, figsize=(10, 10))
-    fig.suptitle('Testing the Final Minimization: Offset')
+    fig, ax = plt.subplots(1, 3, figsize=(15, 10))
+    fig.suptitle('Testing the Final Minimization: {}'.format(noise))
     ax[0].plot(input_masses, output_masses, label='Recovered Mass')
-    # If we are successful, all the output_masses should match halo_mass
-    # Let's get the average of the output_masses (removing outliers (occassionally a fit might be pushed down to 1e-10))
-    output_masses = output_masses[output_masses > 1e10]
-    fit_mass = np.mean(output_masses)
     ax[0].axhline(halo_mass, color='red', linestyle='--', label='True Mass')
     ax[0].set_xscale('log')
     ax[0].set_yscale('log')
-    # ax[0].set_xlim([1e11, 1e15])
-    # ax[0].set_ylim([1e11, 1e15])
     ax[0].set_xlabel('True Mass')
     ax[0].set_ylabel('Recovered Mass')
-    ax[0].set_title('Mass Recovery: Average Mass = {:.2e} \n Within {:.2f}% of True Mass'.format(fit_mass, np.abs(fit_mass - halo_mass) / halo_mass * 100))
+    ax[0].set_title(r'Average Mass = {:.2e} $\pm$ {:.2e}'.format(np.mean(output_masses), np.std(output_masses)))
     ax[0].legend()
 
-    # Plot the chi2 values
-    ax[1].plot(input_masses, chi2_vals, label='Reduced Chi2')
-    ax[1].axvline(halo_mass, color='red', linestyle='--', label='True Mass')
+    # Plot the error
+    ax[1].plot(input_masses, errors, label='Error')
     ax[1].set_xscale('log')
+    # ax[1].set_yscale('log')
     ax[1].set_xlabel('Input Mass')
-    ax[1].set_ylabel('Reduced Chi2')
-    ax[1].set_title('Chi2 Space')
+    ax[1].set_ylabel('Error (%)')
+    ax[1].set_title('Error Space')
     ax[1].legend()
+
+    # Plot the chi2 values
+    ax[2].plot(input_masses, chi2_vals, label='Reduced Chi2')
+    ax[2].axvline(halo_mass, color='red', linestyle='--', label='True Mass')
+    ax[2].set_xscale('log')
+    ax[2].set_xlabel('Input Mass')
+    ax[2].set_ylabel('Reduced Chi2')
+    ax[2].set_title('Chi2 Space')
+    ax[2].legend()
 
     plt.tight_layout()
 
-    plt.savefig('Images/NFW_tests/final_opt/mass_test_{}_offset.png'.format(np.log10(halo_mass)))
-    stop = time.time()
-    print('Finished test: {} seconds'.format(stop - start))
+    plt.savefig('Images/NFW_tests/final_opt/{}_{}_offset_{}.png'.format(size, noise, offset))
+    plt.close()
+
+    return np.mean(errors)
 
 
 def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
@@ -1178,9 +1186,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
 
     # Step 6: Final minimization
-    # Print the mass before minimization 
-    # print('Mass before minimization: {}'.format(np.log10(np.sum(lenses.mass))))
-    # lenses.full_minimization(sources, use_flags)
+    lenses.full_minimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False)
 
@@ -1205,8 +1211,18 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
 # Main Functions
 # --------------------------------------------
 
-if __name__ == '__main__':
-    '''
+def run_simple_tests():
+    masses = [1e14, 1e13]
+    lens_numbers = [3]
+    noise_use = [True, False]
+
+    for mass in masses:
+        for Nlens in lens_numbers:
+            for noise in noise_use:
+                simple_nfw_test(Nlens, 100, 50, mass, use_noise=noise)
+
+
+def run_rr_tests():
     N_lens = [1,2]
     Nsource = 100
     Ntrials = 100
@@ -1216,27 +1232,14 @@ if __name__ == '__main__':
         for mass in masses:
             start = time.time()
             size = 'large' if mass == 1e14 else 'medium' if mass == 1e13 else 'small' if mass == 1e12 else 'other'
-            file_name = 'Images/rr_Nlens_{}_Nsource_{}_size_{}.txt'.format(Nlens, Nsource, size)
+            file_name = 'Images/NFW_tests/random_realization/Nlens_{}_Nsource_{}_size_{}.txt'.format(Nlens, Nsource, size)
             random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name)
             interpret_rr_results(file_name, xmax, Nlens, mass)
             stop = time.time()
             print('Time taken for Nlens = {}: {}'.format(Nlens, stop - start))
-    
-    raise ValueError('This script is not meant to be run as a standalone script')
-    '''
 
-    masses = [1e14, 1e13, 1e12]
-    lens_numbers = [1]
-    noise_use = [True]
 
-    for mass in masses:
-        for Nlens in lens_numbers:
-            for noise in noise_use:
-                simple_nfw_test(Nlens, 100, 50, mass, use_noise=noise)
-
-    raise ValueError('This script is not meant to be run as a standalone script')
-    # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')
-
+def process_md_set():
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
     z_chosen = zs[0]
@@ -1254,19 +1257,37 @@ if __name__ == '__main__':
     if not os.path.exists(ID_file):
         os.makedirs('Data/MDARK_Test/Test{}'.format(test_number))
         build_test_set(30, z_chosen, ID_file)
-    # raise ValueError('This script is not meant to be run as a standalone script')
-
-    # Choose a random cluster ID from the ID file
-    IDs = pd.read_csv(ID_file)['ID'].values
-    # Make sure the IDs are integers
-    IDs = [int(ID) for ID in IDs]
-    zs = [0.194, 0.391, 0.586, 0.782, 0.977]
-    start = time.time()
-    halos = find_halos(IDs, zs[0])
-    stop = time.time()
 
     run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     build_mass_correlation_plot_errors(ID_file, result_file, plot_name)
     build_chi2_plot(result_file, ID_file, test_number)
+
+
+if __name__ == '__main__':
+    mass = [1e12]
+    use_noise = [True]
+    offsets = [0]
+
+    # Run the final optimization tests, storing the errors for each mass
+    for m in mass:
+        errors = []
+        for noise in use_noise:
+            for offset in offsets:
+                for _ in range(100):
+                    error = visualize_final_minimization(m, noise, offset)
+                    errors.append(error)
+        
+        # Plot the errors as a histogram
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+        fancy_hist(errors, ax=ax, bins='scott', color='black', histtype='step', density=True, label = 'Mean Error: {:.2f}'.format(np.mean(errors)))
+        ax.set_xlabel('Error (%)')
+        ax.set_ylabel('Probability Density')
+        ax.set_title('Error Distribution for Mass = {:.2e}'.format(m))
+        plt.savefig('Images/NFW_tests/final_opt/error_distribution_{}.png'.format(np.log10(m)))
+
+    # run_simple_tests()
+    # run_rr_tests()
+    # process_md_set()
+    # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')

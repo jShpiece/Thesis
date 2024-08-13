@@ -663,7 +663,7 @@ def chi2wrapper(guess, params):
             return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=True)
         elif constraint_type == 'constrained':
             # Check for overflow in the mass
-            if guess > 20:
+            if np.any(guess > 16):
                 return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
