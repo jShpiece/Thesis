@@ -42,16 +42,18 @@ def smooth_gradient(grads, beta, grad_avg=None):
 def gradient_descent(func, initial_x, learning_rate, num_iterations, params):
     # A simple gradient descent optimizer
     x = initial_x
+    path = []
     for i in range(num_iterations):
-        grad = numerical_gradient(func, x, params)
+        grad = numerical_gradient(func, x, params, epsilon=1e-8)
         grad = clip_gradients(grad, 1) # Clip gradients to avoid large steps
         prev_x = x
         x = x - learning_rate * grad
+        path.append(x)
         # Check for convergence
         if np.linalg.norm(x - prev_x) < 1e-6:
             break
         # print(f'Iteration {i + 1}: x = {x}, f(x) = {func(x, params)}')
-    return x
+    return x, path
 
 
 def adam_optimizer(func, initial_x, learning_rates, max_iterations=1000, beta1=0.9, beta2=0.999, tol=1e-6, params=None):

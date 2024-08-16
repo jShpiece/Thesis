@@ -540,8 +540,10 @@ class Halo:
     def full_minimization(self, sources, use_flags):
         guess = np.log10(self.mass)
         params = ['NFW','constrained',self.x, self.y, self.redshift, self.concentration, sources, use_flags]
-        result = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.1, num_iterations=100, params=params)
+        result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
         self.mass = 10**result
+        self.calculate_concentration()
+        return path
 
 # ------------------------------
 # Chi^2 functions
