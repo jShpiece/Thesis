@@ -779,8 +779,8 @@ def interpret_rr_results(results_file, xmax, Nlens, mass):
 
     # Now plot the results - 4 histograms
 
-    fig, ax = plt.subplots(1, 3, figsize=(10, 10))
-    fig.suptitle('Random Realization Test /n {} Lenses, {} Sources'.format(Nlens, len(xlens)))
+    fig, ax = plt.subplots(1, 3, figsize=(15, 10))
+    fig.suptitle('Random Realization Test: Nlens = {}, Mass = {:.2e}'.format(Nlens, mass))
     ax = ax.flatten()
     data = [xlens, ylens, log_mass]
     xlabels = ['x', 'y', 'log_mass']
@@ -1257,15 +1257,11 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
 
-    print('Mass before minimization: {:.2e}'.format(np.sum(lenses.mass)))
-
     # Step 6: Final minimization
-    path = lenses.full_minimization(sources, use_flags)
-    # print(path)
+    lenses.full_minimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False, show_mass=True)
 
-    print('Mass after minimization: {:.2e}'.format(np.sum(lenses.mass)))
 
     fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$'.format(np.sum(halos.mass), np.sum(lenses.mass)))
     if halo_mass == 1e14:
@@ -1289,7 +1285,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
 # --------------------------------------------
 
 def run_simple_tests():
-    masses = [1e13]
+    masses = [1e14, 1e13]
     lens_numbers = [1,2]
     noise_use = [True]
 
@@ -1306,16 +1302,11 @@ def run_rr_tests():
     xmax = 50
     masses = [1e14, 1e13, 1e12]
     for Nlens in N_lens:
-        for mass in masses:
-            # Skip Nlens = 1 for the first two masses
-            
-            if Nlens == 1 and mass != 1e12:
-                continue
-            
+        for mass in masses:           
             start = time.time()
             size = 'large' if mass == 1e14 else 'medium' if mass == 1e13 else 'small' if mass == 1e12 else 'other'
             file_name = 'Images/NFW_tests/random_realization/Nlens_{}_Nsource_{}_size_{}.txt'.format(Nlens, Nsource, size)
-            random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name)
+            # random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name)
             interpret_rr_results(file_name, xmax, Nlens, mass)
             stop = time.time()
             print('Time taken for {} Nlens = {}: {}'.format(size, Nlens, stop - start))
@@ -1394,8 +1385,6 @@ if __name__ == '__main__':
         fancy_hist(np.log10(final_mass), ax=ax[0], bins='freedman', color='black', histtype='step', density=True)
         avg_mass = np.median(np.log10(final_mass))
         mean_mass = np.mean(np.log10(final_mass))
-        # ax[0].axvline(avg_mass, color='blue', linestyle='--', label='Average Recovered Mass = {}'.format(np.round(avg_mass, 2)))
-        # ax[0].axvline(np.log10(mass), color='red', linestyle='--', label='True Mass')
         ax[0].set_title('Final Mass')
         ax[0].set_xlabel('log(Mass)')
         ax[0].set_ylabel('Probability Density')
@@ -1411,8 +1400,6 @@ if __name__ == '__main__':
         median_error = np.median(ratio)
         std_error = np.std(ratio)
         ax[1].axvline(mean_error, color='red', linestyle='--', label='Mean ratio = {:.2f}'.format(mean_error))
-        # ax[1].axvline(mean_error - std_error, color='blue', linestyle='--', label='Std = {:.2f}'.format(std_error))
-        # ax[1].axvline(mean_error + std_error, color='blue', linestyle='--')
         ax[1].set_title('Ratio of Final Mass to True Mass')
         ax[1].set_xlabel(r'$\frac{M_f}{M_0}$')
         ax[1].set_ylabel('Probability Density')
@@ -1420,18 +1407,3 @@ if __name__ == '__main__':
 
         plt.tight_layout()
         plt.savefig('Images/NFW_tests/final_opt/minimization_errors_{}.png'.format(np.log10(mass)))
-
-    # visualize_final_minimization_path(1e14)
-    '''
-    mass = [1e14, 1e13, 1e12]
-    noise = [True, False]
-    offset = [0, 1, 2]
-    for m in mass:
-        for n in noise:
-            for o in offset:
-                visualize_final_minimization(m, n, o)
-    '''
-    # run_simple_tests()
-    # run_rr_tests()
-    # process_md_set()
-    # visualize_fits('Data/MDARK_Test/Test15/ID_file_15.csv')

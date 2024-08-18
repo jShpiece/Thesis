@@ -389,12 +389,12 @@ class Halo:
         chi2_values = np.zeros(len(self.x))
         if len(self.x) == 1:
             # Only one lens - calculate the chi2 value for this lens
-            chi2_values[0] = calculate_chi_squared(sources, self, use_flags, lensing='NFW', use_weights=True)
+            chi2_values[0] = calculate_chi_squared(sources, self, use_flags, lensing='NFW', use_weights=False)
         else:
             for i in range(len(self.x)):
                 # Only pass in the i-th lens
                 one_halo = Halo(self.x[i], self.y[i], self.z[i], self.concentration[i], self.mass[i], self.redshift, [0])
-                chi2_values[i] = calculate_chi_squared(sources, one_halo, use_flags, lensing='NFW', use_weights=True)
+                chi2_values[i] = calculate_chi_squared(sources, one_halo, use_flags, lensing='NFW', use_weights=False)
         self.chi2 = chi2_values
         if dof == 0:
             print('Degrees of freedom is zero')
@@ -669,7 +669,7 @@ def chi2wrapper(guess, params):
                 return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
-            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW')
+            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=True)
         
     else:
         raise ValueError("Invalid lensing model: {}".format(model_type))

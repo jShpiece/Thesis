@@ -68,11 +68,9 @@ def compute_source_weights(lenses, sources, r_frac = 0.4):
     xs, ys = sources.x, sources.y
 
     r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2)
-    # Calculate distances from the current lens to all sources
-    distances = np.sqrt((xl - xs)**2 + (yl - ys)**2)
     
     # Sort distances
-    sorted_distances = np.sort(distances)
+    sorted_distances = np.sort(r)
     
     # Find the index at which 1/4 of the sources are within this distance
     index = int(len(sorted_distances) * (r_frac))
@@ -93,7 +91,7 @@ def compute_source_weights(lenses, sources, r_frac = 0.4):
     # print('Weights:', weights)
     assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
     
-    weights = np.ones_like(weights)
+    # weights = np.ones_like(weights)
     return weights
 
 
