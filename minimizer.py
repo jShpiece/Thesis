@@ -42,6 +42,7 @@ def smooth_gradient(grads, beta, grad_avg=None):
 def gradient_descent(func, initial_x, learning_rate, num_iterations, params):
     # A simple gradient descent optimizer
     x = initial_x
+    x = np.asarray(x, dtype=float)
     path = []
     for i in range(num_iterations):
         grad = numerical_gradient(func, x, params, epsilon=1e-8)
@@ -52,7 +53,6 @@ def gradient_descent(func, initial_x, learning_rate, num_iterations, params):
         # Check for convergence
         if np.linalg.norm(x - prev_x) < 1e-6:
             break
-        # print(f'Iteration {i + 1}: x = {x}, f(x) = {func(x, params)}')
     return x, path
 
 

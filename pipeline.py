@@ -538,12 +538,24 @@ class Halo:
 
 
     def full_minimization(self, sources, use_flags):
+        '''
         guess = np.log10(self.mass)
         params = ['NFW','constrained',self.x, self.y, self.redshift, self.concentration, sources, use_flags]
         result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
         self.mass = 10**result
         self.calculate_concentration()
         return path
+        '''
+        for i in range(len(self.x)):
+            guess = [np.log10(self.mass[i])]
+            params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
+            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.001, num_iterations=1000, params=params)
+            self.mass[i] = 10**result
+        self.calculate_concentration()
+
+        return path
+    
+
 
 # ------------------------------
 # Chi^2 functions
@@ -669,7 +681,7 @@ def chi2wrapper(guess, params):
                 return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
-            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=True)
+            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=False)
         
     else:
         raise ValueError("Invalid lensing model: {}".format(model_type))

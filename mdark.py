@@ -182,15 +182,32 @@ def plot_cluster_properties(z):
     fig.savefig('Images/M_frac_dist_{}.png'.format(z))
 
 
-def build_mass_correlation_plot(file_name, plot_name):
+def build_mass_correlation_plot(ID_file, file_name, plot_name):
     # Open the results file and read in the data
     results = pd.read_csv(file_name)
     # Get the mass and true mass
-    true_mass = results[' True Mass'].values
+    # True mass is stored in the ID file
+    ID_results = pd.read_csv(ID_file)
+    true_mass = ID_results[' Mass'].values
     mass = results[' Mass_all_signals'].values
     mass_gamma_f = results[' Mass_gamma_F'].values
     mass_f_g = results[' Mass_F_G'].values
     mass_gamma_g = results[' Mass_gamma_G'].values
+
+    # Convert masses to floats (currently being read in as strings)
+    true_mass = np.array([float(mass) for mass in true_mass])
+    mass = np.array([float(mass) for mass in mass])
+    mass_gamma_f = np.array([float(mass) for mass in mass_gamma_f])
+    mass_f_g = np.array([float(mass) for mass in mass_f_g])
+    mass_gamma_g = np.array([float(mass) for mass in mass_gamma_g])
+
+    # NOW replace any Nan values with 0
+    mass = np.nan_to_num(mass)
+    mass_gamma_f = np.nan_to_num(mass_gamma_f)
+    mass_f_g = np.nan_to_num(mass_f_g)
+    mass_gamma_g = np.nan_to_num(mass_gamma_g)
+
+
     masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
     # True mass is in units of M_sun / h - convert others to the same units
     masses = [mass / h for mass in masses]
@@ -202,12 +219,12 @@ def build_mass_correlation_plot(file_name, plot_name):
     mass = mass[~outliers]
     true_mass = true_mass[~outliers]
     '''
+
+    
     # Plot the results for each signal combination
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
     ax = ax.flatten()
     for i in range(4):
-        # true_mass_temp = true_mass[masses[i] > 0]
-        # masses[i] = masses[i][masses[i] > 0]
         true_mass_temp = true_mass
         masses[i] = np.abs(masses[i])
         if masses[i].min() == 0:
@@ -257,6 +274,7 @@ def build_mass_correlation_plot_errors(ID_file, results_file, plot_name):
 
     # Now read in the results file
     results = pd.read_csv(results_file)
+    # All of the results are floats, so we can convert them to numpy arrays
     # There are 4 columns for mass
     mass_columns = [' Mass_all_signals', ' Mass_gamma_F', ' Mass_F_G', ' Mass_gamma_G']
     signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
@@ -266,6 +284,8 @@ def build_mass_correlation_plot_errors(ID_file, results_file, plot_name):
         mass_values = []
         for j in range(4):
             mass_values.append(results[results['ID'] == int(IDs[i])][mass_columns[j]].values)
+        # Convert strings to floats
+        mass_values = [np.array([float(mass) for mass in masses]) for masses in mass_values]
         mass_values = (np.abs(np.array(mass_values)) ** (3/2)) * 10**-6
         mass_val[i] = np.mean(mass_values, axis=1)
         mass_err[i] = np.std(mass_values, axis=1)
@@ -1285,9 +1305,9 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
 # --------------------------------------------
 
 def run_simple_tests():
-    masses = [1e14, 1e13]
+    masses = [1e14, 1e13, 1e12]
     lens_numbers = [1,2]
-    noise_use = [True]
+    noise_use = [True, False]
 
     for mass in masses:
         for Nlens in lens_numbers:
@@ -1334,8 +1354,8 @@ def process_md_set():
     run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
-    build_mass_correlation_plot_errors(ID_file, result_file, plot_name)
-    build_chi2_plot(result_file, ID_file, test_number)
+    build_mass_correlation_plot(ID_file, result_file, plot_name)
+    # build_chi2_plot(result_file, ID_file, test_number) # No longer of interest
 
 
 def estimate_error_in_minimization(true_mass):
@@ -1367,6 +1387,15 @@ def estimate_error_in_minimization(true_mass):
 
 
 if __name__ == '__main__':
+    # Hypothesis - I am not actually getting a bad normalization - the mass overestimates come from false positives
+    # The pipeline is not actually overestimating the mass, but rather detecting multiple halos
+    # How can I test this hypothesis?
+    # First idea - try final minimization one halo at a time, instead of all halos at once
+    # Reasoning: the pipeline should drive false positives towards a mass of 0, but isn't. Could this be because I'm fitting the good halos at the same time as the bad, 
+    # which causes bad fits to be overlooked? If I fit the bad halo on its own, will it be driven to a mass of 0?
+    run_simple_tests()
+
+    raise ValueError('This script is not meant to be run directly. Please run the main.py script instead.')
     N = 1000
     masses = [1e14, 1e13, 1e12]
 
