@@ -1390,10 +1390,52 @@ if __name__ == '__main__':
     # Hypothesis - I am not actually getting a bad normalization - the mass overestimates come from false positives
     # The pipeline is not actually overestimating the mass, but rather detecting multiple halos
     # How can I test this hypothesis?
-    # First idea - try final minimization one halo at a time, instead of all halos at once
-    # Reasoning: the pipeline should drive false positives towards a mass of 0, but isn't. Could this be because I'm fitting the good halos at the same time as the bad, 
-    # which causes bad fits to be overlooked? If I fit the bad halo on its own, will it be driven to a mass of 0?
-    run_simple_tests()
+
+    # Run 'simple test' multiple times - returning the resulting lenses and original halo. 
+    # Check to see if any of the lenses are actual detections - if so, record their mass
+    # Compare the detected masses to the true mass, across many implementations
+    # If the detected mass is always the true mass, then the pipeline is working correctly, and
+    # the overestimates are due to multiple detections
+
+    # Run the simple tests
+    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
+    halo.calculate_concentration()
+    Nsource = 100
+    xmax = 50
+    args = (halo, Nsource, xmax)
+
+    Ntrials = 100
+    found_masses = np.zeros(Ntrials)
+
+    tasks = [(halo, Nsource, xmax) for _ in range(Ntrials)]
+    with Pool() as pool:
+        results = pool.map(single_realization, tasks)
+
+    # Now, check the results
+    for i in range(Ntrials):
+        lenses, chi2 = results[i]
+        # Check to see if any of the lenses are actual detections
+        # Define a detection as a lens that is within 5 arcseconds of the true halo
+        r = np.sqrt(lenses.x**2 + lenses.y**2)
+        detected = r < 5
+        # Only consider the mass of the detected lenses
+        detected_masses = lenses.mass[detected]
+        found_masses[i] = np.sum(detected_masses)
+    
+    # Save the mass array
+    np.save('Data/NFW_tests/final_opt/detected_masses.npy', found_masses)
+    # Now plot the results
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    fancy_hist(found_masses, ax=ax, bins='freedman', color='black', histtype='step', density=True)
+    ax.axvline(1e14, color='red', linestyle='--', label='True Mass')
+    ax.set_xscale('log')
+    ax.set_title('Detected Masses')
+    ax.set_xlabel('Mass')
+    ax.set_ylabel('Probability Density')
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig('Images/NFW_tests/final_opt/detected_masses.png')
+    plt.show()
 
     raise ValueError('This script is not meant to be run directly. Please run the main.py script instead.')
     N = 1000
