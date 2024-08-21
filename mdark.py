@@ -257,77 +257,6 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     plt.show()
 
 
-def build_mass_correlation_plot_errors(ID_file, results_file, plot_name):
-    IDs = []
-    true_mass = []
-    with open(ID_file, 'r') as f:
-        lines = f.readlines()[1:]
-        for line in lines:
-            ID = line.split(',')[0]
-            mass = line.split(',')[1]
-            IDs.append(int(ID))
-            true_mass.append(float(mass))
-
-    IDs = np.array(IDs)
-    mass_val = np.empty((len(IDs), 4))
-    mass_err = np.empty((len(IDs), 4))
-
-    # Now read in the results file
-    results = pd.read_csv(results_file)
-    # All of the results are floats, so we can convert them to numpy arrays
-    # There are 4 columns for mass
-    mass_columns = [' Mass_all_signals', ' Mass_gamma_F', ' Mass_F_G', ' Mass_gamma_G']
-    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
-    # Each ID will appear multiple times, depending on the number of trials run
-    # For each ID, collect all of the mass values and calculate the mean and standard deviation
-    for i in range(len(IDs)):
-        mass_values = []
-        for j in range(4):
-            mass_values.append(results[results['ID'] == int(IDs[i])][mass_columns[j]].values)
-        # Convert strings to floats
-        mass_values = [np.array([float(mass) for mass in masses]) for masses in mass_values]
-        mass_values = (np.abs(np.array(mass_values)) ** (3/2)) * 10**-6
-        mass_val[i] = np.mean(mass_values, axis=1)
-        mass_err[i] = np.std(mass_values, axis=1)
-
-    # Plot the results for each signal combination
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    ax = ax.flatten()
-
-    for i in range(4):
-        mass = mass_val[:, i]
-        err = mass_err[:, i]
-
-        # Remove NaN values - these occur when we only run a subset of the trials
-        bad_arrays = np.isnan(mass) | np.isnan(err)
-        mass = mass[~bad_arrays]
-        err = err[~bad_arrays]
-        true_mass = true_mass[:len(mass)]
-
-        ax[i].errorbar(true_mass, mass, yerr=err, fmt='o', color='black')
-        ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
-        # Add a line of best fit
-        x = np.linspace(1e13, 1e15, 100)
-        try:
-            m, b = np.polyfit(np.log10(true_mass), np.log10(mass), 1)
-            ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
-        except:
-            print('RuntimeWarning: Skipping line of best fit')
-            continue
-        # Plot the line of best fit and an agreement line
-        ax[i].plot(x, x, color='blue', label='Agreement Line', linestyle='--') # Agreement line - use a different linestyle because the paper won't be in color
-        ax[i].legend()
-        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
-        ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass, mass)[0, 1]))
-
-    fig.suptitle('Mass Correlation')
-    fig.tight_layout()
-    fig.savefig(plot_name)
-    # plt.show()
-
-
 def build_chi2_plot(file_name, ID_file, test_number):
     IDs = []
     true_mass = []
@@ -375,30 +304,6 @@ def build_chi2_plot(file_name, ID_file, test_number):
     
     fig.tight_layout()
     fig.savefig('Images/chi2_plot_{}.png'.format(test_number))
-    plt.show()
-
-
-def plot_source_signals(sources, test_sources):
-    rmse_shear_1 = np.sqrt(np.mean((sources.e1 - test_sources.e1)**2))
-    rmse_shear_2 = np.sqrt(np.mean((sources.e2 - test_sources.e2)**2))
-    rmse_flexion_1 = np.sqrt(np.mean((sources.f1 - test_sources.f1)**2))
-    rmse_flexion_2 = np.sqrt(np.mean((sources.f2 - test_sources.f2)**2))
-    rmse_gflexion_1 = np.sqrt(np.mean((sources.g1 - test_sources.g1)**2))
-    rmse_gflexion_2 = np.sqrt(np.mean((sources.g2 - test_sources.g2)**2))
-
-    # Create rms histograms for each signal
-    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-    signals = np.array([[rmse_shear_1, rmse_shear_2], [rmse_flexion_1, rmse_flexion_2], [rmse_gflexion_1, rmse_gflexion_2]])
-    signal_name = ['Shear', 'Flexion', 'G-Flexion']
-    ax = ax.flatten()
-    for i in range(3):
-        signal = signals[i]
-        ax[i].hist(signal[0], bins=100, histtype='step', density=True, label='1', color='blue')
-        ax[i].hist(signal[1], bins=100, histtype='step', density=True, label='2', color='red')
-        ax[i].set_xlabel('Signal Amplitude')
-        ax[i].set_ylabel('Probability Density')
-        ax[i].set_title('Signal {}'.format(signal_name[i]))
-    fig.tight_layout()
     plt.show()
 
 
@@ -1294,34 +1199,6 @@ def process_md_set():
     print('Time taken: {}'.format(stop - start))
     build_mass_correlation_plot(ID_file, result_file, plot_name)
     # build_chi2_plot(result_file, ID_file, test_number) # No longer of interest
-
-
-def estimate_error_in_minimization(true_mass):
-    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([true_mass]), 0.194, np.array([0]))
-    halo.calculate_concentration()
-    xmax = 50
-    Nsource = 100
-    sources = pipeline.Source(np.random.uniform(-xmax, xmax, Nsource), np.random.uniform(-xmax, xmax, Nsource),
-                            np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource), np.zeros(Nsource),
-                            np.ones(Nsource) * 0.1, np.ones(Nsource) * 0.01, np.ones(Nsource) * 0.02)
-    sources.apply_noise()
-    sources.apply_NFW_lensing(halo)
-    sources.filter_sources(xmax)
-
-    # Now create a single lens at the correct position, with a random starting mass
-    # Actually, let's offset the lens position by a small amount, to account for the fact that our pipeline will not get the exact position
-    xl = np.random.normal(0, 0)
-    yl = np.random.normal(0, 0)
-    starting_mass = 10**np.random.uniform(11, 16)
-    lens = pipeline.Halo(np.array(xl), np.array(yl), np.array([0]), np.array([0]), np.array(starting_mass), 0.194, np.array([0]))
-    lens.calculate_concentration()
-    true_chi2 = halo.update_chi2_values(sources, [True, True, True])
-    
-    # Perform the final minimization
-    lens.full_minimization(sources, [True, True, True])
-    reduced_chi2 = lens.update_chi2_values(sources, [True, True, True])
-
-    return reduced_chi2, true_chi2, starting_mass, lens.mass[0]
 
 
 if __name__ == '__main__':
