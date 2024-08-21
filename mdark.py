@@ -1076,7 +1076,8 @@ def visualize_final_minimization(halo_mass, use_noise=True, offset=0):
         lenses = pipeline.Halo(x+offset, y+offset, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
         lenses.calculate_concentration()
         chi2_reduced = lenses.update_chi2_values(sources, [True, True, True])
-        lenses.full_minimization(sources, [True, True, True])
+        # lenses.full_minimization(sources, [True, True, True])
+        lenses.two_param_minimization(sources, [True, True, True])
         output_masses[i] = np.sum(lenses.mass)
         chi2_vals[i] = chi2_reduced
         errors[i] = np.abs(output_masses[i] - halo_mass) / halo_mass * 100
@@ -1103,7 +1104,7 @@ def visualize_final_minimization(halo_mass, use_noise=True, offset=0):
     ax[0].axhline(halo_mass, color='red', linestyle='--', label='True Mass')
     ax[0].set_xscale('log')
     ax[0].set_yscale('log')
-    ax[0].set_xlabel('True Mass')
+    ax[0].set_xlabel('Input Mass')
     ax[0].set_ylabel('Recovered Mass')
     ax[0].set_title(r'Average Mass = {:.2e} $\pm$ {:.2e}'.format(np.mean(output_masses), np.std(output_masses)))
     ax[0].legend()
@@ -1128,79 +1129,8 @@ def visualize_final_minimization(halo_mass, use_noise=True, offset=0):
     plt.tight_layout()
 
     plt.savefig('Images/NFW_tests/final_opt/{}_{}_offset_{}.png'.format(size, noise, offset))
-    print('Finished test for halo mass: {}'.format(halo_mass))
+    print('Finished test for halo mass: {}'.format(np.log10(halo_mass)))
     plt.close()
-
-
-def visualize_final_minimization_path(halo_mass):
-    # Create a simple lensing field and test the pipeline on it
-    Nlens = 1
-    Nsource = 100
-    xmax = 50
-
-    # Create a set of lenses
-    x = np.array([0])
-    y = np.array([0])
-    mass = np.ones(Nlens) * halo_mass
-
-    halos = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
-    halos.calculate_concentration()
-
-    # Create a set of sources (in grid form)
-    n = int(np.sqrt(Nsource))
-    xs = np.linspace(-xmax, xmax, n)
-    ys = np.linspace(-xmax, xmax, n)
-    xs, ys = np.meshgrid(xs, ys)
-    xs = xs.flatten()
-    ys = ys.flatten()
-    Nsource = len(xs)
-    sig_s = np.ones(Nsource) * 0.1
-    sig_f = np.ones(Nsource) * 0.01
-    sig_g = np.ones(Nsource) * 0.02
-    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
-    sources.apply_noise()
-    sources.apply_NFW_lensing(halos)
-    sources.filter_sources()
-
-    # Create a single lens at the correct position, with x% of the true mass
-    A = np.random.uniform(0.1, 10)
-    lens = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([0]), np.array([A*halo_mass]), 0.194, np.array([0]))
-    lens.calculate_concentration()
-    true_chi2 = lens.update_chi2_values(sources, [True, True, True])
-
-    # Perform the final minimization
-    path = lens.full_minimization(sources, [True, True, True])
-    # Turn path into a 1d array
-    path = np.array(path).flatten()
-    chi2 = np.empty(len(path))
-    for i in range(len(path)):
-        sub_lens = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([0]), np.array([10**path[i]]), 0.194, np.array([0]))
-        sub_lens.calculate_concentration()
-        chi2[i] = sub_lens.update_chi2_values(sources, [True, True, True])
-
-    # Plot the path in mass space and chi2 space
-    # Right now the path is just a list of masses
-    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    fig.suptitle('Final Minimization Path')
-    ax[0].plot(10**path, label='Mass Path')
-    ax[0].axhline(halo_mass, color='red', linestyle='--', label='True Mass')
-    ax[0].set_xlabel('Step')
-    ax[0].set_ylabel('Mass')
-    ax[0].set_title('Mass Path')
-    ax[0].set_yscale('log')
-    ax[0].legend()
-
-    ax[1].plot(10**path, chi2, label='Chi2 Path')
-    ax[1].scatter(halo_mass, true_chi2, color='red', label='True Mass')
-    ax[1].set_xlabel('Mass')
-    ax[1].set_ylabel('Reduced Chi2')
-    ax[1].set_title('Chi2 Path')
-    ax[1].set_xscale('log') 
-    ax[1].legend()
-
-    plt.tight_layout()
-    plt.savefig('Images/NFW_tests/final_opt/{}_path.png'.format(np.log10(halo_mass)))
-    plt.show()
 
 
 def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
@@ -1246,7 +1176,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
     sources.filter_sources()
 
     # Arrange a plot with 6 subplots in 2 rows
-    fig, axarr = plt.subplots(2, 3, figsize=(15, 10), sharex=True, sharey=True)
+    fig, axarr = plt.subplots(2, 3, figsize=(20, 15), sharex=True, sharey=True)
 
     use_flags = [True, True, True]  # Use all signals
 
@@ -1278,12 +1208,20 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
 
     # Step 6: Final minimization
-    lenses.full_minimization(sources, use_flags)
+    # lenses.full_minimization(sources, use_flags)
+    lenses.two_param_minimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False, show_mass=True)
 
-
-    fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$'.format(np.sum(halos.mass), np.sum(lenses.mass)))
+    # Get the 'ideal' mass - only counting the mass of lenses that are close to the true halo
+    ideal_mass = 0
+    for i in range(len(lenses.x)):
+        for j in range(len(halos.x)):
+            if np.sqrt((lenses.x[i] - halos.x[j])**2 + (lenses.y[i] - halos.y[j])**2) < 5:
+                ideal_mass += lenses.mass[i]
+                break
+    
+    fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$ \n Ideal Mass: {:.2e} $M_\odot$'.format(halo_mass, np.sum(lenses.mass), ideal_mass))
     if halo_mass == 1e14:
         size = 'large'
     elif halo_mass == 1e13:
@@ -1387,55 +1325,82 @@ def estimate_error_in_minimization(true_mass):
 
 
 if __name__ == '__main__':
-    # Hypothesis - I am not actually getting a bad normalization - the mass overestimates come from false positives
-    # The pipeline is not actually overestimating the mass, but rather detecting multiple halos
-    # How can I test this hypothesis?
+    run_simple_tests()
+    raise ValueError('This script is not meant to be run directly. Please run the main.py script instead.')
+    masses = [1e14, 1e13, 1e12]
+    offset = [0, 0.5, 2]
+    noise = [True, False]
+    for mass in masses:
+        for off in offset:
+            for n in noise:
+                visualize_final_minimization(mass, use_noise=n, offset=off)
+    
 
-    # Run 'simple test' multiple times - returning the resulting lenses and original halo. 
-    # Check to see if any of the lenses are actual detections - if so, record their mass
-    # Compare the detected masses to the true mass, across many implementations
-    # If the detected mass is always the true mass, then the pipeline is working correctly, and
-    # the overestimates are due to multiple detections
+    raise ValueError('This script is not meant to be run directly. Please run the main.py script instead.')
+    mass_range = np.logspace(13, 16, 100)
+    mass_range = np.log10(mass_range)
+    concentration_range = np.linspace(0.1, 10, 100)
+    chi2 = np.zeros((len(mass_range), len(concentration_range)))
 
-    # Run the simple tests
     halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([5]), np.array([1e14]), 0.194, np.array([0]))
     halo.calculate_concentration()
+
+    # Create a set of sources (in grid form)
     Nsource = 100
     xmax = 50
-    args = (halo, Nsource, xmax)
+    use_noise = False
+    n = int(np.sqrt(Nsource))
+    xs = np.linspace(-xmax, xmax, n)
+    ys = np.linspace(-xmax, xmax, n)
+    xs, ys = np.meshgrid(xs, ys)
+    xs = xs.flatten()
+    ys = ys.flatten()
+    Nsource = len(xs)
+    sig_s = np.ones(Nsource) * 0.1
+    sig_f = np.ones(Nsource) * 0.01
+    sig_g = np.ones(Nsource) * 0.02
+    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
+    if use_noise:
+        sources.apply_noise()
+    sources.apply_NFW_lensing(halo)
+    sources.filter_sources()
 
-    Ntrials = 100
-    found_masses = np.zeros(Ntrials)
+    for i in range(len(mass_range)):
+        for j in range(len(concentration_range)):
+            lens = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([concentration_range[j]]), np.array([10**mass_range[i]]), 0.194, np.array([0]))
+            chi2_val = pipeline.calculate_chi_squared(sources, lens, [True, True, True], lensing='NFW', use_weights=False)
+            chi2[i, j] = chi2_val
 
-    tasks = [(halo, Nsource, xmax) for _ in range(Ntrials)]
-    with Pool() as pool:
-        results = pool.map(single_realization, tasks)
+    min_loc = np.unravel_index(np.argmin(chi2), chi2.shape)
 
-    # Now, check the results
-    for i in range(Ntrials):
-        lenses, chi2 = results[i]
-        # Check to see if any of the lenses are actual detections
-        # Define a detection as a lens that is within 5 arcseconds of the true halo
-        r = np.sqrt(lenses.x**2 + lenses.y**2)
-        detected = r < 5
-        # Only consider the mass of the detected lenses
-        detected_masses = lenses.mass[detected]
-        found_masses[i] = np.sum(detected_masses)
-    
-    # Save the mass array
-    np.save('Data/NFW_tests/final_opt/detected_masses.npy', found_masses)
-    # Now plot the results
-    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    fancy_hist(found_masses, ax=ax, bins='freedman', color='black', histtype='step', density=True)
-    ax.axvline(1e14, color='red', linestyle='--', label='True Mass')
-    ax.set_xscale('log')
-    ax.set_title('Detected Masses')
-    ax.set_xlabel('Mass')
-    ax.set_ylabel('Probability Density')
-    ax.legend()
-    plt.tight_layout()
-    plt.savefig('Images/NFW_tests/final_opt/detected_masses.png')
+    fig, ax = plt.subplots(1, 3, figsize=(10, 10))
+    ax[0].imshow(np.log(chi2), extent=[np.min(concentration_range), np.max(concentration_range), np.min(mass_range), np.max(mass_range)], aspect='equal')
+    ax[0].scatter(halo.concentration, np.log10(halo.mass), color='red', label='True Lens')
+    ax[0].scatter(concentration_range[min_loc[1]], mass_range[min_loc[0]], color='blue', label='Minimum Chi2')
+    ax[0].set_xlabel('Concentration')
+    ax[0].set_ylabel('Mass')
+    ax[0].set_title('Chi2 Space')
+
+    # Get a cross section of chi2 along the mass and concentration axes
+    true_mass_index = np.argmin(np.abs(mass_range - np.log10(halo.mass)))
+    true_concentration_index = np.argmin(np.abs(concentration_range - halo.concentration))
+    ax[1].plot(concentration_range, np.log(chi2[true_mass_index, :]))
+    ax[1].axvline(halo.concentration, color='red', linestyle='--', label='True Concentration')
+    ax[1].set_xlabel('Concentration')
+    ax[1].set_ylabel('log(Chi2)')
+    ax[1].set_title('Chi2 along Mass')
+    ax[1].legend()
+
+    ax[2].plot(mass_range, np.log(chi2[:, true_concentration_index]))
+    ax[2].axvline(np.log10(halo.mass), color='red', linestyle='--', label='True Mass')
+    ax[2].set_xlabel('Mass')
+    ax[2].set_ylabel('log(Chi2)')
+    ax[2].set_title('Chi2 along Concentration')
+    ax[2].legend()
+
+    plt.savefig('Images/chi2_space.png')
     plt.show()
+
 
     raise ValueError('This script is not meant to be run directly. Please run the main.py script instead.')
     N = 1000

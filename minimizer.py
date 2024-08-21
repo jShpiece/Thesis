@@ -22,6 +22,8 @@ def numerical_gradient(func, x, params, epsilon=1e-8):
         x_minus = np.copy(x)
         x_plus[i] += epsilon
         x_minus[i] -= epsilon
+        # print(x_plus, x_minus)
+        # print(func(x_plus, params), func(x_minus, params))
         grad[i] = (func(x_plus, params) - func(x_minus, params)) / (2 * epsilon)
     return grad
 
@@ -45,7 +47,8 @@ def gradient_descent(func, initial_x, learning_rate, num_iterations, params):
     x = np.asarray(x, dtype=float)
     path = []
     for i in range(num_iterations):
-        grad = numerical_gradient(func, x, params, epsilon=1e-8)
+        grad = numerical_gradient(func, x, params)
+        grad = smooth_gradient(grad, 0.9)
         grad = clip_gradients(grad, 1) # Clip gradients to avoid large steps
         prev_x = x
         x = x - learning_rate * grad
