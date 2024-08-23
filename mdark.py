@@ -641,19 +641,41 @@ def random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name):
     xlens = []
     ylens = []
     log_mass = []
+    log_detection_mass = []
     chi2 = []
     
     for result in results:
+        x_vals = []
+        y_vals = []
+        mass_vals = []
         candidate_lenses, candidate_chi2 = result
         for x in candidate_lenses.x:
-            xlens.append(x)
+            x_vals.append(x)
         for y in candidate_lenses.y:
-            ylens.append(y)
+            y_vals.append(y)
         for mass in candidate_lenses.mass:
             mass = np.abs(mass)
-            log_mass.append(np.log10(mass))
+            mass_vals.append(mass)
+        
+        x_vals, y_vals, mass_vals = np.array(x_vals), np.array(y_vals), np.array(mass_vals)
 
         chi2.append(candidate_chi2)
+        detection_mass = 10**-10 # Small value to avoid log(0)
+
+        for i in range(len(x_vals)):
+            for j in range(len(xl)):
+                if np.sqrt((x_vals[i] - xl[j])**2 + (y_vals[i] - yl[j])**2) < 5:
+                    detection_mass += mass_vals[i]
+        
+        xlens.append(x_vals)
+        ylens.append(y_vals)
+        log_mass.append(np.log10(mass_vals))
+        log_detection_mass.append(np.log10(detection_mass))
+
+    # Concatenate the results
+    xlens = np.concatenate(xlens)
+    ylens = np.concatenate(ylens)
+    log_mass = np.concatenate(log_mass)
 
     # Save the results to a file
     # Keep in mind, arrays are not the same length. 
@@ -662,9 +684,11 @@ def random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name):
     xlens = np.pad(xlens, (0, max_length - len(xlens)), 'constant', constant_values=np.nan)
     ylens = np.pad(ylens, (0, max_length - len(ylens)), 'constant', constant_values=np.nan)
     log_mass = np.pad(log_mass, (0, max_length - len(log_mass)), 'constant', constant_values=np.nan)
+    log_detection_mass = np.pad(log_detection_mass, (0, max_length - len(log_detection_mass)), 'constant', constant_values=np.nan)
+
     chi2 = np.pad(chi2, (0, max_length - len(chi2)), 'constant', constant_values=np.nan)
 
-    results = pd.DataFrame({'x': xlens, 'y': ylens, 'log_mass': log_mass, 'chi2': chi2})
+    results = pd.DataFrame({'x': xlens, 'y': ylens, 'log_mass': log_mass, 'log_detection_mass': log_detection_mass, 'chi2': chi2})
     results.to_csv(file_name, index=False)
     
     return
@@ -676,12 +700,14 @@ def interpret_rr_results(results_file, xmax, Nlens, mass):
     xlens = results['x'].values
     ylens = results['y'].values
     log_mass = results['log_mass'].values
+    log_detection_mass = results['log_detection_mass'].values
     chi2 = results['chi2'].values
     
     # Check for NANs, if so, remove them
     xlens = xlens[~np.isnan(xlens)]
     ylens = ylens[~np.isnan(ylens)]
     log_mass = log_mass[~np.isnan(log_mass)]
+    log_detection_mass = log_detection_mass[~np.isnan(log_detection_mass)]
 
     # Reproduce the true lenses
     xl = np.zeros(Nlens)
@@ -702,18 +728,16 @@ def interpret_rr_results(results_file, xmax, Nlens, mass):
     else:
         size = 'other'
 
-    # Now plot the results - 4 histograms
-
-    fig, ax = plt.subplots(1, 3, figsize=(15, 10))
+    fig, ax = plt.subplots(2, 2, figsize=(15, 10))
     fig.suptitle('Random Realization Test: Nlens = {}, Mass = {:.2e}'.format(Nlens, mass))
     ax = ax.flatten()
-    data = [xlens, ylens, log_mass]
-    xlabels = ['x', 'y', 'log_mass']
-    titles = ['Lens x Position', 'Lens y Position', 'Lens Mass',]
-    true_vals = [xl, yl, np.log10(ml)]
-    xrange = [(-xmax, xmax), (-xmax, xmax), (10, 16)]
+    data = [xlens, ylens, log_mass, log_detection_mass]
+    xlabels = ['x', 'y', 'log_mass', 'log_detection_mass']
+    titles = ['Lens x Position', 'Lens y Position', 'Lens Mass','Detection Mass']
+    true_vals = [xl, yl, np.log10(ml), np.log10(ml)]
+    xrange = [(-xmax, xmax), (-xmax, xmax), (10, 16), (10, 16)]
 
-    for i in range(3):
+    for i in range(4):
         fancy_hist(data[i], ax=ax[i], bins='freedman', color='black', histtype='step', density=True)
         if i < 3:
             if len(true_vals[i]) > 1:
@@ -729,7 +753,7 @@ def interpret_rr_results(results_file, xmax, Nlens, mass):
         ax[i].set_title(titles[i])
         
     fig.tight_layout()
-    plt.savefig('Images/NFW_tests/random_realization/Nlens_{}_{}.png'.format(Nlens, size))
+    plt.savefig('Images/NFW_tests/random_realization/detection_Nlens_{}_{}.png'.format(Nlens, size))
 
 
 # --------------------------------------------
@@ -1126,7 +1150,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
                 ideal_mass += lenses.mass[i]
                 break
     
-    fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$ \n Ideal Mass: {:.2e} $M_\odot$'.format(halo_mass, np.sum(lenses.mass), ideal_mass))
+    fig.suptitle('True Mass: {:.2e} $M_\odot$ \n Recovered Mass: {:.2e} $M_\odot$ \n Detection Mass: {:.2e} $M_\odot$'.format(np.sum(halos.mass), np.sum(lenses.mass), ideal_mass))
     if halo_mass == 1e14:
         size = 'large'
     elif halo_mass == 1e13:
@@ -1148,9 +1172,9 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
 # --------------------------------------------
 
 def run_simple_tests():
-    masses = [1e14, 1e13, 1e12]
+    masses = [1e13, 1e12]
     lens_numbers = [1,2]
-    noise_use = [True, False]
+    noise_use = [True]
 
     for mass in masses:
         for Nlens in lens_numbers:
@@ -1168,8 +1192,8 @@ def run_rr_tests():
         for mass in masses:           
             start = time.time()
             size = 'large' if mass == 1e14 else 'medium' if mass == 1e13 else 'small' if mass == 1e12 else 'other'
-            file_name = 'Images/NFW_tests/random_realization/Nlens_{}_Nsource_{}_size_{}.txt'.format(Nlens, Nsource, size)
-            # random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name)
+            file_name = 'Images/NFW_tests/random_realization/detection_Nlens_{}_Nsource_{}_size_{}.txt'.format(Nlens, Nsource, size)
+            random_realization_test(Ntrials, Nlens, Nsource, mass, xmax, file_name)
             interpret_rr_results(file_name, xmax, Nlens, mass)
             stop = time.time()
             print('Time taken for {} Nlens = {}: {}'.format(size, Nlens, stop - start))
@@ -1202,8 +1226,9 @@ def process_md_set():
 
 
 if __name__ == '__main__':
-    run_simple_tests()
+    run_rr_tests()
     raise ValueError('This script is not meant to be run directly. Please run the main.py script instead.')
+    '''
     masses = [1e14, 1e13, 1e12]
     offset = [0, 0.5, 2]
     noise = [True, False]
@@ -1214,6 +1239,7 @@ if __name__ == '__main__':
     
 
     raise ValueError('This script is not meant to be run directly. Please run the main.py script instead.')
+    '''
     mass_range = np.logspace(13, 16, 100)
     mass_range = np.log10(mass_range)
     concentration_range = np.linspace(0.1, 10, 100)
@@ -1225,7 +1251,7 @@ if __name__ == '__main__':
     # Create a set of sources (in grid form)
     Nsource = 100
     xmax = 50
-    use_noise = False
+    use_noise = True
     n = int(np.sqrt(Nsource))
     xs = np.linspace(-xmax, xmax, n)
     ys = np.linspace(-xmax, xmax, n)
@@ -1257,6 +1283,7 @@ if __name__ == '__main__':
     ax[0].set_xlabel('Concentration')
     ax[0].set_ylabel('Mass')
     ax[0].set_title('Chi2 Space')
+    ax[0].legend()
 
     # Get a cross section of chi2 along the mass and concentration axes
     true_mass_index = np.argmin(np.abs(mass_range - np.log10(halo.mass)))
