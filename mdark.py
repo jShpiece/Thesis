@@ -77,7 +77,6 @@ def _plot_results(halo, true_halo, title, reducedchi2, xmax, ax=None, legend=Tru
             ax.legend()
         return
 
-
     # Extract positions and masses for both sets
     x_true, y_true, mass_true = [true_halo.x, true_halo.y, true_halo.mass]
     x_recon, y_recon, mass_recon = [halo.x, halo.y, halo.mass]
@@ -139,20 +138,10 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     mass_f_g = np.nan_to_num(mass_f_g)
     mass_gamma_g = np.nan_to_num(mass_gamma_g)
 
-
     masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
-    # True mass is in units of M_sun / h - convert others to the same units
     masses = [mass / h for mass in masses]
     signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
 
-    '''
-    # Remove outliers
-    outliers = (mass > 1e15) | (mass < 1e12)
-    mass = mass[~outliers]
-    true_mass = true_mass[~outliers]
-    '''
-
-    
     # Plot the results for each signal combination
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
     ax = ax.flatten()
@@ -169,9 +158,6 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
         # Add a line of best fit
         x = np.linspace(1e13, 1e15, 100)
         try:
-            # Remove any mass values that are zero
-            # true_mass = true_mass[masses[i] > 0]
-            # masses[i] = masses[i][masses[i] > 0]
             m, b = np.polyfit(np.log10(true_mass_temp), np.log10(masses[i]), 1)
             ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
         except:
@@ -254,7 +240,6 @@ def choose_ID(z, mass_range, substructure_range):
 
         if np.any(combined_criteria):
             valid_ids = IDs[combined_criteria]
-            # Add these to the list of rows
             rows.append(chunk[chunk['MainHaloID'].isin(valid_ids)])
     # Choose a random cluster from the list of valid rows
     if len(rows) > 0:
@@ -297,7 +282,6 @@ def run_single_test(args):
 
         mass = np.sum(candidate_lenses.mass)
         candidate_num = len(candidate_lenses.x)
-
         chi_scores.append(candidate_chi2)
         masses.append(mass)
         candidate_number.append(candidate_num)
@@ -376,11 +360,7 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
 
 def single_realization(args):
     lenses, Nsource, xmax = args
-
-    # Generate a set of background galaxies
     sources = utils.createSources(lenses, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
-
-    # Now run the pipeline
     candidate_lenses, candidate_chi2 = pipeline.fit_lensing_field(sources, xmax, False, [True, True, True], lens_type='NFW')
     return candidate_lenses, candidate_chi2
 
@@ -471,7 +451,6 @@ def interpret_rr_results(results_file, xmax, Nlens, mass):
     ylens = results['y'].values
     log_mass = results['log_mass'].values
     log_detection_mass = results['log_detection_mass'].values
-    chi2 = results['chi2'].values
     
     # Check for NANs, if so, remove them
     xlens = xlens[~np.isnan(xlens)]
@@ -572,52 +551,6 @@ def build_lensing_field(halos, z, Nsource = None):
     sources = utils.createSources(halos, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
 
     return halos, sources, xmax
-
-
-def build_test_set(Nclusters, z, file_name):
-    # Select a number of clusters, spaced evenly in log space across the mass range
-    # This set will be used to test the pipeline
-    # For each cluster, we will save the following information
-    # ID, Mass, Halo Number, Mass Fraction, Size
-
-    # Establish criteria for cluster selection
-    M_min = 1e13
-    M_max = 1e15
-    substructure_min = 0
-    substructure_max = 0.1
-    mass_bins = np.logspace(np.log10(M_min), np.log10(M_max), Nclusters+1)
-
-    rows = []
-    for i in range(Nclusters):
-        mass_range = [mass_bins[i], mass_bins[i+1]]
-        substructure_range = [substructure_min, substructure_max]
-
-        row = choose_ID(z, mass_range, substructure_range)
-        if row is not None:
-            print('Found a cluster in mass bin {}'.format(i))
-            rows.append(row)
-        else:
-            print('No cluster found in mass bin {}'.format(i))
-    
-    # Let's make sure that the cluster properties are correct
-    IDs = [row['MainHaloID'].values[i] for row in rows for i in range(len(row))]
-    halos = find_halos(IDs, z)
-    mass = []
-    halo_number = []
-    mass_fraction = []
-
-    for i in range(len(rows)):
-        halo = halos[IDs[i]]
-        mass.append(halo.mass.sum())
-        halo_number.append(len(halo.mass))
-        mass_fraction.append(1 - np.max(halo.mass) / halo.mass.sum())
-
-    # Save the rows to a file
-    with open(file_name, 'w') as f:
-        f.write('ID, Mass, Halo Number, Mass Fraction, Size\n')
-        for i in range(len(rows)):
-            f.write('{}, {}, {}, {} \n'.format(IDs[i], mass[i], halo_number[i], mass_fraction[i]))
-    return 
 
 # --------------------------------------------
 # Testing Functions
@@ -781,9 +714,9 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
 
 
 def run_simple_tests():
-    masses = [1e13, 1e12]
+    masses = [1e14, 1e13, 1e12]
     lens_numbers = [1,2]
-    noise_use = [True]
+    noise_use = [True, False]
 
     for mass in masses:
         for Nlens in lens_numbers:
@@ -808,14 +741,13 @@ def run_rr_tests():
             print('Time taken for {} Nlens = {}: {}'.format(size, Nlens, stop - start))
 
 
-def process_md_set():
+def process_md_set(test_number):
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
     z_chosen = zs[0]
     start = time.time()
     Ntrials = 1 # Number of trials to run for each cluster in the test set
 
-    test_number = 15
     test_dir = 'Data/MDARK_Test/Test{}'.format(test_number)
     halos_file = 'MDARK/Halos_{}.MDARK'.format(z_chosen)
     ID_file = test_dir + '/ID_file_{}.csv'.format(test_number)
@@ -831,8 +763,7 @@ def process_md_set():
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     build_mass_correlation_plot(ID_file, result_file, plot_name)
-    # build_chi2_plot(result_file, ID_file, test_number) # No longer of interest
 
 
 if __name__ == '__main__':
-    pass
+    run_simple_tests()

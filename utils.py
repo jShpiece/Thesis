@@ -61,38 +61,20 @@ def create_gaussian_kernel(stamp_size, sigma):
 # Chi-Squared Utility Functions
 # ------------------------
 
-def compute_source_weights(lenses, sources, r_frac = 0.4):
+def compute_source_weights(lenses, sources, r_char = 10):
     # Calculate gaussian weights for each lens-source pair based on the distance between them
-
-    xl, yl = lenses.x, lenses.y
-    xs, ys = sources.x, sources.y
-
-    r = np.sqrt((xl[:, None] - xs)**2 + (yl[:, None] - ys)**2)
-    
-    # Sort distances
-    sorted_distances = np.sort(r)
-    
-    # Find the index at which 1/4 of the sources are within this distance
-    index = int(len(sorted_distances) * (r_frac))
-    
-    # Set r0 as the distance at the calculated index
-    r0 = sorted_distances[index]
-    
-    weights = np.exp(- (r / (r0))**2)
+    # Relative to some characteristic length scale - set to 10 by default
+    weights = np.zeros((len(lenses.x), len(sources.x)))
+    for i in range(len(lenses.x)):
+        for j in range(len(sources.x)):
+            r = np.sqrt((lenses.x[i] - sources.x[j])**2 + (lenses.y[i] - sources.y[j])**2)
+            weights[i, j] = np.exp(-r / r_char)
     
     # Normalize the weights
-    if np.sum(weights, axis=1).any() == 0:
-        weights = np.ones_like(weights)
-        print('Weights sum to zero')
-    else:
-        weights /= np.sum(weights, axis=1)[:, None]  # Normalize the weights to sum to N_sources
-        assert np.allclose(np.sum(weights, axis=1), 1), "Weights must sum to 1 - they sum to {}".format(np.sum(weights, axis=1))
+    for i in range(len(lenses.x)):
+        weights[i, :] /= np.sum(weights[i, :])
     
-    # print('Weights:', weights)
-    assert weights.shape == (len(xl), len(xs)), "Weights must have shape (len(xl), len(xs))."
-    
-    # weights = np.ones_like(weights)
-    return weights
+    return weights[0] # Right now, I'm going to assume we generate weights for a single lens at a time - at the moment, that is consistent with the pipeline
 
 
 def find_combinations(values, k):

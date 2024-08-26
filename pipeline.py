@@ -554,7 +554,8 @@ class Halo:
         self.calculate_concentration()
 
         return path
-    
+
+
     def two_param_minimization(self, sources, use_flags):
         for i in range(len(self.x)):
             guess = [np.log10(self.mass[i]), self.concentration[i]]
@@ -621,8 +622,7 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS', use_weights = F
     }
 
     # Sum the chi-squared values, considering only the enabled lensing effects
-    total_chi_squared = np.zeros_like(sources.x)
-    total_chi_squared += use_shear * chi_squared_components['shear'] + use_flexion * chi_squared_components['flexion'] + use_g_flexion * chi_squared_components['g_flexion']    
+    total_chi_squared = use_shear * chi_squared_components['shear'] + use_flexion * chi_squared_components['flexion'] + use_g_flexion * chi_squared_components['g_flexion']    
 
     if use_weights:
         weights = utils.compute_source_weights(lenses, sources)
@@ -640,11 +640,12 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS', use_weights = F
     # Calculate and add penalties for the lenses
     if lensing == 'SIS':
         penalty = sum(eR_penalty_function(eR) for eR in lenses.te)
+        total_chi_squared += penalty
     elif lensing == 'NFW':
-        penalty = 0
+        pass
 
     # Return the total chi-squared including penalties
-    return total_chi_squared + penalty
+    return total_chi_squared 
 
 
 def chi2wrapper(guess, params):
@@ -680,7 +681,7 @@ def chi2wrapper(guess, params):
         if constraint_type == 'unconstrained':
             lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
             lenses.calculate_concentration()
-            return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=True)
+            return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=False)
         elif constraint_type == 'constrained':
             # Check for overflow in the mass
             if np.any(guess > 16):
