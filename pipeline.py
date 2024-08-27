@@ -389,12 +389,12 @@ class Halo:
         chi2_values = np.zeros(len(self.x))
         if len(self.x) == 1:
             # Only one lens - calculate the chi2 value for this lens
-            chi2_values[0] = calculate_chi_squared(sources, self, use_flags, lensing='NFW', use_weights=False)
+            chi2_values[0] = calculate_chi_squared(sources, self, use_flags, lensing='NFW', use_weights=True)
         else:
             for i in range(len(self.x)):
                 # Only pass in the i-th lens
                 one_halo = Halo(self.x[i], self.y[i], self.z[i], self.concentration[i], self.mass[i], self.redshift, [0])
-                chi2_values[i] = calculate_chi_squared(sources, one_halo, use_flags, lensing='NFW', use_weights=False)
+                chi2_values[i] = calculate_chi_squared(sources, one_halo, use_flags, lensing='NFW', use_weights=True)
         self.chi2 = chi2_values
         if dof == 0:
             print('Degrees of freedom is zero')
@@ -538,22 +538,15 @@ class Halo:
 
 
     def full_minimization(self, sources, use_flags):
-        '''
-        guess = np.log10(self.mass)
-        params = ['NFW','constrained',self.x, self.y, self.redshift, self.concentration, sources, use_flags]
-        result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
-        self.mass = 10**result
-        self.calculate_concentration()
-        return path
-        '''
         for i in range(len(self.x)):
             guess = [np.log10(self.mass[i])]
             params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
-            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
-            self.mass[i] = 10**result
+            # result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
+            result = opt.minimize(chi2wrapper, guess, args=params, method='Powell', tol=1e-8, options={'maxiter': 1000})
+            self.mass[i] = 10**result.x[0]
         self.calculate_concentration()
 
-        return path
+        # return path
 
 
     def two_param_minimization(self, sources, use_flags):
@@ -562,7 +555,6 @@ class Halo:
             params = ['NFW','dual_constraint',self.x[i], self.y[i], self.redshift, sources, use_flags]
             result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
             self.mass[i], self.concentration[i] = 10**result[0], result[1]
-        return path
 
 # ------------------------------
 # Chi^2 functions
@@ -681,18 +673,18 @@ def chi2wrapper(guess, params):
         if constraint_type == 'unconstrained':
             lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
             lenses.calculate_concentration()
-            return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=False)
+            return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=True)
         elif constraint_type == 'constrained':
             # Check for overflow in the mass
             if np.any(guess > 16):
                 return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
-            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=False)
+            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=True)
         elif constraint_type == 'dual_constraint':
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), guess[1], 10**guess[0], params[2], np.empty_like(params[0]))
             # Don't update the concentration here - we are optimizing both mass and concentration
-            return calculate_chi_squared(params[3], lenses, params[4], lensing='NFW', use_weights=False) 
+            return calculate_chi_squared(params[3], lenses, params[4], lensing='NFW', use_weights=True) 
     else:
         raise ValueError("Invalid lensing model: {}".format(model_type))
 
