@@ -217,10 +217,17 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     flexion_s = kappa_s * Dl / rs
 
     # Compute the distances between each source and each halo
+    dx = sources.x - halos.x[:, np.newaxis]
+    dy = sources.y - halos.y[:, np.newaxis]
+    r = np.sqrt(dx**2 + dy**2)
+    r = np.where(r == 0, 0.01, r) # Avoid division by zero
+
+    x = r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
+
     # x is the distance from the halo in units of the NFW scale radius
-    x = np.sqrt((sources.x - halos.x[:, np.newaxis])**2 + (sources.y - halos.y[:, np.newaxis])**2) / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
+    # x = np.sqrt((sources.x - halos.x[:, np.newaxis])**2 + (sources.y - halos.y[:, np.newaxis])**2) / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
     # If x is less than 0.01, set it to 0.01 - the nfw profile is not well defined at x = 0
-    x = np.where(x < 0.01, 0.01, x)
+    # x = np.where(x < 0.01, 0.01, x)
 
     # Define the radial terms that go into lensing calculations - these are purely functions of x
     def radial_term_1(x):
@@ -275,10 +282,10 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     term_4 = radial_term_4(x)
 
     # Begin with the distances and angles between the source and the halo
-    dx = sources.x - halos.x[:, np.newaxis]
-    dy = sources.y - halos.y[:, np.newaxis]
-    r = np.sqrt(dx**2 + dy**2)
-    r = np.where(r == 0, 0.01, r) # Avoid division by zero
+    # dx = sources.x - halos.x[:, np.newaxis]
+    # dy = sources.y - halos.y[:, np.newaxis]
+    # r = np.sqrt(dx**2 + dy**2)
+    # r = np.where(r == 0, 0.01, r) # Avoid division by zero
     cos_phi = dx / r # Cosine of the angle between the source and the halo
     sin_phi = dy / r # Sine of the angle between the source and the halo
     cos2phi = cos_phi**2 - sin_phi**2 # Cosine of 2*phi
