@@ -639,18 +639,6 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
         Nsource = len(xs)
     
 
-    '''
-    indices = []
-    for i in range(Nsource):
-        for j in range(Nlens):
-            if np.sqrt((xs[i] - x[j])**2 + (ys[i] - y[j])**2) < 10:
-                indices.append(i)
-                break
-    xs = xs[indices]
-    ys = ys[indices]
-    Nsource = len(xs)
-    '''
-
     sig_s = np.ones(Nsource) * 0.1
     sig_f = np.ones(Nsource) * 0.01
     sig_g = np.ones(Nsource) * 0.02
@@ -696,27 +684,6 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
 
-    # At this point, we should have a good idea of where the lenses are
-    # From this, determine the sources that are giving us information - ie, those that are close to the lenses
-    # Remove sources that are too far from the lenses
-    indices = []
-    for i in range(len(sources.x)):
-        for j in range(len(lenses.x)):
-            if np.sqrt((sources.x[i] - lenses.x[j])**2 + (sources.y[i] - lenses.y[j])**2) < 10:
-                indices.append(i)
-                break
-    sources.x = sources.x[indices]
-    sources.y = sources.y[indices]
-    sources.e1 = sources.e1[indices]
-    sources.e2 = sources.e2[indices]
-    sources.f1 = sources.f1[indices]
-    sources.f2 = sources.f2[indices]
-    sources.g1 = sources.g1[indices]
-    sources.g2 = sources.g2[indices]
-    sources.sigs = sources.sigs[indices]
-    sources.sigf = sources.sigf[indices]
-    sources.sigg = sources.sigg[indices]
-
     # Step 6: Final minimization
     # lenses.full_minimization(sources, use_flags)
     lenses.two_param_minimization(sources, use_flags)
@@ -740,7 +707,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
         size = 'small'
     else:
         size = 'other'
-    plot_name = 'Images/NFW_tests/standard_tests/filtered_{}_Nlens_{}_{}.png'.format(size,Nlens,noisy)
+    plot_name = 'Images/NFW_tests/standard_tests/{}_Nlens_{}_{}.png'.format(size,Nlens,noisy)
     plt.savefig(plot_name)
     stop = time.time()
 

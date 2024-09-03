@@ -7,60 +7,16 @@ from astropy.cosmology import Planck15 as cosmo
 
 M_solar = 1.989e30 # Solar mass in kg
 
-
 def angular_diameter_distances(z1, z2):
     dl = cosmo.angular_diameter_distance(z1).to(u.m).value
     ds = cosmo.angular_diameter_distance(z2).to(u.m).value
     dls = cosmo.angular_diameter_distance_z1z2(z1, z2).to(u.m).value
     return dl, ds, dls
 
-
 def critical_surface_density(z1, z2):
     dl, ds, dls = angular_diameter_distances(z1, z2)
     kappa_c = (c.value**2 / (4 * np.pi * G.value)) * (ds / (dl * dls))
     return kappa_c
-
-
-def calc_signals(halos, sources, z_source):
-
-    # Begin with the distances and angles between the source and the halo
-    dx = sources.x - halos.x[:, np.newaxis]
-    dy = sources.y - halos.y[:, np.newaxis]
-    r = np.sqrt(dx**2 + dy**2)
-    r = np.where(r == 0, 0.01, r) # Avoid division by zero
-    cos_phi = dx / r # Cosine of the angle between the source and the halo
-    sin_phi = dy / r # Sine of the angle between the source and the halo
-    cos2phi = cos_phi**2 - sin_phi**2 # Cosine of 2*phi
-    sin2phi = 2 * cos_phi * sin_phi # Sine of 2*phi
-    cos3phi = cos2phi * cos_phi - sin2phi * sin_phi # Cosine of 3*phi
-    sin3phi = sin2phi * cos_phi + cos2phi * sin_phi # Sine of 3*phi
-
-    # Compute lensing magnitudes (in arcseconds)
-    shear_mag = - kappa_s[:, np.newaxis] * term_2
-    flex_mag = (-2 * flexion_s[:, np.newaxis]) * ((2 * x * term_1 / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Using Wright & Brainerd notation
-    g_flex_mag = (2 * flexion_s[:, np.newaxis]) * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2) / 206265
-
-    # Sum over all halos, resulting array should have shape (n_sources,)
-    shear_1 = np.sum(shear_mag * cos2phi, axis=0)
-    shear_2 = np.sum(shear_mag * sin2phi, axis=0)
-    flexion_1 = np.sum(flex_mag * cos_phi, axis=0)
-    flexion_2 = np.sum(flex_mag * sin_phi, axis=0)
-    g_flexion_1 = np.sum(g_flex_mag * cos3phi, axis=0)
-    g_flexion_2 = np.sum(g_flex_mag * sin3phi, axis=0)
-
-    return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
-
-
-def calculate_concentration(self):
-    # Compute the concentration parameter for each halo
-    # This is done with the Duffy et al. (2008) relation
-    # This relation is valid for 0 < z < 2 - this covers the range of redshifts we are interested in
-    # Note - numpy doesn't like negative powers on lists, even if the answer isn't complex
-    # Get around this by taking taking the absolute value of arrays (then multiplying by -1 if necessary) (actually don't do this - mass and concentration should be positive)
-    # It also breaks down if the mass is 0 (we'll be dividing by the mass)
-    self.mass += 1e-10 # Add a small value to the mass to avoid division by zero
-    self.concentration = 5.71 * (np.abs(self.mass) / (2 * 10**12))**(-0.084) * (1 + self.redshift)**(-0.47) 
-
 
 def calc_R200(mass, redshift):
     # Compute the R200 radius for each halo
@@ -70,22 +26,106 @@ def calc_R200(mass, redshift):
     R200_arcsec = (R200 / cosmo.angular_diameter_distance(redshift).to(u.meter).value) * 206265
     return R200, R200_arcsec
 
-
 def calc_delta_c(concentration):
     # Compute the characteristic density contrast for each halo
     delta_c = (200/3) * (concentration**3) / (np.log(1 + concentration) - concentration / (1 + concentration))
     return delta_c
 
+def compute_flexion(gamma1, gamma2, dx):
+    """
+    Computes the second flexion (G) from the shear components (gamma1, gamma2).
+    
+    Parameters:
+    - gamma1: 2D array representing the first component of shear (gamma1)
+    - gamma2: 2D array representing the second component of shear (gamma2)
+    - dx: Scalar representing the grid spacing
+    
+    Returns:
+    - G1: 2D array representing the first component of second flexion (G1)
+    - G2: 2D array representing the second component of second flexion (G2)
+    """
+    # Compute the numerical derivatives
+    dgamma1_dx = np.gradient(gamma1, dx, axis=1)
+    dgamma1_dy = np.gradient(gamma1, dx, axis=0)
+    dgamma2_dx = np.gradient(gamma2, dx, axis=1)
+    dgamma2_dy = np.gradient(gamma2, dx, axis=0)
+    
+    # Compute components of the flexion G = (G1, G2)
+    G1 = dgamma1_dx - dgamma2_dy
+    G2 = dgamma2_dx + dgamma1_dy
+    
+    return G1, G2
 
-if __name__ == '__main__':
+def radial_term_1(x):
+    # This is called f(x) in theory
+    # Note that the two statements are almost identical - switching arctanh and arctan, and 1-x and x-1
+    sol = np.zeros_like(x)
+    mask1 = x < 1
+    mask2 = x >= 1
+
+    sol[mask1] = 1 - (2 / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
+    sol[mask2] = 1 - (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
+
+    return sol
+
+def radial_term_2(x):
+    # This is called g(x) in theory
+    sol = np.zeros_like(x)
+    mask1 = x < 1
+    mask2 = x > 1
+    mask3 = x == 1
+
+    k = (1 - x) / (1 + x)
+
+    sol[mask1] = 8 * np.arctanh(np.sqrt(k[mask1])) / (x[mask1]**2 * np.sqrt(1 - x[mask1]**2)) \
+                + 4 * np.log(x[mask1] / 2) / x[mask1]**2 \
+                - 2 / (x[mask1]**2 - 1) \
+                + 4 * np.arctanh(np.sqrt(k[mask1])) / ((x[mask1]**2 - 1) * np.sqrt(1 - x[mask1]**2))
+    
+    sol[mask2] = 8 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / (x[mask2]**2 * np.sqrt(x[mask2]**2 - 1)) \
+                + 4 * np.log(x[mask2] / 2) / x[mask2]**2 \
+                - 2 / (x[mask2]**2 - 1) \
+                + 4 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / ((x[mask2]**2 - 1)**(3/2))
+    
+    sol[mask3] = 10 / 3 + 4 * np.log(1/2)
+    
+    return sol
+
+def radial_term_3(x):
+    # Compute the radial term - this is called h(x) in theory
+    sol = np.zeros_like(x)
+    mask1 = x < 1
+    mask2 = x >= 1
+
+    sol[mask1] = (1 / (1 - x[mask1]**2)) * (1 / x[mask1] - ((2*x[mask1]) / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))))
+    sol[mask2] = (1 / (x[mask2]**2 - 1)) * (((2 * x[mask2]) / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2]))) - 1 / x[mask2])
+
+    return sol
+
+def radial_term_4(x):
+    # Compute the radial term - this is called I(x) in theory
+    sol = np.zeros_like(x)
+    mask1 = x < 1
+    mask2 = x >= 1
+    leading_term = 8 / x**3 - 20 / x + 15 * x
+
+    # Introduce a constant
+    k = (1 - x) / (1 + x)
+
+    sol[mask1] = (2 / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt(k[mask1]))
+    sol[mask2] = (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt(-k[mask2]))
+    sol *= leading_term
+
+    return sol
+
+
+def one_dimensional_calc():
+    # Do this in 1D
     z_halo = 0.35
     z_source = 0.8
     mass = 1e12
     concentration = 7.2
-
-    x_range = np.linspace(0.1, 10, 1000)
-    # Correct for small values of x
-    # x_range = np.where(np.abs(x_range) < 0.01, 0.01, x_range)
+    dx = np.linspace(-10, 10, 1000)
 
     # Define angular diameter distances
     Dl = angular_diameter_distances(z_halo, z_source)[0]
@@ -101,197 +141,246 @@ if __name__ == '__main__':
     # Each halo has a characteristic surface density kappa_s
     kappa_s = rho_s * rs / sigma_c
     flexion_s = kappa_s * Dl / rs
-
-    # Define the radial terms that go into lensing calculations - these are purely functions of x
-    x = (x_range / (r200_arcsec / concentration))
-
-    def radial_term_1(x):
-        # This is called f(x) in theory
-        # Note that the two statements are almost identical - switching arctanh and arctan, and 1-x and x-1
-        sol = np.zeros_like(x)
-        mask1 = x < 1
-        mask2 = x >= 1
-
-        sol[mask1] = 1 - (2 / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
-        sol[mask2] = 1 - (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
-
-        return sol
-    
-    def radial_term_2(x):
-        # This is called g(x) in theory
-        sol = np.zeros_like(x)
-        mask1 = x < 1
-        mask2 = x > 1
-        mask3 = x == 1
-
-        sol[mask1] = 8 * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))) / (x[mask1]**2 * np.sqrt(1 - x[mask1]**2)) \
-                    + 4 * np.log(x[mask1] / 2) / x[mask1]**2 \
-                    - 2 / (x[mask1]**2 - 1) \
-                    + 4 * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))) / ((x[mask1]**2 - 1) * np.sqrt(1 - x[mask1]**2))
-        
-        sol[mask2] = 8 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / (x[mask2]**2 * np.sqrt(x[mask2]**2 - 1)) \
-                    + 4 * np.log(x[mask2] / 2) / x[mask2]**2 \
-                    - 2 / (x[mask2]**2 - 1) \
-                    + 4 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / ((x[mask2]**2 - 1)**(3/2))
-        
-        sol[mask3] = 10 / 3 + 4 * np.log(1/2)
-        
-        return sol
-
-    def radial_term_3(x):
-        # Compute the radial term - this is called h(x) in theory
-        sol = np.zeros_like(x)
-        mask1 = x < 1
-        mask2 = x >= 1
-
-        sol[mask1] = (1 / (1 - x[mask1]**2)) * (1 / x[mask1] - ((2*x[mask1]) / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))))
-        sol[mask2] = (1 / (x[mask2]**2 - 1)) * (((2 * x[mask2]) / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2]))) - 1 / x[mask2])
-
-        return sol
-    
-    def radial_term_4(x):
-        # Compute the radial term - this is called I(x) in theory
-        sol = np.zeros_like(x)
-        mask1 = x < 1
-        mask2 = x >= 1
-        leading_term = 8 / x**3 - 20 / x + 15 * x
-
-        sol[mask1] = leading_term[mask1] * (2 / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
-        sol[mask2] = leading_term[mask2] * (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
-
-        return sol
+    x = np.abs(dx / (r200_arcsec / concentration))
 
     term_1 = radial_term_1(x)
     term_2 = radial_term_2(x)
     term_3 = radial_term_3(x)
     term_4 = radial_term_4(x)
 
-    # Calculate the lensing signals
-    kappa_mag = 2 * kappa_s * (term_1 / (x**2 - 1))
-    shear_mag = -kappa_s * term_2
-    flex_mag = (-2 * flexion_s) * ((2 * x * term_1 / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Using Wright & Brainerd notation
-    g_flex_mag = (2 * flexion_s) * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*(x**2)) + term_4) / (x**2 - 1)**2) / 206265
+    def calc_f_flex(flexion_s, x, term_1, term_3):
+        I_1 = 2 * flexion_s 
+        I_2 = 2 * x * term_1 / (x**2 - 1)**2
+        I_3 = term_3 / (x**2 - 1)
+        return I_1 * (I_2 - I_3) / 206265
 
-    '''
-    # Compare shear from nfw to sis
-    theta_e = 0.215
-    shear_sis = - theta_e / (2 * x_range)
-
-    plt.figure()
-    plt.plot(x_range, np.abs(shear_mag), label='NFW')
-    plt.plot(x_range, np.abs(shear_sis), label='SIS')
-    plt.yscale('log')
-    plt.xlabel('x')
-    plt.xlabel('x')
-    plt.ylabel('Shear')
-    plt.title('Shear from NFW and SIS')
-    plt.legend()
-    plt.show()
-
-    raise ValueError
-    '''
-
-    '''
-    # Plot the lensing signals
-    fig, ax = plt.subplots(1, 5, figsize=(20, 10))
-    ax[0].plot(x_range, np.abs(kappa_mag), label=r'$\kappa$')
-    ax[0].plot(x_range, np.abs(shear_mag), label=r'$\gamma$')
-    ax[0].plot(x_range, np.abs(flex_mag), label=r'$\mathcal{F}$-Flexion')
-    ax[0].plot(x_range, np.abs(g_flex_mag), label=r'$\mathcal{G}$-Flexion')
-    ax[0].set_yscale('log')
-    ax[0].set_xlabel('x')
-    ax[0].set_ylabel('Lensing signal')
-    ax[0].set_title('Lensing signals')
-    ax[0].legend()
-
-    # The first flexion should be the same as the first derivative of the convergence
-    first_deriv = np.gradient(kappa_mag, x_range)
-    ax[1].plot(x_range[1:], np.abs(first_deriv[1:]), label='First derivative of $\kappa$')
-    ax[1].plot(x_range[1:], np.abs(flex_mag[1:]), label='Flexion')
-    ax[1].set_yscale('log')
-    ax[1].set_xlabel('x')
-    ax[1].set_ylabel('Lensing signal')
-    ax[1].set_title('First derivative of $\kappa$ and flexion')
-    ax[1].legend()
-
-    ax[2].plot(x_range, first_deriv - flex_mag)
-    ax[2].set_xlabel('x')
-    ax[2].set_ylabel('Difference')    
-    ax[2].set_title('Residual')
-
-    first_deriv = np.gradient(shear_mag, x_range)
-    # Leave out the first value when plotting, to account for the fact that the first derivative is not defined at x = 0
-    ax[3].plot(x_range[1:], np.abs(first_deriv[1:]), label='First derivative of $\gamma$')
-    ax[3].plot(x_range[1:], np.abs(g_flex_mag[1:]), label='G-Flexion')
-    ax[3].set_yscale('log')
-    ax[3].set_xlabel('x')
-    ax[3].set_ylabel('Lensing signal')
-    ax[3].set_title('First derivative of $\gamma$ and G-Flexion')
-    ax[3].legend()
-
-    ax[4].plot(x_range[1:], first_deriv[1:] - g_flex_mag[1:])
-    ax[4].set_xlabel('x')
-    ax[4].set_ylabel('Difference')
-    ax[4].set_title('Residual')
-
-
-    plt.show()
-    '''
-
-    # Focus on the shear and the second flexion
+    def calc_g_flex(flexion_s, x, term_4):
+        I_1 = 2 * flexion_s
+        I_2 = (8 / x**3 ) * np.log(x / 2)
+        I_3 = ((3 / x) * (1 - 2 * x**2)) + term_4
+        I_4 = (x**2 - 1)**2
+        return (I_1 * (I_2 + (I_3 / I_4))) / 206265
     
-    fig, ax = plt.subplots(2, 3, figsize=(20, 10))
-    ax = ax.flatten()
+    # Compute the magnitudes of the lensing quantities
+    kappa = 2*kappa_s * term_1 / (x**2 - 1)
+    gamma = kappa_s * term_2 
+    flex_mag = calc_f_flex(flexion_s, x, term_1, term_3)
+    g_flex_mag = calc_g_flex(flexion_s, x, term_4)
 
-    ax[0].plot(x_range, np.abs(shear_mag), label=r'$\gamma$')
-    ax[0].plot(x_range, np.abs(g_flex_mag), label=r'$\mathcal{G}$')
-    ax[0].set_yscale('log')
-    ax[0].set_xlabel('x')
-    ax[0].set_ylabel('Lensing signal')
-    ax[0].set_title('Shear and G-Flexion')
+    # Plot the lensing quantities
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+    ax[0].plot(dx, kappa, label='Convergence')
+    ax[0].plot(dx, gamma, label='Shear')
+    ax[0].plot(dx, flex_mag, label='Flexion')
+    ax[0].plot(dx, g_flex_mag, label='G Flexion')
+    ax[0].axvline(x=r200_arcsec/concentration, color='r', linestyle='--')
+    ax[0].axvline(x=-r200_arcsec/concentration, color='r', linestyle='--')
+    ax[0].set_title('Lensing quantities')
     ax[0].legend()
+    ax[0].set_xlabel('dx (arcsec)')
+    ax[0].set_ylabel('Magnitude')
+    ax[0].set_yscale('log')
 
-    first_deriv = np.gradient(shear_mag, x_range)
-    ax[1].plot(x_range[1:], np.abs(first_deriv[1:]), label='First derivative of $\gamma$')
-    ax[1].plot(x_range[1:], np.abs(g_flex_mag[1:]), label='Flexion')
-    ax[1].set_yscale('log')
-    ax[1].set_xlabel('x')
-    ax[1].set_ylabel('Lensing signal')
-    ax[1].set_title('First derivative of $\gamma$ and flexion')
+    # Compare the gradient of the convergence to the first flexion
+    grad_kappa = np.gradient(kappa, dx)
+    # Get the magnitude
+    grad_kappa = np.abs(grad_kappa)
+    ax[1].plot(dx, grad_kappa, label='Gradient of convergence', linestyle='--')
+    ax[1].plot(dx, flex_mag, label='Flexion', linestyle='-.')
+    ax[1].set_title('Comparison of gradients')
     ax[1].legend()
+    ax[1].set_xlabel('dx (arcsec)')
+    ax[1].set_ylabel('Magnitude')
+    ax[1].set_yscale('log')
 
-    ax[2].plot(x_range[1:], first_deriv[1:] - g_flex_mag[1:])
-    ax[2].axhline(0, color='black', linestyle='--')
-    ax[2].set_xlabel('x')
-    ax[2].set_ylabel('Residual')
-    ax[2].set_title('Residual')    
+    # Compare the gradient of the shear to the second flexion
+    grad_gamma = np.gradient(gamma, dx) 
+    # Get the magnitude
+    grad_gamma = np.abs(grad_gamma)
+    ax[2].plot(dx, grad_gamma, label='Gradient of shear', linestyle='--')
+    ax[2].plot(dx, g_flex_mag, label='G Flexion', linestyle='-.')
+    ax[2].set_title('Comparison of gradients')
+    ax[2].legend()
+    ax[2].set_xlabel('dx (arcsec)')
+    ax[2].set_ylabel('Magnitude')
+    ax[2].set_yscale('log')
 
-    # Do this for the SIS
-    theta_e = 0.215
-    shear = -theta_e / (2 * x_range)
-    g_flexion = 3*theta_e / (2 * x_range**2)
-
-    ax[3].plot(x_range, np.abs(shear), label=r'$\gamma$')
-    ax[3].plot(x_range, np.abs(g_flexion), label=r'$\mathcal{G}$')
-    ax[3].set_yscale('log')
-    ax[3].set_xlabel('x')
-    ax[3].set_ylabel('Lensing signal')
-    ax[3].legend()
-
-    first_deriv = np.gradient(shear, x_range)
-    ax[4].plot(x_range[1:], np.abs(first_deriv[1:]), label='First derivative of $\gamma$')
-    ax[4].plot(x_range[1:], np.abs(g_flexion[1:]), label='G-Flexion')
-    ax[4].set_yscale('log')
-    ax[4].set_xlabel('x')
-    ax[4].set_ylabel('Lensing signal')
-    ax[4].legend()
-
-    ax[5].plot(x_range[1:], first_deriv[1:] / g_flexion[1:])
-    ax[5].axhline(0, color='black', linestyle='--')
-    ax[5].set_xlabel('x')
-    ax[5].set_ylabel('Residual')
-    ax[5].set_title('Residual')
-
-    plt.savefig('nfw_test.png')
+    plt.savefig('1d_lensing_quantities.png')
 
     plt.show()
+    plt.close()
+
+    # Take the second derivative of the first and second flexion - they should match
+    f_first = np.gradient(flex_mag, dx)
+    f_second = np.gradient(f_first, dx)
+    g_first = np.gradient(g_flex_mag, dx)
+    g_second = np.gradient(g_first, dx)
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+    ax.plot(dx, f_second, label='Second derivative of first flexion')
+    ax.plot(dx, g_second, label='Second derivative of second flexion')
+    # Add a vertical line to show where our scale radius is - this is where the piecewise function changes
+    ax.axvline(x=r200_arcsec/concentration, color='r', linestyle='--')
+    ax.set_title('Second derivatives of flexion')
+    ax.legend()
+    ax.set_xlabel('dx (arcsec)')
+    ax.set_ylabel('Magnitude')
+    ax.set_yscale('log')
+
+    plt.savefig('1d_flexion_second_derivative.png')
+    plt.show()
+
+
+def two_dimensional_calc():
+    # Do this in 2D
+    z_halo = 0.35
+    z_source = 0.8
+    mass = 1e12
+    concentration = 7.2
+    dx = np.linspace(-10, 10, 1000)
+    dy = np.linspace(-10, 10, 1000)
+    dx, dy = np.meshgrid(dx, dy)
+    r = np.sqrt(dx**2 + dy**2)
+
+    # Define angular diameter distances
+    Dl = angular_diameter_distances(z_halo, z_source)[0]
+
+    # Compute R200
+    r200, r200_arcsec = calc_R200(mass, z_halo)
+    rs = r200 / concentration
+
+    # Compute the critical surface density at the halo redshift
+    rho_c = cosmo.critical_density(z_halo).to(u.kg / u.m**3).value 
+    rho_s = rho_c * calc_delta_c(concentration)
+    sigma_c = critical_surface_density(z_halo, z_source)
+    # Each halo has a characteristic surface density kappa_s
+    kappa_s = rho_s * rs / sigma_c
+    flexion_s = kappa_s * Dl / rs
+    x = np.abs(r / (r200_arcsec / concentration))
+
+    term_1 = radial_term_1(x)
+    term_2 = radial_term_2(x)
+    term_3 = radial_term_3(x)
+    term_4 = radial_term_4(x)
+
+    def calc_f_flex(flexion_s, x, term_1, term_3):
+        I_1 = 2 * flexion_s 
+        I_2 = 2 * x * term_1 / (x**2 - 1)**2
+        I_3 = term_3 / (x**2 - 1)
+        return I_1 * (I_2 - I_3) / 206265
+
+    def calc_g_flex(flexion_s, x, term_4):
+        I_1 = 2 * flexion_s
+        I_2 = (8 / x**3 ) * np.log(x / 2)
+        I_3 = ((3 / x) * (1 - 2 * x**2)) + term_4
+        I_4 = (x**2 - 1)**2
+        return (I_1 * (I_2 + (I_3 / I_4))) / 206265
+    
+    # Compute the magnitudes of the lensing quantities
+    kappa = 2*kappa_s * term_1 / (x**2 - 1)
+    gamma = kappa_s * term_2 
+    flex_mag = calc_f_flex(flexion_s, x, term_1, term_3)
+    g_flex_mag = calc_g_flex(flexion_s, x, term_4)
+
+    # Create the angles between the source and the halo
+    cos_phi = dx / r # Cosine of the angle between the source and the halo
+    sin_phi = dy / r # Sine of the angle between the source and the halo
+    cos2phi = cos_phi**2 - sin_phi**2 # Cosine of 2*phi
+    sin2phi = 2 * cos_phi * sin_phi # Sine of 2*phi
+    cos3phi = cos2phi * cos_phi - sin2phi * sin_phi # Cosine of 3*phi
+    sin3phi = sin2phi * cos_phi + cos2phi * sin_phi # Sine of 3*phi
+
+    # Compute the lensing quantities
+    gamma_1 = gamma * cos2phi
+    gamma_2 = gamma * sin2phi
+    flex_1 = flex_mag * cos_phi
+    flex_2 = flex_mag * sin_phi
+    g_flex_1 = g_flex_mag * cos3phi
+    g_flex_2 = g_flex_mag * sin3phi
+
+    # Plot these signals
+    extent = [-10, 10, -10, 10]
+    signals = [kappa, gamma_1, gamma_2, flex_1, flex_2, g_flex_1, g_flex_2]
+    titles = ['Convergence', 'Shear 1', 'Shear 2', 'Flexion 1', 'Flexion 2', 'G Flexion 1', 'G Flexion 2']
+    fig, ax = plt.subplots(2, 4, figsize=(15, 10))
+    ax = ax.flatten()
+    for i, signal in enumerate(signals):
+        ax[i].imshow(signal, origin='lower', cmap='gray', extent=extent)
+        ax[i].set_title(titles[i])
+
+    # Remove the unused axes (0,3)
+    ax[-1].axis('off')
+    plt.savefig('2d_lensing_quantities.png')
+    # plt.show()
+    plt.close()
+
+    # Now perform some tests
+    # The second derivatives of the two flexions should match
+    # The gradient of the convergence should match the first flexion
+    # The gradient of the shear should match the second flexion
+
+    # Compute the first derivatives of the flexions
+    # (redefine dx and dy, because we made them into a meshgrid)
+    dx = np.linspace(-10, 10, 1000)
+    F1_1 = np.gradient(flex_1, dx, axis=0)
+    F1_2 = np.gradient(flex_1, dx, axis=1)
+    F2_1 = np.gradient(flex_2, dx, axis=0)
+    F2_2 = np.gradient(flex_2, dx, axis=1)
+
+    G1_1 = np.gradient(g_flex_1, dx, axis=0)
+    G1_2 = np.gradient(g_flex_1, dx, axis=1)
+    G2_1 = np.gradient(g_flex_2, dx, axis=0)
+    G2_2 = np.gradient(g_flex_2, dx, axis=1)
+
+    # Compute the second derivatives of the flexions
+    F1_11 = np.gradient(F1_1, dx, axis=0)
+    F1_22 = np.gradient(F1_2, dx, axis=1)
+    F2_11 = np.gradient(F2_1, dx, axis=0)
+    F2_22 = np.gradient(F2_2, dx, axis=1)
+    F1_12 = np.gradient(F1_1, dx, axis=1)
+    F2_12 = np.gradient(F2_1, dx, axis=1)
+
+    G1_11 = np.gradient(G1_1, dx, axis=0)
+    G1_22 = np.gradient(G1_2, dx, axis=1)
+    G2_11 = np.gradient(G2_1, dx, axis=0)
+    G2_22 = np.gradient(G2_2, dx, axis=1)
+    G1_12 = np.gradient(G1_1, dx, axis=1)
+    G2_12 = np.gradient(G2_1, dx, axis=1)
+
+    # It should be the case that G1_11 + G1_22 = F1_11 - F1_22 + 2F2_12
+    # And G2_11 + G2_22 = F2_11 - F2_22 + 2F1_12
+    # We will test this
+    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+    fig.suptitle('Second derivative test - all values should be zero')
+    ax[0].imshow(G1_11 + G1_22 - F1_11 + F1_22 - 2*F2_12, origin='lower', cmap='gray', extent=extent)
+    ax[0].set_title('G1_11 + G1_22 - F1_11 + F1_22 - 2F2_12')
+    ax[1].imshow(G2_11 + G2_22 - F2_11 + F2_22 - 2*F1_12, origin='lower', cmap='gray', extent=extent)
+    ax[1].set_title('G2_11 - G2_22 - F2_11 + F2_22 - 2F1_12')
+    plt.savefig('2d_flexion_second_derivative_test.png')
+    plt.show()
+
+    # Now we will test the gradients
+    # The gradient of the convergence should match the first flexion
+    # The gradient of the shear should match the second flexion
+    grad_kappa = np.gradient(kappa, dx, axis=0)
+    # Kappa is symmetric, so we can just take the gradient in one direction
+    grad_kappa = np.abs(grad_kappa)
+    G1, G2 = compute_flexion(gamma_1, gamma_2, 1)
+    flex_mag = np.sqrt(flex_1**2 + flex_2**2)
+
+    fig, ax = plt.subplots(1, 3, figsize=(10, 5))
+    fig.suptitle('Gradient test - all values should be zero')
+    ax[0].imshow(grad_kappa - flex_mag, origin='lower', cmap='gray', extent=extent)
+    ax[0].set_title('Gradient of convergence - Flexion')
+    ax[1].imshow(G1 - g_flex_1, origin='lower', cmap='gray', extent=extent)
+    ax[1].set_title('Gradient of shear 1 - G1')
+    ax[2].imshow(G2 - g_flex_2, origin='lower', cmap='gray', extent=extent)
+    ax[2].set_title('Gradient of shear 2 - G2')
+    plt.savefig('2d_flexion_gradient_test.png')
+    plt.show()
+
+
+
+if __name__ == '__main__':
+    # one_dimensional_calc()
+    two_dimensional_calc()

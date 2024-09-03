@@ -224,56 +224,63 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 
     x = r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
 
-    # x is the distance from the halo in units of the NFW scale radius
-    # x = np.sqrt((sources.x - halos.x[:, np.newaxis])**2 + (sources.y - halos.y[:, np.newaxis])**2) / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
-    # If x is less than 0.01, set it to 0.01 - the nfw profile is not well defined at x = 0
-    # x = np.where(x < 0.01, 0.01, x)
 
     # Define the radial terms that go into lensing calculations - these are purely functions of x
+
     def radial_term_1(x):
         # This is called f(x) in theory
-        with np.errstate(invalid='ignore'):
-            # Note that the two statements are almost identical - switching arctanh and arctan, and 1-x and x-1
-            sol = np.where(x < 1, 
-                        1 - (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x))), # x < 1
-                        1 - (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (1 + x))) # x >= 1
-                        ) 
+        # Note that the two statements are almost identical - switching arctanh and arctan, and 1-x and x-1
+        sol = np.zeros_like(x)
+        mask1 = x < 1
+        mask2 = x >= 1
+
+        sol[mask1] = 1 - (2 / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
+        sol[mask2] = 1 - (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
+
         return sol
     
     def radial_term_2(x):
         # This is called g(x) in theory
-        with np.errstate(invalid='ignore'):
-            sol = np.where(x < 1,
-                        8 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / (x**2 * np.sqrt(1 - x**2))
-                        + (4 / x**2) * np.log(x / 2)
-                        - 2 / (x**2 - 1)
-                        + 4 * np.arctanh(np.sqrt((1 - x) / (1 + x))) / ((x**2 - 1) * np.sqrt(1 - x**2)),
-                        np.where(x == 1,
-                                    10 / 3 + 4 * np.log(1 / 2),
-                                    8 * np.arctan(np.sqrt((x - 1) / (1 + x))) / (x**2 * np.sqrt(x**2 - 1))
-                                    + (4 / x**2) * np.log(x / 2)
-                                    - 2 / (x**2 - 1)
-                                    + 4 * np.arctan(np.sqrt((x - 1) / (1 + x))) / ((x**2 - 1)**(3/2))
-                                    )
-                        )
+        sol = np.zeros_like(x)
+        mask1 = x < 1
+        mask2 = x > 1
+        mask3 = x == 1
+
+        sol[mask1] = 8 * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))) / (x[mask1]**2 * np.sqrt(1 - x[mask1]**2)) \
+                    + 4 * np.log(x[mask1] / 2) / x[mask1]**2 \
+                    - 2 / (x[mask1]**2 - 1) \
+                    + 4 * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))) / ((x[mask1]**2 - 1) * np.sqrt(1 - x[mask1]**2))
+        
+        sol[mask2] = 8 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / (x[mask2]**2 * np.sqrt(x[mask2]**2 - 1)) \
+                    + 4 * np.log(x[mask2] / 2) / x[mask2]**2 \
+                    - 2 / (x[mask2]**2 - 1) \
+                    + 4 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / ((x[mask2]**2 - 1)**(3/2))
+        
+        sol[mask3] = 10 / 3 + 4 * np.log(1/2)
+        
         return sol
 
     def radial_term_3(x):
         # Compute the radial term - this is called h(x) in theory
-        with np.errstate(invalid='ignore'):
-            sol = np.where(x < 1, 
-                    1 / (1 - x**2) * (1 / x - ((2*x) / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x)))), # x < 1
-                    1 / (x**2 - 1) * (((2 * x) / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (1 + x))) - 1 / x) # x > 1
-                    )
+        sol = np.zeros_like(x)
+        mask1 = x < 1
+        mask2 = x >= 1
+
+        sol[mask1] = (1 / (1 - x[mask1]**2)) * (1 / x[mask1] - ((2*x[mask1]) / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))))
+        sol[mask2] = (1 / (x[mask2]**2 - 1)) * (((2 * x[mask2]) / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2]))) - 1 / x[mask2])
+
         return sol
     
     def radial_term_4(x):
         # Compute the radial term - this is called I(x) in theory
-        with np.errstate(invalid='ignore'):
-            leading_term = 8 / x**3 - 20 / x + 15 * x
-            sol = np.where(x < 1, leading_term * (2 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x))), # x < 1
-                            leading_term * (2 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (x + 1))) # x > 1
-                            )
+        sol = np.zeros_like(x)
+        mask1 = x < 1
+        mask2 = x >= 1
+        leading_term = 8 / x**3 - 20 / x + 15 * x
+
+        sol[mask1] = leading_term[mask1] * (2 / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
+        sol[mask2] = leading_term[mask2] * (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
+
         return sol
 
     term_1 = radial_term_1(x)
@@ -281,11 +288,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     term_3 = radial_term_3(x)
     term_4 = radial_term_4(x)
 
-    # Begin with the distances and angles between the source and the halo
-    # dx = sources.x - halos.x[:, np.newaxis]
-    # dy = sources.y - halos.y[:, np.newaxis]
-    # r = np.sqrt(dx**2 + dy**2)
-    # r = np.where(r == 0, 0.01, r) # Avoid division by zero
+    # Create the angles between the source and the halo
     cos_phi = dx / r # Cosine of the angle between the source and the halo
     sin_phi = dy / r # Sine of the angle between the source and the halo
     cos2phi = cos_phi**2 - sin_phi**2 # Cosine of 2*phi
@@ -295,6 +298,8 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 
     # Compute lensing magnitudes (in arcseconds)
     shear_mag = - kappa_s[:, np.newaxis] * term_2
+    # shear_mag = 2 * kappa_s[:, np.newaxis] * (1 / (x**2 - 1)) * (term_1 - 2 * (1 - 1/x**2) * (1 - np.log(x/2) - term_1)) # Alternative expression
+
     flex_mag = (-2 * flexion_s[:, np.newaxis]) * ((2 * x * term_1 / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Using Wright & Brainerd notation
     g_flex_mag = (2 * flexion_s[:, np.newaxis]) * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2) / 206265
 
