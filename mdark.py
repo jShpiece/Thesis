@@ -608,7 +608,7 @@ def visualize_fits(ID_file):
     return
 
 
-def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
+def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[True, True, True]):
     # Create a simple lensing field and test the pipeline on it
     start = time.time()
     # Create a set of lenses
@@ -638,7 +638,6 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
         ys = ys.flatten()
         Nsource = len(xs)
     
-
     sig_s = np.ones(Nsource) * 0.1
     sig_f = np.ones(Nsource) * 0.01
     sig_g = np.ones(Nsource) * 0.02
@@ -654,8 +653,6 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(20, 15), sharex=True, sharey=True)
-
-    use_flags = [True, True, True]  # Use all signals
 
     # Step 1: Generate initial list of lenses from source guesses
     lenses = sources.generate_initial_guess(z_l = 0.194, lens_type='NFW')
@@ -678,9 +675,9 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
     _plot_results(lenses, halos, 'Lens Number Selection', reducedchi2, xmax, ax=axarr[1,0], legend=False)
 
     # Step 5: Merge lenses that are too close to each other
-    # ns = len(sources.x) / (np.pi * xmax**2)
-    # merger_threshold = (1/np.sqrt(ns))
-    lenses.merge_close_lenses(merger_threshold=10)
+    ns = len(sources.x) / (np.pi * xmax**2)
+    merger_threshold = (1/np.sqrt(ns))
+    lenses.merge_close_lenses(merger_threshold=merger_threshold)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
 
@@ -707,7 +704,16 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
         size = 'small'
     else:
         size = 'other'
-    plot_name = 'Images/NFW_tests/standard_tests/{}_Nlens_{}_{}.png'.format(size,Nlens,noisy)
+    
+    if use_flags == [True, True, True]:
+        directory = 'all'
+    elif use_flags == [True, True, False]:
+        directory = 'shear_f'
+    elif use_flags == [False, True, True]:
+        directory = 'f_g'
+    elif use_flags == [True, False, True]:
+        directory = 'shear_g'
+    plot_name = 'Images/NFW_tests/standard_tests/{}/{}_Nlens_{}_{}.png'.format(directory, size,Nlens,noisy)
     plt.savefig(plot_name)
     stop = time.time()
 
@@ -719,14 +725,16 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True):
 
 
 def run_simple_tests():
-    masses = [1e14, 1e13, 1e12]
+    masses = [1e14, 1e13]
     lens_numbers = [1,2]
-    noise_use = [True, False]
+    noise_use = [True,False]
+    use_flags_choices = [[True, True, True], [True, True, False], [False, True, True], [True, False, True]]
 
     for mass in masses:
         for Nlens in lens_numbers:
             for noise in noise_use:
-                simple_nfw_test(Nlens, 100, 50, mass, use_noise=noise)
+                for use_flags in use_flags_choices:
+                    simple_nfw_test(Nlens, 100, 50, mass, use_noise=noise, use_flags=use_flags)
 
 
 def run_rr_tests():
@@ -772,3 +780,15 @@ def process_md_set(test_number):
 
 if __name__ == '__main__':
     run_simple_tests()
+    # VERY SIMPLE TEST OF NEW MASS ESTIMATE
+
+    raise ValueError('Testing complete')
+    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([0]), np.array([1e13]), 0.194, np.array([0]))
+    halo.calculate_concentration()
+    source = pipeline.Source(np.array([10]), np.array([0]), np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.ones(1) * 0.1, np.ones(1) * 0.01, np.ones(1) * 0.02)
+    source.apply_NFW_lensing(halo)
+    
+    lenses = source.generate_initial_guess(z_l = 0.194, lens_type='NFW')
+    print('Initial guess: {:2e}'.format(np.sum(lenses.mass)))
+    _, r200 = lenses.calc_R200()
+    print('R200: {}'.format(r200))

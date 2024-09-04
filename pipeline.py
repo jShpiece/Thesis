@@ -60,13 +60,22 @@ class Source:
             return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
         elif lens_type == 'NFW':
             r = 1.45 * gamma / flexion # A characteristic distance from the source
+            '''
             te = 2 * gamma * r / 206265 # The Einstein radius of the lens in radians
             from astropy.constants import c, G
             _, Ds, Dls = utils.angular_diameter_distances(z_l, z_s)
             rho_c = cosmo.critical_density(z_l).to(u.kg / u.m**3)
             mass = (te * (c**2 / (2 * np.pi * G)) * (Ds / Dls) * (3 / (800 * np.pi * rho_c))**(1/3))**(3/2)
             mass = mass.to(u.Msun).value
-
+            '''
+            Dl, Ds, Dls = utils.angular_diameter_distances(z_l, z_s)
+            sigma_crit = utils.critical_surface_density(z_l, z_s) * (Dl / 206265)**2 / M_solar
+            # Put sigma_crit in units of Msun / arcsec^2 from kg / m^2
+            mass = 2 * np.pi * r**3 * sigma_crit * flexion
+            # Problem - this is the mass *inside* of distance r, not the total mass of the lens
+            # But the source could be at any distance from the lens
+            # This may be the point at which we need to simply accept that this is an approximation
+            
             xl = np.array(self.x + r * np.cos(phi))
             yl = np.array(self.y + r * np.sin(phi))
             halo = Halo(xl, yl, np.zeros_like(xl), np.array([5]), np.array(mass), np.array(z_l), np.empty_like(xl))
@@ -336,7 +345,8 @@ class Halo:
     def calc_R200(self):
         # Compute the R200 radius for each halo
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
-        R200 = (3 / (800 * np.pi) * (np.abs(self.mass) * M_solar / rho_c))**(1/3) # In meters
+        mass = np.abs(self.mass) * M_solar # Convert to kg - mass is allowed to be negative, but it should be positive for this calculation
+        R200 = (3 / (800 * np.pi) * (mass / rho_c))**(1/3) # In meters
         # Convert to arcseconds
         R200_arcsec = (R200 / cosmo.angular_diameter_distance(self.redshift).to(u.meter).value) * 206265
         return R200, R200_arcsec
@@ -344,15 +354,7 @@ class Halo:
 
     def calc_delta_c(self):
         # Compute the characteristic density contrast for each halo
-        try:
-            delta_c = (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - self.concentration / (1 + self.concentration))
-        except RuntimeWarning:
-            print('RuntimeWarning: invalid value encountered in log')
-            print('Concentration: {}'.format(self.concentration))
-            print('Mass: {}'.format(self.mass))
-            # delta_c = np.nan
-        return delta_c
-        # return (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - self.concentration / (1 + self.concentration))
+        return (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - (self.concentration / (1 + self.concentration)))
 
 
     def calc_corresponding_einstein_radius(self, source_redshift):
@@ -369,9 +371,6 @@ class Halo:
         # Compute the concentration parameter for each halo
         # This is done with the Duffy et al. (2008) relation
         # This relation is valid for 0 < z < 2 - this covers the range of redshifts we are interested in
-        # Note - numpy doesn't like negative powers on lists, even if the answer isn't complex
-        # Get around this by taking taking the absolute value of arrays (then multiplying by -1 if necessary) (actually don't do this - mass and concentration should be positive)
-        # It also breaks down if the mass is 0 (we'll be dividing by the mass)
         self.mass += 1e-10 # Add a small value to the mass to avoid division by zero
         self.concentration = 5.71 * (np.abs(self.mass) / (2 * 10**12))**(-0.084) * (1 + self.redshift)**(-0.47) 
 
@@ -389,12 +388,12 @@ class Halo:
         chi2_values = np.zeros(len(self.x))
         if len(self.x) == 1:
             # Only one lens - calculate the chi2 value for this lens
-            chi2_values[0] = calculate_chi_squared(sources, self, use_flags, lensing='NFW', use_weights=True)
+            chi2_values[0] = calculate_chi_squared(sources, self, use_flags, lensing='NFW', use_weights=False)
         else:
             for i in range(len(self.x)):
                 # Only pass in the i-th lens
                 one_halo = Halo(self.x[i], self.y[i], self.z[i], self.concentration[i], self.mass[i], self.redshift, [0])
-                chi2_values[i] = calculate_chi_squared(sources, one_halo, use_flags, lensing='NFW', use_weights=True)
+                chi2_values[i] = calculate_chi_squared(sources, one_halo, use_flags, lensing='NFW', use_weights=False)
         self.chi2 = chi2_values
         if dof == 0:
             print('Degrees of freedom is zero')
@@ -541,8 +540,8 @@ class Halo:
         for i in range(len(self.x)):
             guess = [np.log10(self.mass[i])]
             params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
-            # result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
-            result = opt.minimize(chi2wrapper, guess, args=params, method='Powell', tol=1e-8, options={'maxiter': 1000})
+            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
+            # result = opt.minimize(chi2wrapper, guess, args=params, method='Powell', tol=1e-8, options={'maxiter': 1000})
             self.mass[i] = 10**result.x[0]
         self.calculate_concentration()
 
@@ -680,11 +679,11 @@ def chi2wrapper(guess, params):
                 return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
-            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=True)
+            return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=False)
         elif constraint_type == 'dual_constraint':
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), guess[1], 10**guess[0], params[2], np.empty_like(params[0]))
             # Don't update the concentration here - we are optimizing both mass and concentration
-            return calculate_chi_squared(params[3], lenses, params[4], lensing='NFW', use_weights=True) 
+            return calculate_chi_squared(params[3], lenses, params[4], lensing='NFW', use_weights=False) 
     else:
         raise ValueError("Invalid lensing model: {}".format(model_type))
 

@@ -156,8 +156,8 @@ def one_dimensional_calc():
 
     def calc_g_flex(flexion_s, x, term_4):
         I_1 = 2 * flexion_s
-        I_2 = (8 / x**3 ) * np.log(x / 2)
-        I_3 = ((3 / x) * (1 - 2 * x**2)) + term_4
+        I_2 = (8 / x**3) * np.log(x / 2)
+        I_3 = ((3 / x) * (1 - 2 * x**2) + term_4)
         I_4 = (x**2 - 1)**2
         return (I_1 * (I_2 + (I_3 / I_4))) / 206265
     
@@ -173,8 +173,6 @@ def one_dimensional_calc():
     ax[0].plot(dx, gamma, label='Shear')
     ax[0].plot(dx, flex_mag, label='Flexion')
     ax[0].plot(dx, g_flex_mag, label='G Flexion')
-    ax[0].axvline(x=r200_arcsec/concentration, color='r', linestyle='--')
-    ax[0].axvline(x=-r200_arcsec/concentration, color='r', linestyle='--')
     ax[0].set_title('Lensing quantities')
     ax[0].legend()
     ax[0].set_xlabel('dx (arcsec)')
@@ -195,10 +193,10 @@ def one_dimensional_calc():
 
     # Compare the gradient of the shear to the second flexion
     grad_gamma = np.gradient(gamma, dx) 
-    # Get the magnitude
     grad_gamma = np.abs(grad_gamma)
     ax[2].plot(dx, grad_gamma, label='Gradient of shear', linestyle='--')
     ax[2].plot(dx, g_flex_mag, label='G Flexion', linestyle='-.')
+    ax[2].plot(dx, grad_gamma / g_flex_mag, label='Ratio', linestyle=':')
     ax[2].set_title('Comparison of gradients')
     ax[2].legend()
     ax[2].set_xlabel('dx (arcsec)')
@@ -229,6 +227,7 @@ def one_dimensional_calc():
 
     plt.savefig('1d_flexion_second_derivative.png')
     plt.show()
+    
 
 
 def two_dimensional_calc():
@@ -241,6 +240,8 @@ def two_dimensional_calc():
     dy = np.linspace(-10, 10, 1000)
     dx, dy = np.meshgrid(dx, dy)
     r = np.sqrt(dx**2 + dy**2)
+    # Mask the center
+    r[r < 1e-3] = 1e-3
 
     # Define angular diameter distances
     Dl = angular_diameter_distances(z_halo, z_source)[0]
@@ -321,6 +322,7 @@ def two_dimensional_calc():
 
     # Compute the first derivatives of the flexions
     # (redefine dx and dy, because we made them into a meshgrid)
+    '''
     dx = np.linspace(-10, 10, 1000)
     F1_1 = np.gradient(flex_1, dx, axis=0)
     F1_2 = np.gradient(flex_1, dx, axis=1)
@@ -358,29 +360,32 @@ def two_dimensional_calc():
     ax[1].set_title('G2_11 - G2_22 - F2_11 + F2_22 - 2F1_12')
     plt.savefig('2d_flexion_second_derivative_test.png')
     plt.show()
+    '''
 
     # Now we will test the gradients
     # The gradient of the convergence should match the first flexion
     # The gradient of the shear should match the second flexion
+    dx = np.linspace(-10, 10, 1000)
     grad_kappa = np.gradient(kappa, dx, axis=0)
     # Kappa is symmetric, so we can just take the gradient in one direction
-    grad_kappa = np.abs(grad_kappa)
+    # grad_kappa = np.abs(grad_kappa)
     G1, G2 = compute_flexion(gamma_1, gamma_2, 1)
-    flex_mag = np.sqrt(flex_1**2 + flex_2**2)
 
-    fig, ax = plt.subplots(1, 3, figsize=(10, 5))
-    fig.suptitle('Gradient test - all values should be zero')
+    fig, ax = plt.subplots(1, 4, figsize=(10, 5))
+    fig.suptitle('Gradient test - all values should be 1')
     ax[0].imshow(grad_kappa - flex_mag, origin='lower', cmap='gray', extent=extent)
     ax[0].set_title('Gradient of convergence - Flexion')
     ax[1].imshow(G1 - g_flex_1, origin='lower', cmap='gray', extent=extent)
     ax[1].set_title('Gradient of shear 1 - G1')
     ax[2].imshow(G2 - g_flex_2, origin='lower', cmap='gray', extent=extent)
     ax[2].set_title('Gradient of shear 2 - G2')
+    G_tot = np.sqrt(G1**2 + G2**2)
+    ax[3].imshow(G_tot - g_flex_mag, origin='lower', cmap='gray', extent=extent)
+    ax[3].set_title('Total gradient - G Flexion')
     plt.savefig('2d_flexion_gradient_test.png')
     plt.show()
 
 
-
 if __name__ == '__main__':
-    # one_dimensional_calc()
-    two_dimensional_calc()
+    one_dimensional_calc()
+    # two_dimensional_calc()

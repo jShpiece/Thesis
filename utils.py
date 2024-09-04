@@ -33,6 +33,8 @@ def angular_diameter_distances(z1, z2):
 
 
 def critical_surface_density(z1, z2):
+    # Compute the critical surface density for a lens at z1 and a source at z2
+    # Returned in units of kg/m^2
     dl, ds, dls = angular_diameter_distances(z1, z2)
     kappa_c = (c.value**2 / (4 * np.pi * G.value)) * (ds / (dl * dls))
     return kappa_c
@@ -227,6 +229,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 
     # Define the radial terms that go into lensing calculations - these are purely functions of x
 
+
     def radial_term_1(x):
         # This is called f(x) in theory
         # Note that the two statements are almost identical - switching arctanh and arctan, and 1-x and x-1
@@ -238,7 +241,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
         sol[mask2] = 1 - (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
 
         return sol
-    
+
     def radial_term_2(x):
         # This is called g(x) in theory
         sol = np.zeros_like(x)
@@ -246,10 +249,12 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
         mask2 = x > 1
         mask3 = x == 1
 
-        sol[mask1] = 8 * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))) / (x[mask1]**2 * np.sqrt(1 - x[mask1]**2)) \
+        k = (1 - x) / (1 + x)
+
+        sol[mask1] = 8 * np.arctanh(np.sqrt(k[mask1])) / (x[mask1]**2 * np.sqrt(1 - x[mask1]**2)) \
                     + 4 * np.log(x[mask1] / 2) / x[mask1]**2 \
                     - 2 / (x[mask1]**2 - 1) \
-                    + 4 * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1]))) / ((x[mask1]**2 - 1) * np.sqrt(1 - x[mask1]**2))
+                    + 4 * np.arctanh(np.sqrt(k[mask1])) / ((x[mask1]**2 - 1) * np.sqrt(1 - x[mask1]**2))
         
         sol[mask2] = 8 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / (x[mask2]**2 * np.sqrt(x[mask2]**2 - 1)) \
                     + 4 * np.log(x[mask2] / 2) / x[mask2]**2 \
@@ -270,7 +275,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
         sol[mask2] = (1 / (x[mask2]**2 - 1)) * (((2 * x[mask2]) / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2]))) - 1 / x[mask2])
 
         return sol
-    
+
     def radial_term_4(x):
         # Compute the radial term - this is called I(x) in theory
         sol = np.zeros_like(x)
@@ -278,8 +283,12 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
         mask2 = x >= 1
         leading_term = 8 / x**3 - 20 / x + 15 * x
 
-        sol[mask1] = leading_term[mask1] * (2 / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
-        sol[mask2] = leading_term[mask2] * (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
+        # Introduce a constant
+        k = (1 - x) / (1 + x)
+
+        sol[mask1] = (2 / np.sqrt(1 - x[mask1]**2)) * np.arctanh(np.sqrt(k[mask1]))
+        sol[mask2] = (2 / np.sqrt(x[mask2]**2 - 1)) * np.arctan(np.sqrt(-k[mask2]))
+        sol *= leading_term
 
         return sol
 
@@ -298,10 +307,24 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 
     # Compute lensing magnitudes (in arcseconds)
     shear_mag = - kappa_s[:, np.newaxis] * term_2
-    # shear_mag = 2 * kappa_s[:, np.newaxis] * (1 / (x**2 - 1)) * (term_1 - 2 * (1 - 1/x**2) * (1 - np.log(x/2) - term_1)) # Alternative expression
+    # flex_mag = (-2 * flexion_s[:, np.newaxis]) * ((2 * x * term_1 / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Using Wright & Brainerd notation
+    # g_flex_mag = (2 * flexion_s[:, np.newaxis]) * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2) / 206265
 
-    flex_mag = (-2 * flexion_s[:, np.newaxis]) * ((2 * x * term_1 / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Using Wright & Brainerd notation
-    g_flex_mag = (2 * flexion_s[:, np.newaxis]) * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2) / 206265
+    def calc_f_flex(flexion_s, x, term_1, term_3):
+        I_1 = 2 * flexion_s[:, np.newaxis]
+        I_2 = 2 * x * term_1 / (x**2 - 1)**2
+        I_3 = term_3 / (x**2 - 1)
+        return -I_1 * (I_2 - I_3) / 206265
+
+    def calc_g_flex(flexion_s, x, term_4):
+        I_1 = 2 * flexion_s[:, np.newaxis]
+        I_2 = (8 / x**3) * np.log(x / 2)
+        I_3 = ((3 / x) * (1 - 2 * x**2) + term_4)
+        I_4 = (x**2 - 1)**2
+        return (I_1 * (I_2 + (I_3 / I_4))) / 206265
+
+    flex_mag = calc_f_flex(flexion_s, x, term_1, term_3)
+    g_flex_mag = calc_g_flex(flexion_s, x, term_4)
 
     # Sum over all halos, resulting array should have shape (n_sources,)
     shear_1 = np.sum(shear_mag * cos2phi, axis=0)
