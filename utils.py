@@ -215,8 +215,8 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     rho_s = rho_c * halos.calc_delta_c() 
     sigma_c = critical_surface_density(halos.redshift, z_source)
     # Each halo has a characteristic surface density kappa_s
-    kappa_s = rho_s * rs / sigma_c
-    flexion_s = kappa_s * Dl / rs
+    kappa_s = rho_s * rs / sigma_c # Dimensionless quantity
+    flexion_s = (kappa_s * Dl / rs) / 206265 # Dimensions of inverse arcseconds
 
     # Compute the distances between each source and each halo
     dx = sources.x - halos.x[:, np.newaxis]
@@ -307,21 +307,19 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 
     # Compute lensing magnitudes (in arcseconds)
     shear_mag = - kappa_s[:, np.newaxis] * term_2
-    # flex_mag = (-2 * flexion_s[:, np.newaxis]) * ((2 * x * term_1 / (x**2 - 1)**2) - term_3 / (x**2 - 1)) / 206265 # Using Wright & Brainerd notation
-    # g_flex_mag = (2 * flexion_s[:, np.newaxis]) * ((8 / x**3) * np.log(x / 2) + ((3/x)*(1 - 2*x**2) + term_4) / (x**2 - 1)**2) / 206265
 
     def calc_f_flex(flexion_s, x, term_1, term_3):
         I_1 = 2 * flexion_s[:, np.newaxis]
         I_2 = 2 * x * term_1 / (x**2 - 1)**2
         I_3 = term_3 / (x**2 - 1)
-        return -I_1 * (I_2 - I_3) / 206265
+        return -I_1 * (I_2 - I_3) 
 
     def calc_g_flex(flexion_s, x, term_4):
         I_1 = 2 * flexion_s[:, np.newaxis]
         I_2 = (8 / x**3) * np.log(x / 2)
         I_3 = ((3 / x) * (1 - 2 * x**2) + term_4)
         I_4 = (x**2 - 1)**2
-        return (I_1 * (I_2 + (I_3 / I_4))) / 206265
+        return (I_1 * (I_2 + (I_3 / I_4))) 
 
     flex_mag = calc_f_flex(flexion_s, x, term_1, term_3)
     g_flex_mag = calc_g_flex(flexion_s, x, term_4)
@@ -356,10 +354,10 @@ def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5
     y = r*np.sin(phi)
 
     sources = pipeline.Source(x, y, 
-                              np.zeros_like(x), np.zeros_like(y),
-                                np.zeros_like(x), np.zeros_like(y),
-                                np.zeros_like(x), np.zeros_like(y), 
-                                np.ones_like(x) * sigs, np.ones_like(x) * sigf, np.ones_like(x) * sigg)
+                            np.zeros_like(x), np.zeros_like(y),
+                            np.zeros_like(x), np.zeros_like(y),
+                            np.zeros_like(x), np.zeros_like(y), 
+                            np.ones_like(x) * sigs, np.ones_like(x) * sigf, np.ones_like(x) * sigg)
     # Now apply noise
     sources.apply_noise()
     # Apply the lensing effects of the lenses

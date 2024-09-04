@@ -767,10 +767,6 @@ def process_md_set(test_number):
     result_file = test_dir + '/results_{}.csv'.format(test_number)
     plot_name = 'Images/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
 
-    #Check that the ID file exists - if not, create the directory and build the test set
-    if not os.path.exists(ID_file):
-        os.makedirs('Data/MDARK_Test/Test{}'.format(test_number))
-        build_test_set(30, z_chosen, ID_file)
 
     run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()

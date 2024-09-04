@@ -78,7 +78,7 @@ def radial_term_2(x):
     k = (1 - x) / (1 + x)
 
     sol[mask1] = 8 * np.arctanh(np.sqrt(k[mask1])) / (x[mask1]**2 * np.sqrt(1 - x[mask1]**2)) \
-                + 4 * np.log(x[mask1] / 2) / x[mask1]**2 \
+                + 4 * np.log(x[mask1]/2) / x[mask1]**2 \
                 - 2 / (x[mask1]**2 - 1) \
                 + 4 * np.arctanh(np.sqrt(k[mask1])) / ((x[mask1]**2 - 1) * np.sqrt(1 - x[mask1]**2))
     
@@ -168,9 +168,9 @@ def one_dimensional_calc():
     g_flex_mag = calc_g_flex(flexion_s, x, term_4)
 
     # Plot the lensing quantities
-    fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+    fig, ax = plt.subplots(1, 4, figsize=(15, 5), sharey=True)
     ax[0].plot(dx, kappa, label='Convergence')
-    ax[0].plot(dx, gamma, label='Shear')
+    ax[0].plot(dx, np.abs(gamma), label='Shear')
     ax[0].plot(dx, flex_mag, label='Flexion')
     ax[0].plot(dx, g_flex_mag, label='G Flexion')
     ax[0].set_title('Lensing quantities')
@@ -185,29 +185,43 @@ def one_dimensional_calc():
     grad_kappa = np.abs(grad_kappa)
     ax[1].plot(dx, grad_kappa, label='Gradient of convergence', linestyle='--')
     ax[1].plot(dx, flex_mag, label='Flexion', linestyle='-.')
-    ax[1].set_title('Comparison of gradients')
+    ax[1].set_title('Comparison of gradients: Convergence and F Flexion')
     ax[1].legend()
     ax[1].set_xlabel('dx (arcsec)')
     ax[1].set_ylabel('Magnitude')
     ax[1].set_yscale('log')
 
-    # Compare the gradient of the shear to the second flexion
-    grad_gamma = np.gradient(gamma, dx) 
+    # Compare the gradient of the shear to the first flexion
+    grad_gamma = np.gradient(gamma, dx) + 2 * gamma / dx
+    # Get the magnitude
     grad_gamma = np.abs(grad_gamma)
     ax[2].plot(dx, grad_gamma, label='Gradient of shear', linestyle='--')
-    ax[2].plot(dx, g_flex_mag, label='G Flexion', linestyle='-.')
-    ax[2].plot(dx, grad_gamma / g_flex_mag, label='Ratio', linestyle=':')
-    ax[2].set_title('Comparison of gradients')
+    ax[2].plot(dx, flex_mag, label='F Flexion', linestyle='-.')
+    # ax[2].plot(dx, grad_gamma / g_flex_mag, label='Ratio', linestyle=':')
+    ax[2].set_title('Comparison of gradients - Shear and F Flexion')
     ax[2].legend()
     ax[2].set_xlabel('dx (arcsec)')
     ax[2].set_ylabel('Magnitude')
     ax[2].set_yscale('log')
 
+    # Compare the gradient of the shear to the second flexion
+    grad_gamma = np.gradient(gamma, dx) - 2 * gamma / dx
+    # Get the magnitude
+    grad_gamma = np.abs(grad_gamma)
+    ax[3].plot(dx, grad_gamma, label='Gradient of shear', linestyle='--')
+    ax[3].plot(dx, g_flex_mag, label='G Flexion', linestyle='-.')
+    # ax[3].plot(dx, grad_gamma / g_flex_mag, label='Ratio', linestyle=':')
+    ax[3].set_title('Comparison of gradients - Shear and G Flexion')
+    ax[3].legend()
+    ax[3].set_xlabel('dx (arcsec)')
+    ax[3].set_ylabel('Magnitude')
+    ax[3].set_yscale('log')
+
     plt.savefig('1d_lensing_quantities.png')
 
     plt.show()
     plt.close()
-
+    raise ValueError('Stop here')
     # Take the second derivative of the first and second flexion - they should match
     f_first = np.gradient(flex_mag, dx)
     f_second = np.gradient(f_first, dx)
