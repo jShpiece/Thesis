@@ -169,10 +169,10 @@ def one_dimensional_calc():
 
     # Plot the lensing quantities
     fig, ax = plt.subplots(1, 4, figsize=(15, 5), sharey=True)
-    ax[0].plot(dx, kappa, label='Convergence')
-    ax[0].plot(dx, np.abs(gamma), label='Shear')
-    ax[0].plot(dx, flex_mag, label='Flexion')
-    ax[0].plot(dx, g_flex_mag, label='G Flexion')
+    ax[0].plot(dx, kappa, label=r'$\kappa$')
+    ax[0].plot(dx, np.abs(gamma), label=r'$\gamma$')
+    ax[0].plot(dx, flex_mag, label=r'$\mathcal{F}$')
+    ax[0].plot(dx, g_flex_mag, label=r'$\mathcal{G}$')
     ax[0].set_title('Lensing quantities')
     ax[0].legend()
     ax[0].set_xlabel('dx (arcsec)')
@@ -183,8 +183,8 @@ def one_dimensional_calc():
     grad_kappa = np.gradient(kappa, dx)
     # Get the magnitude
     grad_kappa = np.abs(grad_kappa)
-    ax[1].plot(dx, grad_kappa, label='Gradient of convergence', linestyle='--')
-    ax[1].plot(dx, flex_mag, label='Flexion', linestyle='-.')
+    ax[1].plot(dx, grad_kappa, label=r'$\nabla \kappa$', linestyle='--')
+    ax[1].plot(dx, flex_mag, label=r'$\mathcal{F}$', linestyle='-.')
     ax[1].set_title('Comparison of gradients: Convergence and F Flexion')
     ax[1].legend()
     ax[1].set_xlabel('dx (arcsec)')
@@ -195,9 +195,8 @@ def one_dimensional_calc():
     grad_gamma = np.gradient(gamma, dx) + 2 * gamma / dx
     # Get the magnitude
     grad_gamma = np.abs(grad_gamma)
-    ax[2].plot(dx, grad_gamma, label='Gradient of shear', linestyle='--')
-    ax[2].plot(dx, flex_mag, label='F Flexion', linestyle='-.')
-    # ax[2].plot(dx, grad_gamma / g_flex_mag, label='Ratio', linestyle=':')
+    ax[2].plot(dx, grad_gamma, label=r'$\partial^\ast\gamma$', linestyle='--')
+    ax[2].plot(dx, flex_mag, label=r'$\mathcal{F}$', linestyle='-.')
     ax[2].set_title('Comparison of gradients - Shear and F Flexion')
     ax[2].legend()
     ax[2].set_xlabel('dx (arcsec)')
@@ -208,9 +207,8 @@ def one_dimensional_calc():
     grad_gamma = np.gradient(gamma, dx) - 2 * gamma / dx
     # Get the magnitude
     grad_gamma = np.abs(grad_gamma)
-    ax[3].plot(dx, grad_gamma, label='Gradient of shear', linestyle='--')
-    ax[3].plot(dx, g_flex_mag, label='G Flexion', linestyle='-.')
-    # ax[3].plot(dx, grad_gamma / g_flex_mag, label='Ratio', linestyle=':')
+    ax[3].plot(dx, grad_gamma, label=r'$\partial \gamma$', linestyle='--')
+    ax[3].plot(dx, g_flex_mag, label=r'$\mathcal{G}$', linestyle='-.')
     ax[3].set_title('Comparison of gradients - Shear and G Flexion')
     ax[3].legend()
     ax[3].set_xlabel('dx (arcsec)')
