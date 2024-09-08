@@ -224,7 +224,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     r = np.sqrt(dx**2 + dy**2)
     r = np.where(r == 0, 0.01, r) # Avoid division by zero
 
-    x = r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])
+    x = np.abs(r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis]))
 
 
     # Define the radial terms that go into lensing calculations - these are purely functions of x

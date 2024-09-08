@@ -41,21 +41,29 @@ def smooth_gradient(grads, beta, grad_avg=None):
     return grad_avg
 
 
-def gradient_descent(func, initial_x, learning_rate, num_iterations, params):
+def gradient_descent(func, initial_x, learning_rates, num_iterations, params):
     # A simple gradient descent optimizer
+    learning_rates = np.asarray(learning_rates, dtype=float)
     x = initial_x
     x = np.asarray(x, dtype=float)
     path = []
+    previous_func_val = func(x, params)
     for i in range(num_iterations):
         grad = numerical_gradient(func, x, params)
-        grad = smooth_gradient(grad, 0.9)
-        grad = clip_gradients(grad, 1) # Clip gradients to avoid large steps
-        prev_x = x
-        x = x - learning_rate * grad
-        path.append(x)
+        # grad = smooth_gradient(grad, 0.9)
+        # grad = clip_gradients(grad, 1) # Clip gradients to avoid large steps
+        x = x - learning_rates * grad
+        path.append([x[0], func(x, params)])
         # Check for convergence
-        if np.linalg.norm(x - prev_x) < 1e-6:
+        func_val = func(x, params)
+        '''
+        if np.abs(func_val - previous_func_val) < 1e-6:
+            print(f'Converged after {i} iterations.')
             break
+        '''
+        previous_func_val = func_val
+
+        # print(f'Iteration {i}: x = {x}, f(x) = {func_val}')
     return x, path
 
 
@@ -83,7 +91,7 @@ def adam_optimizer(func, initial_x, learning_rates, max_iterations=1000, beta1=0
     t = 0
     prev_func_val = func(x, params)
     grad_avg = np.zeros_like(x)
-    
+    path = []
     for i in range(max_iterations):
         t += 1
         grad = numerical_gradient(func, x, params)
@@ -94,12 +102,12 @@ def adam_optimizer(func, initial_x, learning_rates, max_iterations=1000, beta1=0
         m_hat = m / (1 - beta1 ** t) # Bias correction
         v_hat = v / (1 - beta2 ** t) # Bias correction
         x -= learning_rates * m_hat / (np.sqrt(v_hat) + 1e-2) # Update parameters
+        path.append([x, func(x, params)])
         
         # Check for convergence
         current_func_val = func(x, params)
         if np.abs(current_func_val - prev_func_val) < tol:
             break
         prev_func_val = current_func_val
-        
 
-    return x
+    return x, path

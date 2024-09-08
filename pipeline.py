@@ -346,7 +346,7 @@ class Halo:
         # Compute the R200 radius for each halo
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
         mass = np.abs(self.mass) * M_solar # Convert to kg - mass is allowed to be negative, but it should be positive for this calculation
-        R200 = (3 / (800 * np.pi) * (mass / rho_c))**(1/3) # In meters
+        R200 = ((3 / (800 * np.pi)) * (mass / rho_c))**(1/3) # In meters
         # Convert to arcseconds
         R200_arcsec = (R200 / cosmo.angular_diameter_distance(self.redshift).to(u.meter).value) * 206265
         return R200, R200_arcsec
@@ -411,14 +411,9 @@ class Halo:
         beta2 = 0.999
 
         for i in range(len(self.x)):
-            one_source = Source(sources.x[i], sources.y[i], 
-                                sources.e1[i], sources.e2[i], 
-                                sources.f1[i], sources.f2[i], 
-                                sources.g1[i], sources.g2[i],
-                                sources.sigs[i], sources.sigf[i], sources.sigg[i])
             guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
             params = ['NFW','unconstrained',sources, use_flags, self.concentration[i], self.redshift]
-            result = minimizer.adam_optimizer(chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params)
+            result, _ = minimizer.adam_optimizer(chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params)
 
             self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
             self.calculate_concentration() # Remember to update the concentration parameter
@@ -536,24 +531,31 @@ class Halo:
         self.calculate_concentration()
 
 
-    def full_minimization(self, sources, use_flags):
-        for i in range(len(self.x)):
-            guess = [np.log10(self.mass[i])]
-            params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
-            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
-            # result = opt.minimize(chi2wrapper, guess, args=params, method='Powell', tol=1e-8, options={'maxiter': 1000})
-            self.mass[i] = 10**result.x[0]
-        self.calculate_concentration()
-
-        # return path
-
-
     def two_param_minimization(self, sources, use_flags):
+        # learning_rates = [0.1, 0.00001]  # Adjust learning rate for mass and concentration parameters
+        num_iterations = 10**3
+        '''
         for i in range(len(self.x)):
+            # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
             guess = [np.log10(self.mass[i]), self.concentration[i]]
             params = ['NFW','dual_constraint',self.x[i], self.y[i], self.redshift, sources, use_flags]
-            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rate=0.05, num_iterations=100, params=params)
+            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
             self.mass[i], self.concentration[i] = 10**result[0], result[1]
+        '''
+        # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
+        # guess = [np.log10(self.mass), self.concentration]
+        for i in range(len(self.x)):
+            guess = [np.log10(self.mass[i])]
+            learning_rates = [0.1]
+            # Shape the learning rates to match the shape of the guess
+            # Guess will be a 2D array, 2 x number of lenses
+            # Learning rates will be a 2D array, 2 x 1
+            # We need to reshape the learning rates to match the shape of the guess
+            # learning_rates = np.array(learning_rates).reshape(-1, 1)
+            params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
+            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
+            self.mass[i] = 10**result[0]
+        return path
 
 # ------------------------------
 # Chi^2 functions
@@ -672,18 +674,18 @@ def chi2wrapper(guess, params):
         if constraint_type == 'unconstrained':
             lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
             lenses.calculate_concentration()
-            return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=True)
+            return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=False)
         elif constraint_type == 'constrained':
             # Check for overflow in the mass
-            if np.any(guess > 16):
+            if guess > 16:
                 return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
             return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=False)
         elif constraint_type == 'dual_constraint':
+            # In this case, we are optimizing both mass and concentration
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), guess[1], 10**guess[0], params[2], np.empty_like(params[0]))
-            # Don't update the concentration here - we are optimizing both mass and concentration
-            return calculate_chi_squared(params[3], lenses, params[4], lensing='NFW', use_weights=False) 
+            return calculate_chi_squared(params[3], lenses, params[4], lensing='NFW', use_weights=False)
     else:
         raise ValueError("Invalid lensing model: {}".format(model_type))
 

@@ -57,7 +57,7 @@ def GOF_file_reader(IDs):
 # Plotting Functions
 # --------------------------------------------
 
-def _plot_results(halo, true_halo, title, reducedchi2, xmax, ax=None, legend=True, show_mass = False):
+def _plot_results(halo, true_halo, title, reducedchi2, xmax, ax=None, legend=True, show_mass = False, show_chi2 = False):
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 8))
     
@@ -79,7 +79,7 @@ def _plot_results(halo, true_halo, title, reducedchi2, xmax, ax=None, legend=Tru
 
     # Extract positions and masses for both sets
     x_true, y_true, mass_true = [true_halo.x, true_halo.y, true_halo.mass]
-    x_recon, y_recon, mass_recon = [halo.x, halo.y, halo.mass]
+    x_recon, y_recon, mass_recon, chi2_recon = [halo.x, halo.y, halo.mass, halo.chi2]
 
     # Normalize the masses for better visualization in a logarithmic range
     mass_true_log = np.log10(mass_true)
@@ -111,6 +111,11 @@ def _plot_results(halo, true_halo, title, reducedchi2, xmax, ax=None, legend=Tru
     # Label the mass of each of the lenses (in log scale)
         for i in range(len(x_recon)):
             ax.text(x_recon[i], y_recon[i], '{:.2f}'.format(mass_recon_log[i]), fontsize=12, color='black')
+    
+    if show_chi2:
+        # Label the chi2 value of each of the lenses
+        for i in range(len(x_recon)):
+            ax.text(x_recon[i], y_recon[i], '{:.2f}'.format(chi2_recon[i]), fontsize=12, color='black')
 
 
 def build_mass_correlation_plot(ID_file, file_name, plot_name):
@@ -658,7 +663,8 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     lenses = sources.generate_initial_guess(z_l = 0.194, lens_type='NFW')
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Initial Guesses', reducedchi2, xmax, ax=axarr[0,0], legend=True)
-
+    axarr[0,0].scatter(sources.x, sources.y, color='black', label='Sources', alpha=0.5)
+    
     # Step 2: Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
@@ -679,11 +685,13 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     merger_threshold = (1/np.sqrt(ns))
     lenses.merge_close_lenses(merger_threshold=merger_threshold)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False)
+    _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False, show_chi2=True)
 
     # Step 6: Final minimization
-    # lenses.full_minimization(sources, use_flags)
-    lenses.two_param_minimization(sources, use_flags)
+    # Give them the correct concentration
+    results = lenses.two_param_minimization(sources, use_flags)
+    # lenses.optimize_lens_positions(sources, use_flags) # Try this instead - see if the offset is the problem
+    # lenses.complete_optimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False, show_mass=True)
 
@@ -717,6 +725,26 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     plt.savefig(plot_name)
     stop = time.time()
 
+    # Plot the minimized path
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    # Results contains the mass and concentration at each step
+    # concatenate into two arrays
+    # print('Results: {}'.format(results))
+    results = np.array(results)
+    results[:,0] = 10**results[:,0]
+    # Color the first point red and the last point green
+    colors = ['red'] + ['blue']*(len(results) - 2) + ['green']
+    ax.scatter(results[:, 0], results[:, 1], color=colors, label='Minimization Path')
+    dof = 6 * Nsource - 3 * len(lenses.x)
+    ax.scatter(halos.mass[0], dof, color='black', label='True Halo')
+    ax.legend()
+    ax.set_xscale('log')
+    ax.set_xlabel('Iteration')
+    ax.set_ylabel('Chi2')
+    ax.set_title('Minimization Path')
+    plt.savefig('Images/NFW_tests/standard_tests/{}/{}_Nlens_{}_{}_minimization.png'.format(directory, size, Nlens, noisy))
+    plt.close()
+
     print('Finished test: {} seconds'.format(stop - start))
     true_chi2 = halos.update_chi2_values(sources, use_flags)
     print('We beat the true chi2: {}'.format(true_chi2 > reducedchi2))
@@ -725,16 +753,19 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
 
 
 def run_simple_tests():
-    masses = [1e14, 1e13]
-    lens_numbers = [1,2]
-    noise_use = [True,False]
-    use_flags_choices = [[True, True, True], [True, True, False], [False, True, True], [True, False, True]]
+    ns = 0.01
+    xmax = 50
+    Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
+    masses = [1e14, 1e13, 1e12]
+    lens_numbers = [1]
+    noise_use = [True, False]
+    # use_flags_choices = [[True, True, True], [True, True, False], [False, True, True], [True, False, True]]
 
     for mass in masses:
         for Nlens in lens_numbers:
             for noise in noise_use:
-                for use_flags in use_flags_choices:
-                    simple_nfw_test(Nlens, 100, 50, mass, use_noise=noise, use_flags=use_flags)
+                # for use_flags in use_flags_choices:
+                simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=[True, True, True])
 
 
 def run_rr_tests():
@@ -776,15 +807,3 @@ def process_md_set(test_number):
 
 if __name__ == '__main__':
     run_simple_tests()
-    # VERY SIMPLE TEST OF NEW MASS ESTIMATE
-
-    raise ValueError('Testing complete')
-    halo = pipeline.Halo(np.array([0]), np.array([0]), np.array([0]), np.array([0]), np.array([1e13]), 0.194, np.array([0]))
-    halo.calculate_concentration()
-    source = pipeline.Source(np.array([10]), np.array([0]), np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1), np.ones(1) * 0.1, np.ones(1) * 0.01, np.ones(1) * 0.02)
-    source.apply_NFW_lensing(halo)
-    
-    lenses = source.generate_initial_guess(z_l = 0.194, lens_type='NFW')
-    print('Initial guess: {:2e}'.format(np.sum(lenses.mass)))
-    _, r200 = lenses.calc_R200()
-    print('R200: {}'.format(r200))

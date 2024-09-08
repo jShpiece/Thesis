@@ -219,10 +219,10 @@ def one_dimensional_calc():
 
     plt.show()
     plt.close()
-    raise ValueError('Stop here')
+    # raise ValueError('Stop here')
     # Take the second derivative of the first and second flexion - they should match
     f_first = np.gradient(flex_mag, dx)
-    f_second = np.gradient(f_first, dx)
+    f_second = np.gradient(f_first, dx) - flex_mag / dx**2 - 2 * f_first / dx
     g_first = np.gradient(g_flex_mag, dx)
     g_second = np.gradient(g_first, dx)
 
@@ -239,7 +239,6 @@ def one_dimensional_calc():
 
     plt.savefig('1d_flexion_second_derivative.png')
     plt.show()
-    
 
 
 def two_dimensional_calc():
