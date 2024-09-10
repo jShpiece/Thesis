@@ -533,7 +533,7 @@ class Halo:
 
     def two_param_minimization(self, sources, use_flags):
         # learning_rates = [0.1, 0.00001]  # Adjust learning rate for mass and concentration parameters
-        num_iterations = 10**3
+        num_iterations = 10**4
         '''
         for i in range(len(self.x)):
             # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
@@ -543,7 +543,7 @@ class Halo:
             self.mass[i], self.concentration[i] = 10**result[0], result[1]
         '''
         # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
-        # guess = [np.log10(self.mass), self.concentration]
+        # Try just minimizing the mass
         for i in range(len(self.x)):
             guess = [np.log10(self.mass[i])]
             learning_rates = [0.1]
@@ -678,6 +678,7 @@ def chi2wrapper(guess, params):
         elif constraint_type == 'constrained':
             # Check for overflow in the mass
             if guess > 16:
+                print('Overflow in mass')
                 return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass

@@ -50,17 +50,17 @@ def gradient_descent(func, initial_x, learning_rates, num_iterations, params):
     previous_func_val = func(x, params)
     for i in range(num_iterations):
         grad = numerical_gradient(func, x, params)
-        # grad = smooth_gradient(grad, 0.9)
-        # grad = clip_gradients(grad, 1) # Clip gradients to avoid large steps
+        grad = smooth_gradient(grad, 0.9)
+        grad = clip_gradients(grad, 1) # Clip gradients to avoid large steps
         x = x - learning_rates * grad
         path.append([x[0], func(x, params)])
         # Check for convergence
         func_val = func(x, params)
-        '''
+        
         if np.abs(func_val - previous_func_val) < 1e-6:
-            print(f'Converged after {i} iterations.')
+            # print(f'Converged after {i} iterations.')
             break
-        '''
+        
         previous_func_val = func_val
 
         # print(f'Iteration {i}: x = {x}, f(x) = {func_val}')

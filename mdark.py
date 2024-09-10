@@ -616,45 +616,7 @@ def visualize_fits(ID_file):
 def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[True, True, True]):
     # Create a simple lensing field and test the pipeline on it
     start = time.time()
-    # Create a set of lenses
-    if Nlens == 1:
-        x = np.array([0])
-        y = np.array([0])
-    elif Nlens == 2:
-        x = np.linspace(-xmax/2, xmax/2, Nlens)
-        y = np.array([0, 0])
-    else:
-        x = np.linspace(-xmax/2, xmax/2, Nlens)
-        y = np.linspace(-xmax/2, xmax/2, Nlens)
-    mass = np.ones(Nlens) * halo_mass
-
-    halos = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
-    halos.calculate_concentration()
-    
-    if Nsource == 1:
-        xs = np.random.uniform(-xmax, xmax, Nsource)
-        ys = np.random.uniform(-xmax, xmax, Nsource)
-    else:
-        n = int(np.sqrt(Nsource))
-        xs = np.linspace(-xmax, xmax, n)
-        ys = np.linspace(-xmax, xmax, n)
-        xs, ys = np.meshgrid(xs, ys)
-        xs = xs.flatten()
-        ys = ys.flatten()
-        Nsource = len(xs)
-    
-    sig_s = np.ones(Nsource) * 0.1
-    sig_f = np.ones(Nsource) * 0.01
-    sig_g = np.ones(Nsource) * 0.02
-    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
-    if use_noise:
-        sources.apply_noise()
-        noisy = 'noisy'
-    else:
-        noisy = 'noiseless'
-    sources.apply_NFW_lensing(halos)
-    sources.filter_sources()
-
+    halos, sources, noisy = utils.build_standardized_field(Nlens, Nsource, halo_mass, xmax, use_noise)
 
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(20, 15), sharex=True, sharey=True)
@@ -663,8 +625,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     lenses = sources.generate_initial_guess(z_l = 0.194, lens_type='NFW')
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Initial Guesses', reducedchi2, xmax, ax=axarr[0,0], legend=True)
-    axarr[0,0].scatter(sources.x, sources.y, color='black', label='Sources', alpha=0.5)
-    
+
     # Step 2: Optimize guesses with local minimization
     lenses.optimize_lens_positions(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
@@ -688,10 +649,19 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False, show_chi2=True)
 
     # Step 6: Final minimization
-    # Give them the correct concentration
+    # Grab only the best lens (if there are multiple)
+    '''
+    if len(lenses.x) > 1:
+        best_lens = np.argmin(lenses.chi2)
+        lenses.x = np.array([lenses.x[best_lens]])
+        lenses.y = np.array([lenses.y[best_lens]])
+        lenses.mass = np.array([lenses.mass[best_lens]])
+        lenses.concentration = np.array([lenses.concentration[best_lens]])
+        lenses.z = np.array([lenses.z[best_lens]])
+        lenses.chi2 = np.array([lenses.chi2[best_lens]])
+    '''
+    lenses.optimize_lens_positions(sources, use_flags) # Try this instead - see if the offset is the problem
     results = lenses.two_param_minimization(sources, use_flags)
-    # lenses.optimize_lens_positions(sources, use_flags) # Try this instead - see if the offset is the problem
-    # lenses.complete_optimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False, show_mass=True)
 
@@ -724,19 +694,31 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     plot_name = 'Images/NFW_tests/standard_tests/{}/{}_Nlens_{}_{}.png'.format(directory, size,Nlens,noisy)
     plt.savefig(plot_name)
     stop = time.time()
-
+    
     # Plot the minimized path
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    # Results contains the mass and concentration at each step
-    # concatenate into two arrays
-    # print('Results: {}'.format(results))
-    results = np.array(results)
-    results[:,0] = 10**results[:,0]
-    # Color the first point red and the last point green
-    colors = ['red'] + ['blue']*(len(results) - 2) + ['green']
-    ax.scatter(results[:, 0], results[:, 1], color=colors, label='Minimization Path')
-    dof = 6 * Nsource - 3 * len(lenses.x)
-    ax.scatter(halos.mass[0], dof, color='black', label='True Halo')
+    results = np.array(results) # Convert to numpy array
+    results[:,0] = 10**results[:,0] # Convert mass values to linear scale
+    colors = ['red'] + ['blue']*(len(results) - 2) + ['green'] # Color the first point red and the last point green
+    ax.scatter(results[:, 0], results[:, 1], color = colors, label='Minimization Path', alpha=0.5)
+    ax.axvline(halos.mass[0], color='black', linestyle='--', label='True Halo')
+
+    # Let's also get a sense of what the chi2 space looks like here
+    mass_range = np.logspace(np.log10(halo_mass)-1, np.log10(halo_mass)+1, 100)
+    test_lens = pipeline.Halo(lenses.x, lenses.y, lenses.z, lenses.concentration, lenses.mass, 0.194, np.zeros_like(lenses.x))
+    chi2_values = np.zeros_like(mass_range)
+    for i in range(len(mass_range)):
+        if len(lenses.x) > 1:
+            for j in range(len(lenses.x)):
+                test_lens.mass[j] = mass_range[i]
+        else:
+            test_lens.mass[0] = mass_range[i]
+        test_lens.update_chi2_values(sources, use_flags)
+        chi2_values[i] = test_lens.chi2[0] # Get the raw chi2, not the reduced chi2
+    ax.plot(mass_range, chi2_values, label='Chi2 Path', linestyle='--', c='red')
+    # Identify the lowest point
+    min_chi2 = np.min(chi2_values)
+    ax.axhline(min_chi2, color='blue', linestyle='--', label='Lowest Chi2', alpha=0.5)
     ax.legend()
     ax.set_xscale('log')
     ax.set_xlabel('Iteration')
@@ -744,6 +726,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     ax.set_title('Minimization Path')
     plt.savefig('Images/NFW_tests/standard_tests/{}/{}_Nlens_{}_{}_minimization.png'.format(directory, size, Nlens, noisy))
     plt.close()
+    
 
     print('Finished test: {} seconds'.format(stop - start))
     true_chi2 = halos.update_chi2_values(sources, use_flags)
@@ -806,4 +789,95 @@ def process_md_set(test_number):
 
 
 if __name__ == '__main__':
-    run_simple_tests()
+    # run_simple_tests()
+    # How does the error in mass inference change as a function of separation?
+    '''
+    Nlens = 1
+    Nsource = 100
+    xmax = 50
+    halo_mass = 1e14
+    use_noise = False
+    # Create a simple lensing field and test the pipeline on it
+    start = time.time()
+    
+    Ntrials = 1000
+    final_mass = []
+    mass_guess = np.array([1e13])
+    # Initialize progress bar
+    
+    utils.print_progress_bar(0, Ntrials, prefix='Progress:', suffix='Complete', length=50)
+    for n in range(Ntrials):
+        halos, sources, noisy = utils.build_standardized_field(Nlens, Nsource, halo_mass, xmax, use_noise)
+        x_guess = np.array([0])
+        y_guess = np.array([0])
+        halos_guess = pipeline.Halo(x_guess, y_guess, np.zeros_like(x_guess), np.zeros_like(x_guess), mass_guess, 0.194, np.zeros_like(x_guess))
+        halos_guess.calculate_concentration()
+        # Perform mass minimization
+        results = halos_guess.two_param_minimization(sources, [True, True, True])
+        final_mass.append(halos_guess.mass[0])
+        # Update the progress bar
+        utils.print_progress_bar(n, Ntrials, prefix='Progress:', suffix='Complete', length=50)
+    # Complete the progress bar
+    utils.print_progress_bar(Ntrials, Ntrials, prefix='Progress:', suffix='Complete', length=50)
+    stop = time.time()
+    print('Time taken: {}'.format(stop - start))
+    final_mass = np.array(final_mass)
+    # Save the data to a file
+    np.save('Data/nfw_mass_distribution_noiseless.npy', final_mass)
+    
+    # Create a histogram of the final masses
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    fancy_hist(final_mass, ax=ax, bins='freedman', color='black', histtype='step', density=True)
+    ax.axvline(halo_mass, color='black', linestyle='--', label='True Mass')
+    mean = np.mean(final_mass)
+    std = np.std(final_mass)
+    ax.axvline(mean, color='red', linestyle='--', label='Mean = {:.2e}'.format(mean))
+    ax.axvline(mean - std, color='blue', linestyle='--', label='Mean - Std = {:.2e}'.format(mean - std))
+    ax.axvline(mean + std, color='blue', linestyle='--', label='Mean + Std = {:.2e}'.format(mean + std))
+    ax.legend()
+    ax.set_xscale('log')
+    ax.set_xlabel('Final Mass ($M_\odot$)')
+    ax.set_ylabel('Probability Density')
+    ax.set_title('Mass Distribution - Ntrials = {}'.format(Ntrials))
+    plt.savefig('Images/NFW_tests/mass_error_noiseless.png')
+    plt.show()
+
+    '''
+    halos, sources, noisy = utils.build_standardized_field(Nlens, Nsource, xmax, halo_mass, use_noise)
+    r = np.linspace(0, 10, 50)
+    phi = np.linspace(0, 2*np.pi, 10)
+    mass_guess = 10**np.random.uniform(13, 15, 1)
+
+    mass_results = np.zeros_like(r)
+    errors = np.zeros_like(r)
+
+    # Create a progress bar
+    utils.print_progress_bar(0, len(r), prefix='Progress:', suffix='Complete', length=50)
+    for i in range(len(r)):
+        masses = []
+        for j in range(len(phi)):
+            # Create a guess lens, with a separation of r
+            x_guess = np.array([r[i] * np.cos(phi[j])])
+            y_guess = np.array([r[i] * np.sin(phi[j])])
+            halos_guess = pipeline.Halo(x_guess, y_guess, np.zeros_like(x_guess), np.zeros_like(x_guess), mass_guess, 0.194, np.zeros_like(x_guess))
+            halos_guess.calculate_concentration()
+            # Perform mass minimization
+            results = halos_guess.two_param_minimization(sources, [True, True, True])
+            masses.append(halos_guess.mass[0])
+        # Update the progress bar
+        utils.print_progress_bar(i, len(r), prefix='Progress:', suffix='Complete', length=50)
+        mass_results[i] = np.mean(masses)
+        errors[i] = np.std(masses)
+    # Complete the progress bar
+    utils.print_progress_bar(len(r), len(r), prefix='Progress:', suffix='Complete', length=50)
+    
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    ax.errorbar(r, mass_results, yerr=errors, fmt='o', color='black', label='Final Mass')
+    ax.set_xlabel('Separation (arcseconds)')
+    ax.set_ylabel('Inferred Mass ($M_\odot$)')
+    ax.set_yscale('log')
+    ax.set_title('Mass Inference as a Function of Separation (Noisy)')
+    ax.axhline(halo_mass, color='red', linestyle='--', label='True Mass')
+    plt.savefig('Images/NFW_tests/error_as_separation-close-noisy.png')
+    plt.show()
+    '''

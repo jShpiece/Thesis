@@ -223,12 +223,9 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     dy = sources.y - halos.y[:, np.newaxis]
     r = np.sqrt(dx**2 + dy**2)
     r = np.where(r == 0, 0.01, r) # Avoid division by zero
-
-    x = np.abs(r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis]))
-
+    x = np.abs(r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])) # Dimensionless quantity
 
     # Define the radial terms that go into lensing calculations - these are purely functions of x
-
 
     def radial_term_1(x):
         # This is called f(x) in theory
@@ -309,12 +306,14 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     shear_mag = - kappa_s[:, np.newaxis] * term_2
 
     def calc_f_flex(flexion_s, x, term_1, term_3):
-        I_1 = 2 * flexion_s[:, np.newaxis]
+        # Write as a function to improve readability
+        I_1 = -2 * flexion_s[:, np.newaxis]
         I_2 = 2 * x * term_1 / (x**2 - 1)**2
         I_3 = term_3 / (x**2 - 1)
-        return -I_1 * (I_2 - I_3) 
+        return I_1 * (I_2 - I_3) 
 
     def calc_g_flex(flexion_s, x, term_4):
+        # Write as a function to improve readability
         I_1 = 2 * flexion_s[:, np.newaxis]
         I_2 = (8 / x**3) * np.log(x / 2)
         I_3 = ((3 / x) * (1 - 2 * x**2) + term_4)
@@ -338,6 +337,47 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 # ------------------------------
 # Initialization functions
 # ------------------------------
+
+def build_standardized_field(Nlens, Nsource, halo_mass, xmax, use_noise=False):
+    # Create a set of lenses
+    if Nlens == 1:
+        x = np.array([0])
+        y = np.array([0])
+    elif Nlens == 2:
+        x = np.linspace(-xmax/2, xmax/2, Nlens)
+        y = np.array([0, 0])
+    else:
+        x = np.linspace(-xmax/2, xmax/2, Nlens)
+        y = np.linspace(-xmax/2, xmax/2, Nlens)
+    mass = np.ones(Nlens) * halo_mass
+
+    halos = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
+    halos.calculate_concentration()
+    
+    if Nsource == 1:
+        xs = np.random.uniform(-xmax, xmax, Nsource)
+        ys = np.random.uniform(-xmax, xmax, Nsource)
+    else:
+        n = int(np.sqrt(Nsource))
+        xs = np.linspace(-xmax, xmax, n)
+        ys = np.linspace(-xmax, xmax, n)
+        xs, ys = np.meshgrid(xs, ys)
+        xs = xs.flatten()
+        ys = ys.flatten()
+        Nsource = len(xs)
+    
+    sig_s = np.ones(Nsource) * 0.1
+    sig_f = np.ones(Nsource) * 0.01
+    sig_g = np.ones(Nsource) * 0.02
+    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
+    if use_noise:
+        sources.apply_noise()
+        noisy = 'noisy'
+    else:
+        noisy = 'noiseless'
+    sources.apply_NFW_lensing(halos)
+    sources.filter_sources()
+    return halos, sources, noisy
 
 
 def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5,lens_type='SIS'):
