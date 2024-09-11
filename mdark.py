@@ -856,25 +856,26 @@ if __name__ == '__main__':
     sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sigs, sigf, sigg)
     sources.apply_NFW_lensing(halo)
 
+    gamma = (sources.e1**2 + sources.e2**2)**0.5
+    flexion = (sources.f1**2 + sources.f2**2)**0.5
+    gflexion = (sources.g1**2 + sources.g2**2)**0.5
+
     sources_1 = copy.deepcopy(sources)
     sources_2 = copy.deepcopy(sources)
 
     # Now, one source is going to be set to have a signal to noise of 1 (for all signals), the other will have a signal to noise of 10
     # This is a sanity test to see if the pipeline results scale how we expect them to
 
-    gamma_1 = (sources_1.e1**2 + sources_1.e2**2)**0.5
-    sources_1.sigs = np.ones_like(sources_1.sigs) * gamma_1 # So that the signal to noise is 1
-    f_1 = (sources_1.f1**2 + sources_1.f2**2)**0.5
-    sources_1.sigf = np.ones_like(sources_1.sigf) * f_1
-    g_1 = (sources_1.g1**2 + sources_1.g2**2)**0.5
-    sources_1.sigg = np.ones_like(sources_1.sigg) * g_1
+    sources_1.sigs = np.ones_like(sources_1.sigs) * gamma # So that the signal to noise is 1
+    sources_1.sigf = np.ones_like(sources_1.sigf) * flexion
+    sources_1.sigg = np.ones_like(sources_1.sigg) * gflexion
 
-    gamma_2 = (sources_2.e1**2 + sources_2.e2**2)**0.5
-    sources_2.sigs = np.ones_like(sources_2.sigs) * gamma_2 / 10 # So that the signal to noise is 10
-    f_2 = (sources_2.f1**2 + sources_2.f2**2)**0.5
-    sources_2.sigf = np.ones_like(sources_2.sigf) * f_2 / 10
-    g_2 = (sources_2.g1**2 + sources_2.g2**2)**0.5
-    sources_2.sigg = np.ones_like(sources_2.sigg) * g_2 / 10
+    sources_2.sigs = np.ones_like(sources_2.sigs) * gamma / 10 # So that the signal to noise is 10
+    sources_2.sigf = np.ones_like(sources_2.sigf) * flexion / 10
+    sources_2.sigg = np.ones_like(sources_2.sigg) * gflexion / 10
+
+    print(sources_1.sigs)
+    print(sources_2.sigs)
 
     # NOW apply noise (otherwise we're just fiddling with the sigmas, then running the no-noise case)
     sources_1.apply_noise()
