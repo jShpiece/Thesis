@@ -405,17 +405,19 @@ class Halo:
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
 
-        learning_rates = [0.1, 0.1, 0.1] 
-        num_iterations = 10**2
+        learning_rates = [1e-2, 1e-2, 1e-4] 
+        num_iterations = 10**3
         beta1 = 0.9
         beta2 = 0.999
 
         for i in range(len(self.x)):
             guess = [self.x[i], self.y[i], np.log10(self.mass[i])] # Class is already initialized with initial guesses
-            params = ['NFW','unconstrained',sources, use_flags, self.concentration[i], self.redshift]
+            # guess = [self.x[i], self.y[i], self.mass[i]] # Class is already initialized with initial guesses
+            params = ['NFW','unconstrained', sources, use_flags, self.concentration[i], self.redshift]
             result, _ = minimizer.adam_optimizer(chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params)
 
             self.x[i], self.y[i], self.mass[i] = result[0], result[1], 10**result[2] # Optimize the mass in log space, then convert back to linear space
+            # self.x[i], self.y[i], self.mass[i] = result[0], result[1], result[2] 
             self.calculate_concentration() # Remember to update the concentration parameter
 
 
@@ -531,8 +533,8 @@ class Halo:
         self.calculate_concentration()
 
 
-    def two_param_minimization(self, sources, use_flags):
-        learning_rates = [0.1, 0.01]  # Adjust learning rate for mass and concentration parameters
+    def full_minimization(self, sources, use_flags):
+        learning_rates = [1e-4, 1e-5]  # Adjust learning rate for mass and concentration parameters
         num_iterations = 10**4
         
         for i in range(len(self.x)):
@@ -556,7 +558,7 @@ class Halo:
             result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
             self.mass[i] = 10**result[0]
         '''
-        return path
+        # return path
 
 # ------------------------------
 # Chi^2 functions
@@ -674,10 +676,11 @@ def chi2wrapper(guess, params):
     elif model_type == 'NFW':
         if constraint_type == 'unconstrained':
             lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], 10**guess[2], params[3], [0])
+            # lenses = Halo(guess[0], guess[1], np.zeros_like(guess[0]), params[2], guess[2], params[3], [0])
             lenses.calculate_concentration()
             return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=False)
         elif constraint_type == 'constrained':
-            lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
+            lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
             return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=False)
         elif constraint_type == 'dual_constraint':
@@ -748,7 +751,7 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
     # NOTE - if the number of lenses is too large, this step can take a long time
     # Right now, skip this step if there are more than 100 lenses
     if len(lenses.x) < 100:
-        lenses.full_minimization(sources, use_flags)
+        _ = lenses.full_minimization(sources, use_flags)
         reducedchi2 = lenses.update_chi2_values(sources, use_flags)
         print_step_info(flags, "After Final Minimization:", lenses, reducedchi2)
 

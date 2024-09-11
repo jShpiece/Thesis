@@ -353,6 +353,7 @@ def build_standardized_field(Nlens, Nsource, halo_mass, xmax, use_noise=False):
 
     halos = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
     halos.calculate_concentration()
+
     
     if Nsource == 1:
         xs = np.random.uniform(-xmax, xmax, Nsource)
