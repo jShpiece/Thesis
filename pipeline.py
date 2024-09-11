@@ -405,8 +405,8 @@ class Halo:
         # Given a set of initial guesses for lens positions, find the optimal lens positions
         # via local minimization
 
-        learning_rates = [0.1, 0.1, 0.1]  # Adjust learning rate for mass parameter
-        num_iterations = 100
+        learning_rates = [0.1, 0.1, 0.1] 
+        num_iterations = 10**2
         beta1 = 0.9
         beta2 = 0.999
 
@@ -427,7 +427,7 @@ class Halo:
         # Identify lenses that are too close to sources
         too_close_to_sources = np.any(distances_to_sources < threshold_distance, axis=1)
         # Identify lenses that are too far from the center
-        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > 1.5 * xmax
+        too_far_from_center = np.sqrt(self.x**2 + self.y**2) > xmax
         # Identify lenses with zero mass (or too small to be considered lenses)
         zero_mass_lenses = np.abs(self.mass) < 10**10
         # Identify lenses with a mass greater than one we could reasonably expect
@@ -532,9 +532,9 @@ class Halo:
 
 
     def two_param_minimization(self, sources, use_flags):
-        # learning_rates = [0.1, 0.00001]  # Adjust learning rate for mass and concentration parameters
+        learning_rates = [0.1, 0.01]  # Adjust learning rate for mass and concentration parameters
         num_iterations = 10**4
-        '''
+        
         for i in range(len(self.x)):
             # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
             guess = [np.log10(self.mass[i]), self.concentration[i]]
@@ -555,6 +555,7 @@ class Halo:
             params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
             result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
             self.mass[i] = 10**result[0]
+        '''
         return path
 
 # ------------------------------
@@ -676,10 +677,6 @@ def chi2wrapper(guess, params):
             lenses.calculate_concentration()
             return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=False)
         elif constraint_type == 'constrained':
-            # Check for overflow in the mass
-            if guess > 16:
-                print('Overflow in mass')
-                return np.inf
             lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
             return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=False)

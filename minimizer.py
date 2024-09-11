@@ -107,6 +107,7 @@ def adam_optimizer(func, initial_x, learning_rates, max_iterations=1000, beta1=0
         # Check for convergence
         current_func_val = func(x, params)
         if np.abs(current_func_val - prev_func_val) < tol:
+            # print(f'Converged after {i} iterations.')
             break
         prev_func_val = current_func_val
 
