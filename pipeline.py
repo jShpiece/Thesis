@@ -114,14 +114,28 @@ class Source:
 
     
     def apply_NFW_lensing(self, halos, z_source=0.8):
-        e1, e2, f1, f2, g1, g2 = utils.calculate_lensing_signals_nfw(halos, self, z_source)
 
+        # ...let's simplify
+        # do this one lens and one source at a time
+        for i in range(len(halos.x)):
+            this_halo = Halo(halos.x[i], halos.y[i], halos.z[i], halos.concentration[i], halos.mass[i], halos.redshift, [0])
+            for j in range(len(self.x)):
+                this_source = Source(self.x[j], self.y[j], self.e1[j], self.e2[j], self.f1[j], self.f2[j], self.g1[j], self.g2[j], self.sigs[j], self.sigf[j], self.sigg[j])
+                shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(this_halo, this_source, z_source)
+                self.e1[j] += shear_1
+                self.e2[j] += shear_2
+                self.f1[j] += flex_1
+                self.f2[j] += flex_2
+                self.g1[j] += gflex_1
+                self.g2[j] += gflex_2
+        '''
         self.e1 += e1
         self.e2 += e2
         self.f1 += f1
         self.f2 += f2
         self.g1 += g1
         self.g2 += g2
+        '''
 
 
 class Lens:
@@ -406,7 +420,7 @@ class Halo:
         # via local minimization
 
         learning_rates = [1e-2, 1e-2, 1e-4] 
-        num_iterations = 10**3
+        num_iterations = 10**1
         beta1 = 0.9
         beta2 = 0.999
 
@@ -535,7 +549,7 @@ class Halo:
 
     def full_minimization(self, sources, use_flags):
         learning_rates = [1e-4, 1e-5]  # Adjust learning rate for mass and concentration parameters
-        num_iterations = 10**4
+        num_iterations = 10**1
         
         for i in range(len(self.x)):
             # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
@@ -721,7 +735,7 @@ def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, Tru
                 print('Chi^2: ', reducedchi2)
 
     # Initialize candidate lenses from source guesses
-    lenses = sources.generate_initial_guess(lens_type)
+    lenses = sources.generate_initial_guess(lens_type=lens_type, z_l=0.194)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     print_step_info(flags, "Initial Guesses:", lenses, reducedchi2)
 

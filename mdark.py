@@ -624,6 +624,18 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     halos, sources, noisy = utils.build_standardized_field(Nlens, Nsource, halo_mass, xmax, use_noise)
     halos.update_chi2_values(sources, use_flags)
 
+    # Replace sources with a single source
+    '''
+    xs = np.array([5.0])
+    ys = np.array([0.0])
+    sigs = np.array([0.1])
+    sigf = np.array([0.01])
+    sigg = np.array([0.02])
+    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sigs, sigf, sigg)
+    sources.apply_NFW_lensing(halos)
+    if use_noise:
+        sources.apply_noise()
+    '''
     # Arrange a plot with 6 subplots in 2 rows
     fig, axarr = plt.subplots(2, 3, figsize=(20, 15), sharex=True, sharey=True)
 
@@ -633,28 +645,28 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Initial Guesses', reducedchi2, xmax, ax=axarr[0,0], legend=True)
     stop1 = time.time()
-    
+    print('Finished initial guesses')
     # Step 2: Optimize guesses with local minimization
     start2 = time.time()
     lenses.optimize_lens_positions(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Initial Optimization', reducedchi2, xmax, ax=axarr[0,1], legend=False)
     stop2 = time.time()
-
+    print('Finished optimization')
     # Step 3: Filter out lenses that are too far from the source population
     start3 = time.time()
     lenses.filter_lens_positions(sources, xmax)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Filtering', reducedchi2, xmax, ax=axarr[0,2], legend=False)
     stop3 = time.time()
-
+    print('Finished filtering')
     # Step 4: Iterative elimination
     start4 = time.time()
     lenses.iterative_elimination(sources, reducedchi2, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Lens Number Selection', reducedchi2, xmax, ax=axarr[1,0], legend=False)
     stop4 = time.time()
-    
+    print('Finished iterative elimination')
     # Step 5: Merge lenses that are too close to each other
     start5 = time.time()
     ns = len(sources.x) / (np.pi * xmax**2)
@@ -663,26 +675,10 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Merging', reducedchi2, xmax, ax=axarr[1,1], legend=False, show_chi2=True)
     stop5 = time.time()
-
+    print('Finished merging')
     # Step 6: Final minimization
     start6 = time.time()
-    # Store the positions (copy them, so that we can compare them later)
-    xvals = copy.deepcopy(lenses.x)
-    yvals = copy.deepcopy(lenses.y)
-    # Perturb the positions of the lenses slightly, otherwise optimize_lens_positions will fail
-    '''
-    for i in range(len(lenses.x)):
-        lenses.x[i] += np.random.normal(0, 10)
-        lenses.y[i] += np.random.normal(0, 10)
-    
-    lenses.optimize_lens_positions(sources, use_flags) # Try this instead - see if the offset is the problem
-    # Compare the results to the original positions, identify if there have been any changes
-    for i in range(len(lenses.x)):
-        r = np.sqrt((lenses.x[i] - xvals[i])**2 + (lenses.y[i] - yvals[i])**2)
-        if r > 1:
-            print('Lens {} has moved by {}'.format(i, r))
-    '''
-    results = lenses.two_param_minimization(sources, use_flags)
+    results = lenses.full_minimization(sources, use_flags)
     reducedchi2 = lenses.update_chi2_values(sources, use_flags)
     _plot_results(lenses, halos, 'Final Minimization', reducedchi2, xmax, ax=axarr[1,2], legend=False, show_mass=True)
     stop6 = time.time()
@@ -715,39 +711,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, halo_mass, use_noise=True, use_flags=[
     plot_name = 'Images/NFW_tests/standard_tests/{}/{}_Nlens_{}_{}.png'.format(directory, size,Nlens,noisy)
     plt.savefig(plot_name)
     stop = time.time()
-    '''
-    # Plot the minimized path
-    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    results = np.array(results) # Convert to numpy array
-    results[:,0] = 10**results[:,0] # Convert mass values to linear scale
-    colors = ['red'] + ['blue']*(len(results) - 2) + ['green'] # Color the first point red and the last point green
-    ax.scatter(results[:, 0], results[:, 1], color = colors, label='Minimization Path', alpha=0.5)
-    ax.axvline(halos.mass[0], color='black', linestyle='--', label='True Halo')
 
-    # Let's also get a sense of what the chi2 space looks like here
-    mass_range = np.logspace(np.log10(halo_mass)-1, np.log10(halo_mass)+1, 100)
-    test_lens = pipeline.Halo(lenses.x, lenses.y, lenses.z, lenses.concentration, lenses.mass, 0.194, np.zeros_like(lenses.x))
-    chi2_values = np.zeros_like(mass_range)
-    for i in range(len(mass_range)):
-        if len(lenses.x) > 1:
-            for j in range(len(lenses.x)):
-                test_lens.mass[j] = mass_range[i]
-        else:
-            test_lens.mass[0] = mass_range[i]
-        test_lens.update_chi2_values(sources, use_flags)
-        chi2_values[i] = test_lens.chi2[0] # Get the raw chi2, not the reduced chi2
-    ax.plot(mass_range, chi2_values, label='Chi2 Path', linestyle='--', c='red')
-    # Identify the lowest point
-    min_chi2 = np.min(chi2_values)
-    ax.axhline(min_chi2, color='blue', linestyle='--', label='Lowest Chi2', alpha=0.5)
-    ax.legend()
-    ax.set_xscale('log')
-    ax.set_xlabel('Iteration')
-    ax.set_ylabel('Chi2')
-    ax.set_title('Minimization Path')
-    plt.savefig('Images/NFW_tests/standard_tests/{}/{}_Nlens_{}_{}_minimization.png'.format(directory, size, Nlens, noisy))
-    plt.close()
-    '''
     true_chi2 = halos.update_chi2_values(sources, use_flags)
     print('Finished test: {} seconds'.format(stop - start))
     print('Step 1: {} seconds'.format(stop1 - start1))
@@ -814,8 +778,8 @@ def process_md_set(test_number):
 
 
 if __name__ == '__main__':
-    # run_simple_tests()
-    # raise ValueError('Tests complete')
+    run_simple_tests()
+    raise ValueError('Tests complete')
     '''
     # Quick test - does optimization move me far away from the true solution?
     Nsource = 100
@@ -848,7 +812,7 @@ if __name__ == '__main__':
     halo.calculate_concentration()
 
     # Create a source...lets say 10 arcseconds away
-    xs = np.array([10.0])
+    xs = np.array([5.0])
     ys = np.array([0.0])
     sigs = np.array([0.1])
     sigf = np.array([0.01])
@@ -862,6 +826,9 @@ if __name__ == '__main__':
 
     sources_1 = copy.deepcopy(sources)
     sources_2 = copy.deepcopy(sources)
+    sources_3 = copy.deepcopy(sources)
+    sources_4 = copy.deepcopy(sources)
+    sources_5 = copy.deepcopy(sources)
 
     # Now, one source is going to be set to have a signal to noise of 1 (for all signals), the other will have a signal to noise of 10
     # This is a sanity test to see if the pipeline results scale how we expect them to
@@ -874,25 +841,46 @@ if __name__ == '__main__':
     sources_2.sigf = np.ones_like(sources_2.sigf) * flexion / 10
     sources_2.sigg = np.ones_like(sources_2.sigg) * gflexion / 10
 
-    print(sources_1.sigs)
-    print(sources_2.sigs)
+    sources_3.sigs = np.ones_like(sources_3.sigs) * gamma / 100 # So that the signal to noise is 100
+    sources_3.sigf = np.ones_like(sources_3.sigf) * flexion / 100
+    sources_3.sigg = np.ones_like(sources_3.sigg) * gflexion / 100
+
+    sources_4.sigs = np.ones_like(sources_4.sigs) * gamma / 10**6 # So that the signal to noise is 10^6
+    sources_4.sigf = np.ones_like(sources_4.sigf) * flexion / 10**6
+    sources_4.sigg = np.ones_like(sources_4.sigg) * gflexion / 10**6
+
+    sources_5.sigs = np.ones_like(sources_5.sigs) / 10**10 # So that the signal to noise is infinite
+    sources_5.sigf = np.ones_like(sources_5.sigf) / 10**10
+    sources_5.sigg = np.ones_like(sources_5.sigg) / 10**10
 
     # NOW apply noise (otherwise we're just fiddling with the sigmas, then running the no-noise case)
     sources_1.apply_noise()
     sources_2.apply_noise()
+    sources_3.apply_noise()
+    sources_4.apply_noise()
+    # sources_5.apply_noise()
 
     # Now, run the pipeline on both sources
     use_flags = [True, True, True]
     xmax = 50
     lenses_1, reducedchi2_1 = pipeline.fit_lensing_field(sources_1, xmax, False, use_flags, lens_type='NFW')
     lenses_2, reducedchi2_2 = pipeline.fit_lensing_field(sources_2, xmax, False, use_flags, lens_type='NFW')
+    lenses_3, reducedchi2_3 = pipeline.fit_lensing_field(sources_3, xmax, False, use_flags, lens_type='NFW')
+    lenses_4, reducedchi2_4 = pipeline.fit_lensing_field(sources_4, xmax, False, use_flags, lens_type='NFW')
+    lenses_5, reducedchi2_5 = pipeline.fit_lensing_field(sources_5, xmax, False, use_flags, lens_type='NFW')
 
     # Now, plot the results
-    fig, ax = plt.subplots(1, 2, figsize=(20, 10))
+    fig, ax = plt.subplots(1, 5, figsize=(20, 10))
     title_1 = 'Signal to Noise 1'
     title_2 = 'Signal to Noise 10'
+    title_3 = 'Signal to Noise 100'
+    title_4 = 'Signal to Noise 10^6'
+    title_5 = 'Signal to Noise $\infty$'
     _plot_results(lenses_1, halo, title_1, reducedchi2_1, xmax, ax=ax[0], legend=True, show_mass=True)
     _plot_results(lenses_2, halo, title_2, reducedchi2_2, xmax, ax=ax[1], legend=True, show_mass=True)
+    _plot_results(lenses_3, halo, title_3, reducedchi2_3, xmax, ax=ax[2], legend=True, show_mass=True)
+    _plot_results(lenses_4, halo, title_4, reducedchi2_4, xmax, ax=ax[3], legend=True, show_mass=True)
+    _plot_results(lenses_5, halo, title_5, reducedchi2_5, xmax, ax=ax[4], legend=True, show_mass=True)
     plt.tight_layout()
     plt.show()
 
