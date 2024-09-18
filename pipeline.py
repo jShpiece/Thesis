@@ -557,20 +557,9 @@ class Halo:
 
 
     def full_minimization(self, sources, use_flags):
-        '''
-        learning_rates = [1e-4, 1e-5]  # Adjust learning rate for mass and concentration parameters
-        num_iterations = 10**4
-        
-        for i in range(len(self.x)):
-            # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
-            guess = [np.log10(self.mass[i]), self.concentration[i]]
-            params = ['NFW','dual_constraint',self.x[i], self.y[i], self.redshift, sources, use_flags]
-            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
-            self.mass[i], self.concentration[i] = 10**result[0], result[1]
-        '''
-
         # Okay - hail mary time
         # Perform a global optimization of the mass parameters
+        '''
         from scipy.optimize import differential_evolution
         bounds = [(10**9, 10**16)] * len(self.mass) # This will be the bounds for the mass parameters
         params = ('NFW', 'constrained', self.x, self.y, self.redshift, self.concentration, sources, use_flags)
@@ -579,18 +568,14 @@ class Halo:
         '''
         # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
         # Try just minimizing the mass
+        num_iterations = 10**4
         for i in range(len(self.x)):
             guess = [np.log10(self.mass[i])]
-            learning_rates = [0.1]
-            # Shape the learning rates to match the shape of the guess
-            # Guess will be a 2D array, 2 x number of lenses
-            # Learning rates will be a 2D array, 2 x 1
-            # We need to reshape the learning rates to match the shape of the guess
-            # learning_rates = np.array(learning_rates).reshape(-1, 1)
+            learning_rates = [1e-4]
             params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
             result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
             self.mass[i] = 10**result[0]
-        '''
+        
         # return path
 
 # ------------------------------
@@ -724,7 +709,7 @@ def chi2wrapper(guess, params):
             lenses.calculate_concentration()
             return calculate_chi_squared(params[0], lenses, params[1], lensing='NFW', use_weights=False)
         elif constraint_type == 'constrained':
-            lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], guess, params[2], np.empty_like(params[0]))
+            lenses = Halo(params[0], params[1], np.zeros_like(params[0]), params[3], 10**guess, params[2], np.empty_like(params[0]))
             lenses.calculate_concentration() # Update the concentration based on the new mass
             return calculate_chi_squared(params[4], lenses, params[5], lensing='NFW', use_weights=False)
         elif constraint_type == 'dual_constraint':

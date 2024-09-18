@@ -780,7 +780,7 @@ def run_simple_tests():
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
     masses = [1e14, 1e13]
     lens_numbers = [1, 2]
-    noise_use = [True]
+    noise_use = [False]
     # use_flags_choices = [[True, True, True], [True, True, False], [False, True, True], [True, False, True]]
 
     for mass in masses:
@@ -828,7 +828,75 @@ def process_md_set(test_number):
 
 
 if __name__ == '__main__':
-    run_simple_tests()
+    # run_simple_tests()
+
+    halo, sources, xmax = utils.build_standardized_field(1, 100, 1e14, 50, False)
+
+    
+
+    
+    # Randomly place a single source
+    xmax = 20
+    xs = np.array([10.0])
+    ys = np.array([0.0])
+    sigs = np.array([0.1])
+    sigf = np.array([0.01])
+    sigg = np.array([0.02])
+    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sigs, sigf, sigg)
+    sources.apply_NFW_lensing(halo)
+    
+    masses = []
+    perturbed_masses = []
+    Ntrials = 100
+    # Initialize progress bar
+    utils.print_progress_bar(0, Ntrials, prefix='Progress:', suffix='Complete', length=50)
+    for n in range(Ntrials):
+        sources.apply_noise()
+
+        # Create a lens object with the exactly correct position and concentration - this assumes that we perfectly located the halo, and the only thing we need to do is to calculate the mass
+        lens = copy.deepcopy(halo)
+        # Randomize the mass
+        # lens.mass = np.random.normal(1e14, 1e12, 1)
+
+        # Run the final minimization
+        results = lens.full_minimization(sources, [True, True, False])
+        reducedchi2 = lens.update_chi2_values(sources, [True, True, False])
+        masses.append(np.sum(lens.mass))
+
+        # Now clone the source object
+        sources_1 = copy.deepcopy(sources)
+        # Perturb e1 and f1
+        sources_1.e1 *= 0.95
+        sources_1.f1 *= 0.95
+        
+        results_1 = lens.full_minimization(sources_1, [True, True, False])
+        reducedchi2_1 = lens.update_chi2_values(sources_1, [True, True, False])
+        perturbed_masses.append(np.sum(lens.mass))
+        # Update the progress bar
+        utils.print_progress_bar(n + 1, Ntrials, prefix='Progress:', suffix='Complete', length=50)
+    
+    # Complete the progress bar
+    utils.print_progress_bar(Ntrials, Ntrials, prefix='Progress:', suffix='Complete', length=50)
+    
+    masses = np.array(masses)
+    masses = np.log10(masses)
+    perturbed_masses = np.array(perturbed_masses)
+    perturbed_masses = np.log10(perturbed_masses)
+    fig, ax = plt.subplots(1, 1, figsize=(15, 7))
+    fancy_hist(masses, ax=ax, bins='freedman', color='black', histtype='step', density=True, label='Mass', linestyle='--')
+    fancy_hist(perturbed_masses, ax=ax, bins='freedman', color='red', histtype='step', density=True, label='Perturbed Mass', linestyle='--')
+    ax.axvline(14, color='blue', linestyle='--', label='True Mass')
+    ax.axvline(np.mean(masses), color='black', linestyle='-', label='Mean Mass = {:.2f}'.format(np.mean(masses)))
+    ax.axvline(np.mean(perturbed_masses), color='red', linestyle='-', label='Mean Perturbed Mass = {:.2f}'.format(np.mean(perturbed_masses)))
+    ax.set_xlabel('Mass (log10)')
+    ax.set_ylabel('Probability Density')
+    ax.set_title('Mass Distribution')
+    ax.legend()
+    # ax[0].set_xscale('log')
+
+    plt.tight_layout()
+    plt.savefig('Images/NFW_tests/mass_chi2_distribution.png')
+    plt.show()
 
     raise ValueError('Testing complete')
 
