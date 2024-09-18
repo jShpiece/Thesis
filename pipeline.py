@@ -568,10 +568,10 @@ class Halo:
         '''
         # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
         # Try just minimizing the mass
-        num_iterations = 10**4
+        num_iterations = 10**3
         for i in range(len(self.x)):
             guess = [np.log10(self.mass[i])]
-            learning_rates = [1e-4]
+            learning_rates = [1e-2]
             params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
             result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
             self.mass[i] = 10**result[0]
