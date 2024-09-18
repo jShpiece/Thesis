@@ -204,11 +204,11 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     # Then the primary parameters are the masses and concentrations of the halos
 
     # Define angular diameter distances
-    Dl = angular_diameter_distances(halos.redshift, z_source)[0]
+    Dl, _, _ = angular_diameter_distances(halos.redshift, z_source)
 
     # Compute R200
     r200, r200_arcsec = halos.calc_R200()
-    rs = r200 / halos.concentration
+    rs = r200 / halos.concentration # Scale radius, in meters
 
     # Compute the critical surface density at the halo redshift
     rho_c = cosmo.critical_density(halos.redshift).to(u.kg / u.m**3).value 
@@ -223,8 +223,8 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     dy = sources.y - halos.y[:, np.newaxis]
     r = np.sqrt(dx**2 + dy**2)
     r = np.where(r == 0, 0.01, r) # Avoid division by zero
-    # x = np.abs(r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])) # Dimensionless quantity
-    x = np.abs(r / (r200_arcsec / halos.concentration))
+    x = np.abs(r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis])) # Dimensionless quantity
+    # x = np.abs(r / (r200_arcsec / halos.concentration))
 
     # Define the radial terms that go into lensing calculations - these are purely functions of x
 
@@ -304,21 +304,18 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     sin3phi = sin2phi * cos_phi + cos2phi * sin_phi # Sine of 3*phi
 
     # Compute lensing magnitudes (in arcseconds)
-    # shear_mag = - kappa_s[:, np.newaxis] * term_2
-    shear_mag = - kappa_s * term_2
+    shear_mag = - kappa_s[:, np.newaxis] * term_2
 
     def calc_f_flex(flexion_s, x, term_1, term_3):
         # Write as a function to improve readability
-        # I_1 = -2 * flexion_s[:, np.newaxis]
-        I_1 = -2 * flexion_s
+        I_1 = -2 * flexion_s[:, np.newaxis]
         I_2 = 2 * x * term_1 / (x**2 - 1)**2
         I_3 = term_3 / (x**2 - 1)
         return I_1 * (I_2 - I_3) 
 
     def calc_g_flex(flexion_s, x, term_4):
         # Write as a function to improve readability
-        # I_1 = 2 * flexion_s[:, np.newaxis]
-        I_1 = 2 * flexion_s
+        I_1 = 2 * flexion_s[:, np.newaxis]
         I_2 = (8 / x**3) * np.log(x / 2)
         I_3 = ((3 / x) * (1 - 2 * x**2) + term_4)
         I_4 = (x**2 - 1)**2

@@ -60,25 +60,32 @@ class Source:
             return Lens(np.array(self.x + r * np.cos(phi)), np.array(self.y + r * np.sin(phi)), np.array(te), np.empty_like(self.x))
         elif lens_type == 'NFW':
             r = 1.45 * gamma / flexion # A characteristic distance from the source
-            '''
-            te = 2 * gamma * r / 206265 # The Einstein radius of the lens in radians
-            from astropy.constants import c, G
-            _, Ds, Dls = utils.angular_diameter_distances(z_l, z_s)
-            rho_c = cosmo.critical_density(z_l).to(u.kg / u.m**3)
-            mass = (te * (c**2 / (2 * np.pi * G)) * (Ds / Dls) * (3 / (800 * np.pi * rho_c))**(1/3))**(3/2)
-            mass = mass.to(u.Msun).value
-            '''
-            Dl, Ds, Dls = utils.angular_diameter_distances(z_l, z_s)
-            sigma_crit = utils.critical_surface_density(z_l, z_s) * (Dl / 206265)**2 / M_solar
-            # Put sigma_crit in units of Msun / arcsec^2 from kg / m^2
-            mass = 2 * np.pi * r**3 * sigma_crit * flexion
-            # Problem - this is the mass *inside* of distance r, not the total mass of the lens
-            # But the source could be at any distance from the lens
-            # This may be the point at which we need to simply accept that this is an approximation
+
+            def estimate_nfw_mass_from_flexion(mass, params):
+                # unpack params
+                xl, yl, xs, ys, f1, f2 = params
+                # Create a halo
+                halo = Halo(xl, yl, np.zeros_like(xl), np.array([5]), np.array(mass), np.array([z_l]), np.empty_like(xl))
+                halo.calculate_concentration()
+                # create a source
+                source = Source(xs, ys, np.zeros_like(xs), np.zeros_like(ys), f1, f2, np.zeros_like(f1), np.zeros_like(f2), np.zeros_like(f1), np.zeros_like(f1), np.zeros_like(f1))
+                # get the flexion signals
+                shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(halo, source, z_s)
+                # Use this as a function to minimize - find the mass that minimizes the difference between the flexion signals
+                return np.sqrt((flex_1 - f1)**2 + (flex_2 - f2)**2)
             
             xl = np.array(self.x + r * np.cos(phi))
             yl = np.array(self.y + r * np.sin(phi))
-            halo = Halo(xl, yl, np.zeros_like(xl), np.array([5]), np.array(mass), np.array(z_l), np.empty_like(xl))
+
+            # Estimate the mass of the NFW halo
+            masses = []
+            for i in range(len(self.x)):
+                mass_guess = 10**13 # Initial guess for the mass
+                limits = [(10**10, 10**16)] # Mass limits
+                result = opt.minimize(estimate_nfw_mass_from_flexion, mass_guess, args=([xl[i], yl[i], self.x[i], self.y[i], self.f1[i], self.f2[i]]), method='Nelder-Mead', tol=1e-6, options={'maxiter': 1000}, bounds=limits)
+                masses.append(result.x[0] * 2)
+            
+            halo = Halo(xl, yl, np.zeros_like(xl), np.array([5]), np.array(masses), np.array(z_l), np.empty_like(xl))
             halo.calculate_concentration()
             return halo
 
@@ -117,6 +124,7 @@ class Source:
 
         # ...let's simplify
         # do this one lens and one source at a time
+        '''
         for i in range(len(halos.x)):
             this_halo = Halo(halos.x[i], halos.y[i], halos.z[i], halos.concentration[i], halos.mass[i], halos.redshift, [0])
             for j in range(len(self.x)):
@@ -129,13 +137,14 @@ class Source:
                 self.g1[j] += gflex_1
                 self.g2[j] += gflex_2
         '''
-        self.e1 += e1
-        self.e2 += e2
-        self.f1 += f1
-        self.f2 += f2
-        self.g1 += g1
-        self.g2 += g2
-        '''
+        shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(halos, self, z_source)
+        self.e1 += shear_1
+        self.e2 += shear_2
+        self.f1 += flex_1
+        self.f2 += flex_2
+        self.g1 += gflex_1
+        self.g2 += gflex_2
+        
 
 
 class Lens:
@@ -420,7 +429,7 @@ class Halo:
         # via local minimization
 
         learning_rates = [1e-2, 1e-2, 1e-4] 
-        num_iterations = 10**1
+        num_iterations = 10**3
         beta1 = 0.9
         beta2 = 0.999
 
@@ -548,8 +557,9 @@ class Halo:
 
 
     def full_minimization(self, sources, use_flags):
+        '''
         learning_rates = [1e-4, 1e-5]  # Adjust learning rate for mass and concentration parameters
-        num_iterations = 10**1
+        num_iterations = 10**4
         
         for i in range(len(self.x)):
             # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
@@ -557,6 +567,15 @@ class Halo:
             params = ['NFW','dual_constraint',self.x[i], self.y[i], self.redshift, sources, use_flags]
             result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
             self.mass[i], self.concentration[i] = 10**result[0], result[1]
+        '''
+
+        # Okay - hail mary time
+        # Perform a global optimization of the mass parameters
+        from scipy.optimize import differential_evolution
+        bounds = [(10**9, 10**16)] * len(self.mass) # This will be the bounds for the mass parameters
+        params = ('NFW', 'constrained', self.x, self.y, self.redshift, self.concentration, sources, use_flags)
+        result = differential_evolution(chi2wrapper, bounds, args=(params,))
+        self.mass = result.x
         '''
         # Do the minimization one lens at a time - hopefully this will drive the mass of false lenses to zero
         # Try just minimizing the mass
@@ -616,6 +635,13 @@ def calculate_chi_squared(sources, lenses, flags, lensing='SIS', use_weights = F
         sigs=sources.sigs, sigf=sources.sigf, sigg=sources.sigg
     )
 
+    assert np.all(source_clone.e1 == 0), "The cloned source should have zeroed lensing signals."
+    assert np.all(source_clone.e2 == 0), "The cloned source should have zeroed lensing signals."
+    assert np.all(source_clone.f1 == 0), "The cloned source should have zeroed lensing signals."
+    assert np.all(source_clone.f2 == 0), "The cloned source should have zeroed lensing signals."
+    assert np.all(source_clone.g1 == 0), "The cloned source should have zeroed lensing signals."
+    assert np.all(source_clone.g2 == 0), "The cloned source should have zeroed lensing signals."
+
     # Apply lensing effects to the cloned source
     if lensing == 'SIS':
         source_clone.apply_SIS_lensing(lenses)
@@ -674,6 +700,10 @@ def chi2wrapper(guess, params):
     Returns:
         float: Chi-squared value to be minimized.
     """
+
+    # Check if params were passed as a tuple - if so, unpack them into a list
+    if isinstance(params, tuple):
+        params = list(params)
 
     model_type, constraint_type = params[0], params[1]
     params = params[2:]
