@@ -831,9 +831,6 @@ if __name__ == '__main__':
     # run_simple_tests()
 
     halo, sources, xmax = utils.build_standardized_field(1, 100, 1e14, 50, False)
-
-    
-
     
     # Randomly place a single source
     xmax = 20
@@ -846,57 +843,85 @@ if __name__ == '__main__':
     sources.apply_NFW_lensing(halo)
     
     masses = []
-    perturbed_masses = []
-    Ntrials = 100
+    perturbation_1 = []
+    perturbation_2 = []
+    perturbation_3 = []
+    perturbation_4 = []
+
+    def perturb_source(target_source, shear_dir, flex_dir):
+        if shear_dir == 'plus':
+            target_source.e1 *= 1.05
+            # target_source.e2 *= 1.05
+        elif shear_dir == 'minus':
+            target_source.e1 *= 0.95
+            # target_source.e2 *= 0.95
+        else:
+            raise ValueError('Invalid shear direction specified')
+        
+        if flex_dir == 'plus':
+            target_source.f1 *= 1.05
+            # target_source.f2 *= 1.05
+        elif flex_dir == 'minus':
+            target_source.f1 *= 0.95
+            # target_source.f2 *= 0.95
+        else:
+            raise ValueError('Invalid flexion direction specified')
+        return target_source
+
+
+    Ntrials = 1000
     # Initialize progress bar
     utils.print_progress_bar(0, Ntrials, prefix='Progress:', suffix='Complete', length=50)
     for n in range(Ntrials):
-        sources.apply_noise()
+        # Clone the source object, otherwise we add noise to the same object each time
+        source_clone = copy.deepcopy(sources)
+        source_clone.apply_noise()
 
         # Create a lens object with the exactly correct position and concentration - this assumes that we perfectly located the halo, and the only thing we need to do is to calculate the mass
         lens = copy.deepcopy(halo)
         # Randomize the mass
-        # lens.mass = np.random.normal(1e14, 1e12, 1)
+        starting_mass = np.random.normal(1e14, 1e13, 1)
+        lens.mass[0] = starting_mass[0]
 
         # Run the final minimization
-        results = lens.full_minimization(sources, [True, True, False])
-        reducedchi2 = lens.update_chi2_values(sources, [True, True, False])
-        masses.append(np.sum(lens.mass))
+        lens.full_minimization(source_clone, [True, True, False])
+        masses.append((lens.mass))
 
-        # Now clone the source object
-        sources_1 = copy.deepcopy(sources)
-        # Perturb e1 and f1
-        sources_1.e1 *= 0.95
-        sources_1.f1 *= 0.95
-        
-        results_1 = lens.full_minimization(sources_1, [True, True, False])
-        reducedchi2_1 = lens.update_chi2_values(sources_1, [True, True, False])
-        perturbed_masses.append(np.sum(lens.mass))
+        # Now, clone the source object and perturb it in different ways
+        perturbations = [['plus', 'plus'], ['plus', 'minus'], ['minus', 'plus'], ['minus', 'minus']]
+        results = [perturbation_1, perturbation_2, perturbation_3, perturbation_4]
+        for perturbation in perturbations:
+            source_clone_perturbation = copy.deepcopy(source_clone)
+            source_clone_perturbation = perturb_source(source_clone_perturbation, perturbation[0], perturbation[1])
+            lens_clone = copy.deepcopy(halo)
+            lens_clone.mass[0] = starting_mass[0]
+            lens_clone.full_minimization(source_clone_perturbation, [True, True, False])
+            results[perturbations.index(perturbation)].append((lens_clone.mass))
+
+
         # Update the progress bar
-        utils.print_progress_bar(n + 1, Ntrials, prefix='Progress:', suffix='Complete', length=50)
-    
-    # Complete the progress bar
-    utils.print_progress_bar(Ntrials, Ntrials, prefix='Progress:', suffix='Complete', length=50)
-    
-    masses = np.array(masses)
-    masses = np.log10(masses)
-    perturbed_masses = np.array(perturbed_masses)
-    perturbed_masses = np.log10(perturbed_masses)
-    fig, ax = plt.subplots(1, 1, figsize=(15, 7))
-    fancy_hist(masses, ax=ax, bins='freedman', color='black', histtype='step', density=True, label='Mass', linestyle='--')
-    fancy_hist(perturbed_masses, ax=ax, bins='freedman', color='red', histtype='step', density=True, label='Perturbed Mass', linestyle='--')
-    ax.axvline(14, color='blue', linestyle='--', label='True Mass')
-    ax.axvline(np.mean(masses), color='black', linestyle='-', label='Mean Mass = {:.2f}'.format(np.mean(masses)))
-    ax.axvline(np.mean(perturbed_masses), color='red', linestyle='-', label='Mean Perturbed Mass = {:.2f}'.format(np.mean(perturbed_masses)))
-    ax.set_xlabel('Mass (log10)')
-    ax.set_ylabel('Probability Density')
-    ax.set_title('Mass Distribution')
-    ax.legend()
-    # ax[0].set_xscale('log')
+        utils.print_progress_bar(n+1, Ntrials, prefix='Progress:', suffix='Complete', length=50)
 
+    # Turn lists into numpy arrays, convert to log space
+    masses = np.log10(np.array(masses))
+    perturbations = [np.log10(np.array(perturbation)) for perturbation in [perturbation_1, perturbation_2, perturbation_3, perturbation_4]]
+    # Check that each perturbation has the same length
+    assert len(perturbation_1) == len(perturbation_2) == len(perturbation_3) == len(perturbation_4)
+
+    # Plot the results
+    fig, ax = plt.subplots(5, 1, figsize=(10, 20))
+    ax = ax.flatten()
+    fancy_hist(masses, ax=ax[0], bins='freedman', color='black', histtype='step', density=True)
+    ax[0].set_title('No Perturbation')
+    titles = ['Shear +, Flexion +', 'Shear +, Flexion -', 'Shear -, Flexion +', 'Shear -, Flexion -']
+    for i in range(4):
+        fancy_hist(masses, ax=ax[i+1], bins='freedman', color='black', histtype='step', density=True, label = 'No Perturbation', linestyle='-')
+        fancy_hist(perturbations[i], ax=ax[i+1], bins='freedman', color='red', histtype='step', density=True, label = 'Perturbed', linestyle='--')
+        ax[i+1].set_title(titles[i])
+        ax[i+1].legend()
     plt.tight_layout()
-    plt.savefig('Images/NFW_tests/mass_chi2_distribution.png')
     plt.show()
+
 
     raise ValueError('Testing complete')
 

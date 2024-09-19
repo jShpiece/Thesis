@@ -146,7 +146,6 @@ class Source:
         self.g2 += gflex_2
         
 
-
 class Lens:
     # Class to store lens information. Each lens has a position (x, y) and an Einstein radius (te)
     def __init__(self, x, y, te, chi2):
@@ -573,11 +572,9 @@ class Halo:
             guess = [np.log10(self.mass[i])]
             learning_rates = [1e-2]
             params = ['NFW','constrained',self.x[i], self.y[i], self.redshift, self.concentration[i], sources, use_flags]
-            result, path = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
+            result, _ = minimizer.gradient_descent(chi2wrapper, guess, learning_rates=learning_rates, num_iterations=num_iterations, params=params)
             self.mass[i] = 10**result[0]
         
-        # return path
-
 # ------------------------------
 # Chi^2 functions
 # ------------------------------
