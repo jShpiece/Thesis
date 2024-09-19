@@ -7,7 +7,7 @@ from astropy.visualization import hist as fancyhist
 from multiprocessing import Pool
 from functools import partial
 import sklearn.metrics
-import mdark
+import tests_NFW
 
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
@@ -335,11 +335,11 @@ if __name__ == '__main__':
     # true_lenses = utils.createLenses(nlens=Nlens, randompos=True, xmax=xmax)
     ID = [11400399088]
     z = 0.194
-    halos = mdark.find_halos(ID, z)
+    halos = tests_NFW.find_halos(ID, z)
     # The halos object is a dictionary, keyed by the ID of the halo
     # We only have one halo, so we can extract it by taking the first key
     halo = halos[ID[0]]
-    halo, _, xmax = mdark.build_lensing_field(halo, z, Nsource)
+    halo, _, xmax = tests_NFW.build_lensing_field(halo, z, Nsource)
 
     eR = halo.calc_corresponding_einstein_radius(0.8)
     print('Einstein Radius:', eR)

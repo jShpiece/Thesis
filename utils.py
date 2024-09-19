@@ -3,7 +3,6 @@ from astropy.cosmology import Planck15 as cosmo
 from astropy.constants import c, G
 from astropy import units as u
 import scipy.ndimage
-import pipeline
 from itertools import combinations
 
 # ------------------------
@@ -81,6 +80,14 @@ def compute_source_weights(lenses, sources, r_char = 10):
 
 def find_combinations(values, k):
     return list(combinations(values, k))
+
+
+def filter_combinations(combinations):
+    # We only need to keep 'unique' combinations - there's no difference between [1, 2] and [2, 1]
+    # We can sort the combinations and then use np.unique to get the unique combinations
+    sorted_combinations = np.sort(combinations, axis=1)
+    unique_combinations = np.unique(sorted_combinations, axis=0)
+    return unique_combinations
 
 # ------------------------
 # Lensing Utility Functions
@@ -339,104 +346,4 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 # Initialization functions
 # ------------------------------
 
-def build_standardized_field(Nlens, Nsource, halo_mass, xmax, use_noise=False):
-    # Create a set of lenses
-    if Nlens == 1:
-        x = np.array([0])
-        y = np.array([0])
-    elif Nlens == 2:
-        x = np.linspace(-xmax/2, xmax/2, Nlens)
-        y = np.array([0, 0])
-    else:
-        x = np.linspace(-xmax/2, xmax/2, Nlens)
-        y = np.linspace(-xmax/2, xmax/2, Nlens)
-    mass = np.ones(Nlens) * halo_mass
 
-    halos = pipeline.Halo(x, y, np.zeros_like(x), np.zeros(Nlens), mass, 0.194, np.zeros_like(x))
-    halos.calculate_concentration()
-
-    
-    if Nsource == 1:
-        xs = np.random.uniform(-xmax, xmax, Nsource)
-        ys = np.random.uniform(-xmax, xmax, Nsource)
-    else:
-        n = int(np.sqrt(Nsource))
-        xs = np.linspace(-xmax, xmax, n)
-        ys = np.linspace(-xmax, xmax, n)
-        xs, ys = np.meshgrid(xs, ys)
-        xs = xs.flatten()
-        ys = ys.flatten()
-        Nsource = len(xs)
-    
-    sig_s = np.ones(Nsource) * 0.1
-    sig_f = np.ones(Nsource) * 0.01
-    sig_g = np.ones(Nsource) * 0.02
-    sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
-    if use_noise:
-        sources.apply_noise()
-        noisy = 'noisy'
-    else:
-        noisy = 'noiseless'
-    sources.apply_NFW_lensing(halos)
-    sources.filter_sources()
-    return halos, sources, noisy
-
-
-def createSources(lenses,ns=1,randompos=True,sigs=0.1,sigf=0.01,sigg=0.02,xmax=5,lens_type='SIS'):
-    #Create sources for a lensing system and apply the lensing signal
-    #Create the sources - require that they be distributed sphericaly
-    if randompos == True:
-        r = xmax*np.sqrt(np.random.random(ns))
-        phi = 2*np.pi*np.random.random(ns)
-    else: #Uniformly spaced sources - single choice of r, uniform phi
-        r = xmax / 2
-        phi = 2*np.pi*(np.arange(ns)+0.5)/(ns)
-    
-    x = r*np.cos(phi)
-    y = r*np.sin(phi)
-
-    sources = pipeline.Source(x, y, 
-                            np.zeros_like(x), np.zeros_like(y),
-                            np.zeros_like(x), np.zeros_like(y),
-                            np.zeros_like(x), np.zeros_like(y), 
-                            np.ones_like(x) * sigs, np.ones_like(x) * sigf, np.ones_like(x) * sigg)
-    # Now apply noise
-    sources.apply_noise()
-    # Apply the lensing effects of the lenses
-    if lens_type == 'SIS':
-        sources.apply_SIS_lensing(lenses)
-    elif lens_type == 'NFW':
-        # Note - in this case the 'lenses' object is actually a 'halos' object
-        # The effect is the same in practice
-        sources.apply_NFW_lensing(lenses)
-    sources.filter_sources() # Remove sources that are too close to the lens
-    return sources
-
-
-def createLenses(nlens=1,randompos=True,xmax=10,strength_choice='identical'):
-    if randompos == True:
-        r = xmax*np.sqrt(np.random.random(nlens))
-        phi = 2*np.pi*np.random.random(nlens)  
-        xlarr = r*np.cos(phi)
-        ylarr = r*np.sin(phi)
-
-    else: #Uniformly spaced lenses
-        xlarr = -xmax + 2*xmax*(np.arange(nlens)+0.5)/(nlens)
-        ylarr = np.zeros(nlens)
-    
-    # Now we assign einstein radii based on the strength_choice
-    if strength_choice == 'identical':
-        tearr = np.ones(nlens)
-    elif strength_choice == 'random':
-        tearr = np.random.random(nlens) * 20
-    elif strength_choice == 'uniform':
-        tearr = np.linspace(0.1, 20, nlens)
-    elif strength_choice == 'cluster':
-        tearr = np.ones(nlens)
-        tearr[0] = 10
-    else:
-        raise ValueError("Invalid strength_choice")
-
-    
-    lenses = pipeline.Lens(xlarr, ylarr, tearr, np.empty(nlens))
-    return lenses
