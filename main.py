@@ -1,61 +1,93 @@
+"""
+Module for fitting gravitational lensing fields.
+
+This module provides the `fit_lensing_field` function, which reconstructs the lensing field
+from a set of source observations (positions, ellipticity, flexion signals).
+The lensing field is represented by a set of lenses (positions and parameters),
+and can be modeled as Singular Isothermal Spheres (SIS) or Navarro-Frenk-White (NFW) halos.
+
+Functions:
+    - fit_lensing_field
+"""
+
 import pipeline
 
-def fit_lensing_field(sources, xmax, flags = False, use_flags = [True, True, True], lens_type='SIS'):
-    '''
-    This function takes in a set of sources - with positions, ellipticity, and flexion 
-    signals, and attempts to reconstruct the lensing field that produced them. 
-    The lensing field is represented by a set of lenses - with positions and Einstein radii. 
-    The lenses are modeled as Singular Isothermal Spheres (SIS) by default, but can be
-    modeled as NFW halos as well.
-    Parameters:
-    - sources (Source): An object containing source properties and their uncertainties.
-    - xmax (float): The maximum distance from the center of the field to consider for lenses.
-    - flags (bool): Whether to print out step information.
-    - use_flags (list of bool): Flags indicating which lensing effects to include [use_shear, use_flexion, use_g_flexion].
-    - lens_type (str): The type of lens to use - 'SIS' or 'NFW'.
-    Returns:
-    - lenses (Lens): An object representing the lenses that best fit the source properties.
-    - reducedchi2 (float): The reduced chi-squared value for the best fit.
-    '''
+def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], lens_type='SIS'):
+    """
+    Reconstructs the lensing field that produced the observed source properties.
 
-    def print_step_info(flags,message,lenses,reducedchi2):
-        # Helper function to print out step information
+    This function takes in a set of sources with positions, ellipticity, and flexion signals,
+    and attempts to reconstruct the lensing field that produced them.
+    The lensing field is represented by a set of lenses with positions and parameters.
+    Lenses can be modeled as Singular Isothermal Spheres (SIS) by default, or as
+    Navarro-Frenk-White (NFW) halos.
+
+    Parameters:
+        sources (Source): An object containing source properties and their uncertainties.
+        xmax (float): The maximum distance from the center of the field to consider for lenses.
+        flags (bool, optional): Whether to print out step information. Default is False.
+        use_flags (list of bool, optional): Flags indicating which lensing effects to include
+            [use_shear, use_flexion, use_g_flexion]. Default is [True, True, True].
+        lens_type (str, optional): The type of lens to use ('SIS' or 'NFW'). Default is 'SIS'.
+
+    Returns:
+        Tuple[Lens, float]: A tuple containing:
+            - lenses (Lens): An object representing the lenses that best fit the source properties.
+            - reduced_chi2 (float): The reduced chi-squared value for the best fit.
+    """
+    def print_step_info(flags, message, lenses, reduced_chi2):
+        """
+        Helper function to print out step information during the fitting process.
+
+        Parameters:
+            flags (bool): Whether to print out the information.
+            message (str): Message describing the current step.
+            lenses (Lens): The current set of lenses.
+            reduced_chi2 (float): The current reduced chi-squared value.
+        """
         if flags:
             print(message)
-            print('Number of lenses: ', len(lenses.x))
-            if reducedchi2 is not None:
-                print('Chi^2: ', reducedchi2)
+            print(f'Number of lenses: {len(lenses.x)}')
+            if reduced_chi2 is not None:
+                print(f'Reduced Chi^2: {reduced_chi2:.4f}')
 
-    # Initialize candidate lenses from source guesses
-    lenses = pipeline.generate_initial_guess(lens_type=lens_type, z_l=0.194)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    print_step_info(flags, "Initial Guesses:", lenses, reducedchi2)
+    # Step 1: Generate initial candidate lenses from source guesses
+    z_lens = 0.194  # Example redshift of the lens
+    lenses = pipeline.generate_initial_guess(sources, lens_type=lens_type, z_l=z_lens)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    print_step_info(flags, "Initial Guesses:", lenses, reduced_chi2)
 
-    # Optimize lens positions via local minimization
+    # Step 2: Optimize lens positions via local minimization
     lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    print_step_info(flags, "Local Minimization:", lenses, reducedchi2)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    print_step_info(flags, "After Local Minimization:", lenses, reduced_chi2)
 
-    # Filter out lenses that are too close to sources or too far from the center
+    # Step 3: Filter out lenses that are too close to sources or too far from the center
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type=lens_type)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    print_step_info(flags, "After Filtering:", lenses, reducedchi2)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    print_step_info(flags, "After Filtering:", lenses, reduced_chi2)
 
-    # Choose the 'lens_floor' lenses which gives the best reduced chi^2 value
-    lenses = pipeline.iterative_elimination(sources, lenses, reducedchi2, use_flags, lens_type)
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    print_step_info(flags, "After Iterative Elimination:", lenses, reducedchi2)
+    # Step 4: Iteratively eliminate lenses to find the best reduced chi-squared value
+    lenses = pipeline.iterative_elimination(sources, lenses, reduced_chi2, use_flags, lens_type)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    print_step_info(flags, "After Iterative Elimination:", lenses, reduced_chi2)
 
-    # Merge lenses that are too close to each other
-    ns = len(sources.x) / (2 * xmax)**2
-    merger_threshold = (1 / ns)**0.5
-    lenses = pipeline.merge_close_lenses(merger_threshold=merger_threshold) #This is a placeholder value
-    reducedchi2 = lenses.update_chi2_values(sources, use_flags)
-    print_step_info(flags, "After Merging:", lenses, reducedchi2)
+    # Step 5: Merge lenses that are too close to each other
+    # Calculate source density (ns) for merger threshold calculation
+    area = (2 * xmax) ** 2  # Total area of the field
+    ns = len(sources.x) / area  # Source density per unit area
+    if ns > 0:
+        merger_threshold = (1 / ns) ** 0.5  # Merger threshold based on source density
+    else:
+        merger_threshold = 0.1  # Default small value if ns is zero
+    lenses = pipeline.merge_close_lenses(lenses, merger_threshold=merger_threshold, lens_type=lens_type)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    print_step_info(flags, "After Merging Lenses:", lenses, reduced_chi2)
 
-    # Perform a final minimization on the remaining lenses
+    # Step 6: Perform a final optimization on the lens strengths
     lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type)
-    reducedchi2 = lenses.update_chi2_values(sources, [True, True, True]) # Always use all signals for final fit
-    print_step_info(flags, "After Final Minimization:", lenses, reducedchi2)
+    # Always use all signals for final fit
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, [True, True, True])
+    print_step_info(flags, "After Final Optimization:", lenses, reduced_chi2)
 
-    return lenses, reducedchi2
+    return lenses, reduced_chi2

@@ -2,101 +2,165 @@ import numpy as np
 from astropy.cosmology import Planck15 as cosmo
 from astropy import units as u
 
-# Constants
-M_solar = 1.989e30 # kg
-G = 6.67430e-11 # m^3 kg^-1 s^-2
-c = 299792458 # m/s
+# Physical constants
+M_SUN = 1.989e30  # Mass of the sun in kg
+G = 6.67430e-11   # Gravitational constant in m^3 kg^-1 s^-2
+C = 299_792_458   # Speed of light in m/s
 
 class SIS_Lens:
-    # Class to store lens information. Each lens has a position (x, y) and an Einstein radius (te)
+    """
+    Represents a Singular Isothermal Sphere (SIS) lens.
+
+    Attributes:
+        x (np.ndarray): x-positions of the lens(es).
+        y (np.ndarray): y-positions of the lens(es).
+        te (np.ndarray): Einstein radius (theta_E) of the lens(es).
+        chi2 (np.ndarray): Chi-squared values associated with the lens(es).
+    """
+
     def __init__(self, x, y, te, chi2):
-        # When initializing the Lens object, make sure all inputs are numpy arrays
+        """
+        Initializes the SIS_Lens object.
+
+        Parameters:
+            x (array_like): x-positions of the lens(es).
+            y (array_like): y-positions of the lens(es).
+            te (array_like): Einstein radius (theta_E) of the lens(es).
+            chi2 (array_like): Chi-squared values associated with the lens(es).
+        """
+        # Ensure inputs are numpy arrays
         self.x = np.atleast_1d(x)
         self.y = np.atleast_1d(y)
         self.te = np.atleast_1d(te)
         self.chi2 = np.atleast_1d(chi2)
 
-
 class NFW_Lens:
-    # Class to store halo information. Each halo has a position (x, y, z), concentration, mass, redshift, and chi^2 value
+    """
+    Represents a Navarro-Frenk-White (NFW) lens or halo.
 
+    Attributes:
+        x (np.ndarray): x-positions of the halo(s).
+        y (np.ndarray): y-positions of the halo(s).
+        z (np.ndarray): z-positions of the halo(s).
+        concentration (np.ndarray): Concentration parameters of the halo(s).
+        mass (np.ndarray): Masses of the halo(s) in solar masses.
+        redshift (float): Redshift of the cluster (assumed the same for all halos).
+        chi2 (np.ndarray): Chi-squared values associated with the halo(s).
+    """
 
     def __init__(self, x, y, z, concentration, mass, redshift, chi2):
-        # Initialize the halo object with the given parameters
+        """
+        Initializes the NFW_Lens object.
+
+        Parameters:
+            x (array_like): x-positions of the halo(s).
+            y (array_like): y-positions of the halo(s).
+            z (array_like): z-positions of the halo(s).
+            concentration (array_like): Concentration parameters of the halo(s).
+            mass (array_like): Masses of the halo(s) in solar masses.
+            redshift (float): Redshift of the cluster (assumed the same for all halos).
+            chi2 (array_like): Chi-squared values associated with the halo(s).
+        """
+        # Ensure inputs are numpy arrays
         self.x = np.atleast_1d(x)
         self.y = np.atleast_1d(y)
         self.z = np.atleast_1d(z)
         self.concentration = np.atleast_1d(concentration)
         self.mass = np.atleast_1d(mass)
-        # Ensure the mass array is not empty
-        if mass.size == 0:
-            print(mass)
-            raise ValueError('Mass cannot be empty')
-        self.mass = np.atleast_1d(np.abs(mass)) # Masses must be positive
-        self.redshift = redshift # Redshift of the cluster, assumed to be the same for all halos
         self.chi2 = np.atleast_1d(chi2)
+        self.redshift = redshift
 
-    # --------------------------------------------
-    # Halo Calculation Functions
-    # --------------------------------------------
+        # Check if mass array is empty
+        if self.mass.size == 0:
+            print(self.mass)
+            raise ValueError('Mass cannot be empty')
+
+        # Ensure masses are positive
+        self.mass = np.abs(self.mass)
 
     def project_to_2D(self):
         """
-        Projects a set of 3D points onto the plane formed by the first two principal eigenvectors.
-        This will shift from our halos being in object 3D space to being in a projected 2D space.
+        Projects 3D positions onto a 2D plane formed by the first two principal components.
+
+        This method uses Principal Component Analysis (PCA) to project the halos from
+        3D space onto a 2D plane, effectively reducing dimensionality while preserving
+        as much variance as possible. After projection, the z-values are set to zero.
         """
+        # Validate input dimensions
+        if not (len(self.x) == len(self.y) == len(self.z)):
+            raise ValueError("The x, y, and z arrays must have the same length.")
+        if not (self.x.ndim == self.y.ndim == self.z.ndim == 1):
+            raise ValueError("The x, y, and z arrays must be 1D.")
+        if len(self.x) <= 1:
+            raise ValueError("At least two points are required for projection.")
 
-        # Sanity checks
-        assert len(self.x) == len(self.y) == len(self.z), "The x, y, and z arrays must have the same length."
-        assert self.x.ndim == self.y.ndim == self.z.ndim == 1, "The x, y, and z arrays must be 1D."
-        assert len(self.x) > 1, "At least two points are required."
-
-        # Combine the x, y, z coordinates into a single matrix
+        # Stack coordinates into an (N, 3) array
         points = np.vstack((self.x, self.y, self.z)).T
 
-        # Calculate the covariance matrix
+        # Compute the covariance matrix and its eigenvalues and eigenvectors
         cov_matrix = np.cov(points, rowvar=False)
-
-        # Compute the eigenvectors and eigenvalues
         eigenvalues, eigenvectors = np.linalg.eig(cov_matrix)
 
-        # Sort the eigenvectors by eigenvalues in descending order
+        # Sort eigenvectors by descending eigenvalues
         idx = eigenvalues.argsort()[::-1]
         eigenvectors = eigenvectors[:, idx]
 
-        # Project the points onto the plane formed by the first two principal eigenvectors
-        projected_points = np.dot(points, eigenvectors[:, :2])
+        # Project points onto the plane of the first two principal components
+        projected_points = points @ eigenvectors[:, :2]
 
-        x = projected_points[:, 0]
-        y = projected_points[:, 1]
-        # Make sure these are arrays
-        if np.isscalar(x):
-            x = np.array([x])
-        if np.isscalar(y):
-            y = np.array([y])
-
-        self.x, self.y = x, y
-        self.z = np.zeros(len(self.x)) # Set the z values to zero now that we are in 2D
-
+        # Update positions and set z-values to zero
+        self.x = projected_points[:, 0]
+        self.y = projected_points[:, 1]
+        self.z = np.zeros(len(self.x))
 
     def calc_R200(self):
-        # Compute the R200 radius for each halo
+        """
+        Calculates the R200 radius for each halo.
+
+        Returns:
+            tuple:
+                R200 (np.ndarray): R200 radii in meters.
+                R200_arcsec (np.ndarray): R200 radii in arcseconds.
+        """
+        # Critical density at the cluster's redshift
         rho_c = cosmo.critical_density(self.redshift).to(u.kg / u.m**3).value
-        mass = np.abs(self.mass) * M_solar # Convert to kg - mass is allowed to be negative, but it should be positive for this calculation
-        R200 = ((3 / (800 * np.pi)) * (mass / rho_c))**(1/3) # In meters
-        # Convert to arcseconds
-        R200_arcsec = (R200 / cosmo.angular_diameter_distance(self.redshift).to(u.meter).value) * 206265
+
+        # Mass in kg
+        mass_kg = self.mass * M_SUN
+
+        # Calculate R200 in meters
+        R200 = ((3 * mass_kg) / (800 * np.pi * rho_c)) ** (1 / 3)
+
+        # Convert R200 to arcseconds
+        D_A = cosmo.angular_diameter_distance(self.redshift).to(u.m).value
+        R200_arcsec = (R200 / D_A) * 206_265  # Radians to arcseconds
+
         return R200, R200_arcsec
 
-
     def calc_delta_c(self):
-        # Compute the characteristic density contrast for each halo
-        return (200/3) * (self.concentration**3) / (np.log(1 + self.concentration) - (self.concentration / (1 + self.concentration)))
+        """
+        Calculates the characteristic density contrast (delta_c) for each halo.
 
+        Returns:
+            np.ndarray: Characteristic density contrast values.
+        """
+        c = self.concentration
+        delta_c = (200 / 3) * (c ** 3) / (np.log(1 + c) - c / (1 + c))
+        return delta_c
 
     def calculate_concentration(self):
-        # Compute the concentration parameter for each halo
-        # This is done with the Duffy et al. (2008) relation
-        # This relation is valid for 0 < z < 2 - this covers the range of redshifts we are interested in
-        self.mass += 1e-10 # Add a small value to the mass to avoid division by zero
-        self.concentration = 5.71 * (np.abs(self.mass) / (2 * 10**12))**(-0.084) * (1 + self.redshift)**(-0.47) 
+        """
+        Calculates the concentration parameter for each halo based on mass and redshift.
+
+        Updates:
+            self.concentration (np.ndarray): Updated concentration parameters.
+        """
+        # Avoid division by zero
+        mass_corrected = self.mass + 1e-10
+
+        # Calculate concentration parameter
+        self.concentration = (
+            5.71
+            * (mass_corrected / 2e12) ** (-0.084)
+            * (1 + self.redshift) ** (-0.47)
+        )

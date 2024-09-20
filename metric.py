@@ -1,85 +1,137 @@
+"""
+Module for statistical calculations in gravitational lensing analysis.
+
+This module provides functions to calculate the degrees of freedom and the chi-squared
+statistic for gravitational lensing models, aiding in the assessment of lens model fits
+to observed data.
+
+Functions:
+    - calc_degrees_of_freedom
+    - calculate_chi_squared
+"""
+
 import numpy as np
 import copy
-import utils
+import utils  # Custom utility functions
 
 def calc_degrees_of_freedom(sources, lenses, use_flags):
-    # Compute the number of degrees of freedom for a given set of sources and lenses
-    # A source has 2 parameters per signal (use_flags tells us how many signals are used)
-    # A lens has 3 parameters (two positional, one 'strength')
-    dof = ((2 * np.sum(use_flags)) * len(sources.x)) - (3 * len(lenses.x))
+    """
+    Calculate the degrees of freedom for a given set of sources and lenses.
+
+    Parameters:
+        sources (Source): Source object containing source positions and lensing signals.
+        lenses (Lens): Lens object containing lens positions and parameters.
+        use_flags (list of bool): Flags indicating which lensing signals are used 
+                                [use_shear, use_flexion, use_g_flexion].
+
+    Returns:
+        int or float: The degrees of freedom for the system. Returns np.inf if degrees
+                    of freedom are zero or negative.
+    """
+    # Number of lensing signals used (True in use_flags)
+    num_signals = np.sum(use_flags)
+    # Each signal component has 2 parameters (e.g., e1 and e2 for shear)
+    num_source_params = 2 * num_signals * len(sources.x)
+    # Each lens has 3 parameters: x, y, and strength (e.g., Einstein radius)
+    num_lens_params = 3 * len(lenses.x)
+    # Degrees of freedom: observations minus fitted parameters
+    dof = num_source_params - num_lens_params
     if dof <= 0:
         return np.inf
     return dof
 
 
-def calculate_chi_squared(sources, lenses, flags, lensing='SIS', use_weights = False) -> float:
+def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=False) -> float:
     """
-    Calculate the chi-squared statistic for the deviation of lensed source properties from their original values,
-    considering specified lensing effects and adding penalties for certain lens properties.
+    Calculate the chi-squared statistic for the difference between observed and modeled source properties.
+
+    This function computes the chi-squared value by comparing the observed lensing signals
+    (e.g., shear, flexion) with those predicted by the lens model, taking into account the
+    uncertainties in the observations.
 
     Parameters:
-    - sources (Source): An object containing source properties and their uncertainties.
-    - lenses (Lenses): An object representing the test lenses which affect the source properties.
-    - flags (list of bool): Flags indicating which lensing effects to include [use_shear, use_flexion, use_g_flexion].
-    - lensing (str): The lensing model to use ('SIS' or 'NFW').
-    - use_weights (bool): Whether to weight the sources by lens-source distance in the chi-squared calculation.
+        sources (Source): Source object containing observed source properties and uncertainties.
+        lenses (Lens): Lens object containing lens properties.
+        flags (list of bool): Flags indicating which lensing effects to include 
+                            [use_shear, use_flexion, use_g_flexion].
+        lensing (str): The lensing model to use ('SIS' or 'NFW'). Default is 'SIS'.
+        use_weights (bool): If True, weight the chi-squared contributions by source weights.
+                            Default is False.
 
     Returns:
-    - float: The total chi-squared value including penalties.
+        float: The total chi-squared value, including any penalties for lens properties.
     """
-
     # Unpack flags for clarity
     use_shear, use_flexion, use_g_flexion = flags
 
-    # Initialize a clone of sources with zeroed lensing signals
+    # Create a copy of sources and reset lensing signals to zero
     source_clone = copy.deepcopy(sources)
     source_clone.zero_lensing_signals()
 
-    assert np.all(source_clone.e1 == 0), "The cloned source should have zeroed lensing signals."
-    assert np.all(source_clone.e2 == 0), "The cloned source should have zeroed lensing signals."
-    assert np.all(source_clone.f1 == 0), "The cloned source should have zeroed lensing signals."
-    assert np.all(source_clone.f2 == 0), "The cloned source should have zeroed lensing signals."
-    assert np.all(source_clone.g1 == 0), "The cloned source should have zeroed lensing signals."
-    assert np.all(source_clone.g2 == 0), "The cloned source should have zeroed lensing signals."
+    # Apply lensing effects to the cloned source based on the lensing model
+    source_clone.apply_lensing(lenses, lens_type=lens_type)
 
-    # Apply lensing effects to the cloned source
-    if lensing == 'SIS':
-        source_clone.apply_SIS_lensing(lenses)
-    elif lensing == 'NFW':
-        source_clone.apply_NFW_lensing(lenses)
-    else:
-        raise ValueError("Invalid lensing model: {}".format(lensing))
+    # Calculate the squared differences for each lensing signal component
+    chi_squared_components = {}
+    if use_shear:
+        chi_squared_shear = (
+            (source_clone.e1 - sources.e1) ** 2 +
+            (source_clone.e2 - sources.e2) ** 2
+        ) / sources.sigs ** 2
+        chi_squared_components['shear'] = chi_squared_shear
 
-    # Calculate chi-squared for each lensing signal component
-    chi_squared_components = {
-        'shear': ((source_clone.e1 - sources.e1) ** 2 + (source_clone.e2 - sources.e2) ** 2) / sources.sigs**2,
-        'flexion': ((source_clone.f1 - sources.f1) ** 2 + (source_clone.f2 - sources.f2) ** 2) / sources.sigf**2,
-        'g_flexion': ((source_clone.g1 - sources.g1) ** 2 + (source_clone.g2 - sources.g2) ** 2) / sources.sigg**2
-    }
+    if use_flexion:
+        chi_squared_flexion = (
+            (source_clone.f1 - sources.f1) ** 2 +
+            (source_clone.f2 - sources.f2) ** 2
+        ) / sources.sigf ** 2
+        chi_squared_components['flexion'] = chi_squared_flexion
 
-    # Sum the chi-squared values, considering only the enabled lensing effects
-    total_chi_squared = use_shear * chi_squared_components['shear'] + use_flexion * chi_squared_components['flexion'] + use_g_flexion * chi_squared_components['g_flexion']    
+    if use_g_flexion:
+        chi_squared_g_flexion = (
+            (source_clone.g1 - sources.g1) ** 2 +
+            (source_clone.g2 - sources.g2) ** 2
+        ) / sources.sigg ** 2
+        chi_squared_components['g_flexion'] = chi_squared_g_flexion
 
+    # Sum the chi-squared components
+    total_chi_squared_array = np.zeros_like(sources.x)
+    for component in chi_squared_components.values():
+        total_chi_squared_array += component
+
+    # Sum over all sources, optionally using weights
     if use_weights:
+        # Compute weights (e.g., based on lens-source distance)
         weights = utils.compute_source_weights(lenses, sources)
-        total_chi_squared = np.sum(weights * total_chi_squared)
+        total_chi_squared = np.sum(weights * total_chi_squared_array)
     else:
-        total_chi_squared = np.sum(total_chi_squared)
+        total_chi_squared = np.sum(total_chi_squared_array)
 
-    def eR_penalty_function(eR, limit=40.0, lambda_penalty_upper=1000.0):
-        # Soft limits - allow the Einstein radius to be negative
+    # Define penalty functions for lens parameters
+    def einstein_radius_penalty(eR, limit=40.0, penalty_factor=1000.0):
+        """
+        Penalty function for the Einstein radius of SIS lenses.
+
+        Parameters:
+            eR (float): Einstein radius.
+            limit (float): Upper limit for the Einstein radius before penalties apply.
+            penalty_factor (float): Penalty scaling factor.
+
+        Returns:
+            float: Penalty value for the given Einstein radius.
+        """
         if np.abs(eR) > limit:
-            return lambda_penalty_upper * (np.abs(eR) - limit) ** 2
-
+            return penalty_factor * (np.abs(eR) - limit) ** 2
         return 0.0
 
     # Calculate and add penalties for the lenses
-    if lensing == 'SIS':
-        penalty = sum(eR_penalty_function(eR) for eR in lenses.te)
-        total_chi_squared += penalty
-    elif lensing == 'NFW':
+    if lens_type == 'SIS':
+        # Apply penalties for SIS lenses if Einstein radius exceeds limit
+        penalties = sum(einstein_radius_penalty(eR) for eR in lenses.te)
+        total_chi_squared += penalties
+    elif lens_type == 'NFW':
+        # No penalties defined for NFW lenses in this function
         pass
 
     # Return the total chi-squared including penalties
-    return total_chi_squared 
-
+    return total_chi_squared

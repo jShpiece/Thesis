@@ -2,11 +2,25 @@ import numpy as np
 import utils
 
 class Source:
-    # Class to store source information. Each source has a position (x, y) 
-    # and ellipticity (e1, e2), flexion (f1, f2), and g_flexion (g1, g2) signals
-    # as well as the standard deviations of these signals (sigs, sigf, sigg)
+    """
+    Represents a catalog of sources with lensing properties.
+
+    Attributes:
+        x (np.ndarray): x-positions of the sources.
+        y (np.ndarray): y-positions of the sources.
+        e1 (np.ndarray): First component of ellipticity (shear) of the sources.
+        e2 (np.ndarray): Second component of ellipticity (shear) of the sources.
+        f1 (np.ndarray): First component of flexion of the sources.
+        f2 (np.ndarray): Second component of flexion of the sources.
+        g1 (np.ndarray): First component of g-flexion of the sources.
+        g2 (np.ndarray): Second component of g-flexion of the sources.
+        sigs (np.ndarray): Standard deviations of the shear components.
+        sigf (np.ndarray): Standard deviations of the flexion components.
+        sigg (np.ndarray): Standard deviations of the g-flexion components.
+    """
+
     def __init__(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
-        # Make sure all inputs are numpy arrays
+        # Ensure all inputs are numpy arrays
         self.x = np.atleast_1d(x)
         self.y = np.atleast_1d(y)
         self.e1 = np.atleast_1d(e1)
@@ -19,89 +33,146 @@ class Source:
         self.sigf = np.atleast_1d(sigf)
         self.sigg = np.atleast_1d(sigg)
 
+    def add_source(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
+        """
+        Adds a new source to the catalog.
+
+        Parameters:
+            x (float): x-position of the new source.
+            y (float): y-position of the new source.
+            e1 (float): First component of ellipticity (shear) of the new source.
+            e2 (float): Second component of ellipticity (shear) of the new source.
+            f1 (float): First component of flexion of the new source.
+            f2 (float): Second component of flexion of the new source.
+            g1 (float): First component of g-flexion of the new source.
+            g2 (float): Second component of g-flexion of the new source.
+            sigs (float): Standard deviation of the shear components.
+            sigf (float): Standard deviation of the flexion components.
+            sigg (float): Standard deviation of the g-flexion components.
+        """
+        # Append new source properties to existing arrays
+        self.x = np.append(self.x, x)
+        self.y = np.append(self.y, y)
+        self.e1 = np.append(self.e1, e1)
+        self.e2 = np.append(self.e2, e2)
+        self.f1 = np.append(self.f1, f1)
+        self.f2 = np.append(self.f2, f2)
+        self.g1 = np.append(self.g1, g1)
+        self.g2 = np.append(self.g2, g2)
+        self.sigs = np.append(self.sigs, sigs)
+        self.sigf = np.append(self.sigf, sigf)
+        self.sigg = np.append(self.sigg, sigg)
 
     def remove_sources(self, indices):
-        # Remove sources from the source catalog based on indices
-        self.x = np.delete(self.x, indices)
-        self.y = np.delete(self.y, indices)
-        self.e1 = np.delete(self.e1, indices)
-        self.e2 = np.delete(self.e2, indices)
-        self.f1 = np.delete(self.f1, indices)
-        self.f2 = np.delete(self.f2, indices)
-        self.g1 = np.delete(self.g1, indices)
-        self.g2 = np.delete(self.g2, indices)
-        self.sigs = np.delete(self.sigs, indices)
-        self.sigf = np.delete(self.sigf, indices)
-        self.sigg = np.delete(self.sigg, indices)
+        """
+        Removes sources from the catalog based on given indices.
 
+        Parameters:
+            indices (array_like): Indices of the sources to remove.
+        """
+        for attr in [
+            'x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg'
+        ]:
+            setattr(self, attr, np.delete(getattr(self, attr), indices))
 
     def zero_lensing_signals(self):
-        # Set all lensing signals to zero
-        self.e1 = np.zeros_like(self.e1)
-        self.e2 = np.zeros_like(self.e2)
-        self.f1 = np.zeros_like(self.f1)
-        self.f2 = np.zeros_like(self.f2)
-        self.g1 = np.zeros_like(self.g1)
-        self.g2 = np.zeros_like(self.g2)
-
+        """
+        Resets all lensing signals (shear, flexion, g-flexion) to zero.
+        """
+        for attr in ['e1', 'e2', 'f1', 'f2', 'g1', 'g2']:
+            setattr(self, attr, np.zeros_like(getattr(self, attr)))
 
     def filter_sources(self, max_flexion=0.1):
-        # Make cuts in the source data based on size and flexion
+        """
+        Filters out sources with flexion values exceeding the specified threshold.
+
+        Parameters:
+            max_flexion (float): Maximum allowed absolute flexion value. Default is 0.1.
+
+        Returns:
+            np.ndarray: Boolean array indicating the valid sources after filtering.
+        """
         valid_indices = (np.abs(self.f1) <= max_flexion) & (np.abs(self.f2) <= max_flexion)
-        self.x, self.y = self.x[valid_indices], self.y[valid_indices]
-        self.e1, self.e2 = self.e1[valid_indices], self.e2[valid_indices]
-        self.f1, self.f2 = self.f1[valid_indices], self.f2[valid_indices]
-        self.g1, self.g2 = self.g1[valid_indices], self.g2[valid_indices]
-        self.sigs = self.sigs[valid_indices]
-        self.sigf = self.sigf[valid_indices]
-        self.sigg = self.sigg[valid_indices]
+        for attr in [
+            'x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg'
+        ]:
+            setattr(self, attr, getattr(self, attr)[valid_indices])
         return valid_indices
 
-
     def apply_noise(self):
-        # Apply noise to the source - lensing properties
-        self.e1 += np.random.normal(0, self.sigs)
-        self.e2 += np.random.normal(0, self.sigs)
-        self.f1 += np.random.normal(0, self.sigf)
-        self.f2 += np.random.normal(0, self.sigf)
-        self.g1 += np.random.normal(0, self.sigg)
-        self.g2 += np.random.normal(0, self.sigg)
-
-
-    def apply_SIS_lensing(self, lenses):
         """
-        Apply the lensing effects to the source using the Singular Isothermal Sphere (SIS) model. 
-        This model primarily utilizes the Einstein radii of each lens to determine its effect.
+        Applies random noise to the lensing properties based on their standard deviations.
+        """
+        # Apply noise to shear components
+        for attr, sigma in zip(['e1', 'e2'], [self.sigs, self.sigs]):
+            noise = np.random.normal(0, sigma, size=getattr(self, attr).shape)
+            setattr(self, attr, getattr(self, attr) + noise)
+        # Apply noise to flexion components
+        for attr, sigma in zip(['f1', 'f2'], [self.sigf, self.sigf]):
+            noise = np.random.normal(0, sigma, size=getattr(self, attr).shape)
+            setattr(self, attr, getattr(self, attr) + noise)
+        # Apply noise to g-flexion components
+        for attr, sigma in zip(['g1', 'g2'], [self.sigg, self.sigg]):
+            noise = np.random.normal(0, sigma, size=getattr(self, attr).shape)
+            setattr(self, attr, getattr(self, attr) + noise)
+
+    def apply_lensing(self, lenses, lens_type='SIS', z_source=0.8):
+        """
+        Applies lensing effects to the sources using the specified lens model.
 
         Parameters:
-        - lenses: An object containing the lens properties (x, y, Einstein radii 'te').
-                Expected to be arrays but can handle single values.
+            lenses: An object containing lens properties (e.g., positions, masses).
+            lens_type (str): The type of lens model to use ('SIS' or 'NFW'). Default is 'SIS'.
+            z_source (float): Redshift of the sources (used for NFW lensing). Default is 0.8.
         """
-        
-        shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_sis(lenses, self)
-        self.e1 += shear_1
-        self.e2 += shear_2
-        self.f1 += flex_1
-        self.f2 += flex_2
-        self.g1 += gflex_1
-        self.g2 += gflex_2
+        if lens_type == 'SIS':
+            shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_sis(
+                lenses, self
+            )
+        elif lens_type == 'NFW':
+            shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(
+                lenses, self, z_source
+            )
+        else:
+            raise ValueError("Invalid lens type. Use 'SIS' or 'NFW'.")
 
+        # Update lensing properties by adding the calculated signals
+        for attr, delta in zip(
+            ['e1', 'e2', 'f1', 'f2', 'g1', 'g2'],
+            [shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2]
+        ):
+            setattr(self, attr, getattr(self, attr) + delta)
 
-    def apply_NFW_lensing(self, lenses, z_source=0.8):
+    def export_to_file(self, filename, file_format='csv'):
         """
-        Apply the lensing effects to the source using the Navarro-Frenk-White (NFW) model.
-        This model utilizes the mass, concentration, and redshift of each halo to determine its effect.
+        Exports the source catalog to a file in the specified format.
 
         Parameters:
-        - halos: An object containing the halo properties (x, y, mass, concentration, redshift).
-                Expected to be arrays but can handle single values.
-        - z_source: The redshift of the source.
+            filename (str): Name of the file to export to.
+            file_format (str): The format of the output file ('csv' or 'json'). Default is 'csv'.
         """
+        import pandas as pd
 
-        shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(lenses, self, z_source)
-        self.e1 += shear_1
-        self.e2 += shear_2
-        self.f1 += flex_1
-        self.f2 += flex_2
-        self.g1 += gflex_1
-        self.g2 += gflex_2
+        # Create a DataFrame from the source attributes
+        data = {
+            'x': self.x,
+            'y': self.y,
+            'e1': self.e1,
+            'e2': self.e2,
+            'f1': self.f1,
+            'f2': self.f2,
+            'g1': self.g1,
+            'g2': self.g2,
+            'sigs': self.sigs,
+            'sigf': self.sigf,
+            'sigg': self.sigg
+        }
+        df = pd.DataFrame(data)
+
+        # Export the DataFrame to the specified file format
+        if file_format == 'csv':
+            df.to_csv(filename, index=False)
+        elif file_format == 'json':
+            df.to_json(filename, orient='records')
+        else:
+            raise ValueError("Unsupported format. Use 'csv' or 'json'.")
