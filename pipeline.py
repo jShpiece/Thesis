@@ -426,7 +426,7 @@ def iterative_elimination(sources, lenses, reducedchi2, use_flags, lens_type='SI
     return lenses
 
 
-def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS'):
+def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iterations=10**3, learning_rates=1e-2):
     """
     Optimizes the strength parameters (Einstein radius or mass) of the lenses.
 
@@ -460,10 +460,8 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS'):
 
     elif lens_type == 'NFW':
         # Optimize mass for each lens individually
-        num_iterations = 1000
         for i in range(len(lenses.x)):
             guess = [np.log10(lenses.mass[i])]
-            learning_rates = [1e-2]
             params = [
                 'NFW', 'constrained',
                 lenses.x[i], lenses.y[i], lenses.redshift,
