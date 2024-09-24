@@ -68,6 +68,7 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
                 float: Difference between calculated and observed flexion.
             """
             xl, yl, xs, ys, f1_obs, f2_obs = params
+            mass = np.abs(mass)
             # Create a halo with the given mass
             lenses = halo_obj.NFW_Lens(
                 xl, yl, np.zeros_like(xl), np.array([5]), np.array([mass]), np.array([z_l]), np.empty_like(xl)
@@ -287,143 +288,156 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
     return lenses
 
 
-def iterative_elimination(sources, lenses, reducedchi2, use_flags, lens_type='SIS'):
+def select_best_lenses_bic(sources, candidate_lenses, use_flags, lens_type='NFW'):
     """
-    Iteratively eliminates lenses to improve the fit by minimizing the reduced chi-squared value.
+    Selects the best combination of lenses by iteratively removing lenses
+    to minimize the Bayesian Information Criterion (BIC).
+
+    Parameters:
+        sources (Source): Object containing source positions and measured lensing signals.
+        candidate_lenses (NFW_Lens): NFW_Lens object containing candidate lenses.
+        use_flags (list of bool): Flags indicating which lensing signals to use [shear, flexion, second flexion].
+        lens_type (str): Type of lensing model ('SIS' or 'NFW'). Default is 'NFW'.
+
+    Returns:
+        best_lenses (NFW_Lens): NFW_Lens object with selected lenses that minimize the BIC.
+        best_bic (float): The minimized BIC value.
+    """
+    # Initialize with all candidate lenses
+    current_lenses = candidate_lenses.copy()
+    best_lenses = current_lenses.copy()
+
+    # Compute initial BIC
+    best_bic, best_chi2 = metric.compute_bic(sources, best_lenses, use_flags, lens_type)
+    improved = True
+
+    while improved and len(current_lenses.x) > 1:
+        improved = False
+        bic_list = []
+        lens_indices = []
+
+        n_lenses = len(current_lenses.x)
+
+        # Evaluate the effect of removing each lens
+        for i in range(n_lenses):
+            # Create a copy of current_lenses with lens i removed
+            test_lenses = halo_obj.NFW_Lens(
+                x=np.delete(current_lenses.x, i),
+                y=np.delete(current_lenses.y, i),
+                z=np.delete(current_lenses.z, i),
+                concentration=np.delete(current_lenses.concentration, i),
+                mass=np.delete(current_lenses.mass, i),
+                redshift=current_lenses.redshift,
+                chi2=np.delete(current_lenses.chi2, i)
+            )
+            test_bic, test_chi2 = metric.compute_bic(sources, test_lenses, use_flags, lens_type)
+            bic_list.append(test_bic)
+            lens_indices.append(i)
+
+        # Find the lens whose removal leads to the lowest BIC
+        min_bic = min(bic_list)
+        min_index = bic_list.index(min_bic)
+
+        if min_bic < best_bic:
+            # Update the best lenses and BIC
+            best_bic = min_bic
+            idx_to_remove = lens_indices[min_index]
+            print(f"Removing lens {idx_to_remove} improves BIC to {best_bic:.4f}")
+            # Remove lens from current_lenses
+            current_lenses = halo_obj.NFW_Lens(
+                x=np.delete(current_lenses.x, idx_to_remove),
+                y=np.delete(current_lenses.y, idx_to_remove),
+                z=np.delete(current_lenses.z, idx_to_remove),
+                concentration=np.delete(current_lenses.concentration, idx_to_remove),
+                mass=np.delete(current_lenses.mass, idx_to_remove),
+                redshift=current_lenses.redshift,
+                chi2=np.delete(current_lenses.chi2, idx_to_remove)
+            )
+            best_lenses = current_lenses.copy()
+            improved = True
+        else:
+            # No improvement, stop the iteration
+            print("No further improvement found.")
+            break
+
+    return best_lenses, best_bic
+
+
+def iterative_elimination(sources, lenses, reduced_chi2, use_flags):
+    """
+    Iteratively eliminates NFW lenses to improve the fit by minimizing the reduced chi-squared value.
 
     Parameters:
         sources (Source): Source object containing source positions and lensing signals.
-        lenses (SIS_Lens or NFW_Lens): Lens object containing lens positions and parameters.
-        reducedchi2 (float): Current reduced chi-squared value.
+        lenses (NFWLens): NFWLens object containing lens positions and parameters.
+        reduced_chi2 (float): Current reduced chi-squared value.
         use_flags (list): Flags indicating which data to use in calculations.
-        lens_type (str): Type of lens model ('SIS' or 'NFW').
 
     Returns:
-        SIS_Lens or NFW_Lens: Optimized lenses after iterative elimination.
+        NFWLens: Optimized lenses after iterative elimination.
     """
+    import numpy as np
 
-    def select_lowest_chi2(x, y, te_or_mass, chi2, lens_floor=1):
-        """
-        Selects the lenses with the lowest chi-squared values.
+    best_lenses = lenses
+    best_chi2 = reduced_chi2
+    n_lenses = len(lenses.x)
 
-        Parameters:
-            x (np.ndarray): x-positions of lenses.
-            y (np.ndarray): y-positions of lenses.
-            te_or_mass (np.ndarray): Strength parameters (Einstein radius or mass).
-            chi2 (np.ndarray): Chi-squared values for each lens.
-            lens_floor (int): Minimum number of lenses to keep.
+    # Early stopping threshold
+    chi2_threshold = 1.0
+    tolerance = 0.01  # Acceptable deviation from chi2_threshold
 
-        Returns:
-            Tuple[np.ndarray]: Selected x, y, te_or_mass, and chi2 arrays.
-        """
-        sorted_indices = np.argsort(chi2)
-        selected_indices = sorted_indices[:max(lens_floor, len(x))]
-        return x[selected_indices], y[selected_indices], te_or_mass[selected_indices], chi2[selected_indices]
+    # Initialize variables to keep track of the lens indices
+    lens_indices = np.arange(n_lenses)
+    remaining_indices = lens_indices.copy()
 
-    def find_best_combination(x, y, mass, concentration, chi2, max_combinations=5):
-        """
-        Finds the best combination of lenses that minimizes the chi-squared value.
+    # Loop until no further improvement
+    while True:
+        # Calculate chi-squared values without each lens
+        chi2_without_lens = []
 
-        Parameters:
-            x (np.ndarray): x-positions of lenses.
-            y (np.ndarray): y-positions of lenses.
-            mass (np.ndarray): Masses of lenses.
-            concentration (np.ndarray): Concentration parameters of lenses.
-            chi2 (np.ndarray): Chi-squared values for each lens.
-            max_combinations (int): Maximum number of combinations to consider.
-
-        Returns:
-            Tuple[np.ndarray]: Best x, y, mass, concentration, and chi2 arrays.
-        """
-        best_chi2 = np.inf
-        best_params = (x, y, mass, concentration)
-
-        for num in range(2, max_combinations):
-            indices_list = utils.find_combinations(range(len(x)), num)
-            filtered_combinations = utils.filter_combinations(indices_list)
-            for indices in filtered_combinations:
-                indices = list(indices)
-                selected_params = (
-                    x[indices], y[indices], mass[indices], concentration[indices], chi2[indices]
-                )
-                test_lenses = halo_obj.NFW_Lens(
-                    selected_params[0], selected_params[1], np.zeros_like(selected_params[0]),
-                    selected_params[3], selected_params[2], lenses.redshift, selected_params[4]
-                )
-                current_chi2 = test_lenses.update_chi2_values(sources, use_flags)
-                if current_chi2 < best_chi2:
-                    best_chi2 = current_chi2
-                    best_params = selected_params[:-1]  # Exclude chi2
-        return *best_params, best_chi2
-
-    def eliminate_lenses(lenses, lens_floor_range, lens_update_fn, calculate_fn):
-        """
-        Eliminates lenses to minimize the distance between reduced chi-squared and 1.
-
-        Parameters:
-            lenses (SIS_Lens or NFW_Lens): Current lens object.
-            lens_floor_range (range): Range of minimum number of lenses to consider.
-            lens_update_fn (Callable): Function to create new lens objects.
-            calculate_fn (Callable): Function to calculate additional lens parameters if needed.
-        """
-        best_dist = abs(reducedchi2 - 1)
-        best_lenses = lenses
-
-        for floor in lens_floor_range:
-            # Select lenses with lowest chi-squared values
-            x, y, te_or_mass, chi2 = select_lowest_chi2(
-                lenses.x, lenses.y,
-                lenses.te if lens_type == 'SIS' else lenses.mass,
-                lenses.chi2,
-                lens_floor=floor
+        for idx in remaining_indices:
+            test_indices = remaining_indices[remaining_indices != idx]
+            test_lenses = halo_obj.NFW_Lens(
+                x=lenses.x[test_indices],
+                y=lenses.y[test_indices],
+                z=lenses.z[test_indices],
+                concentration=lenses.concentration[test_indices],
+                mass=lenses.mass[test_indices],
+                redshift=lenses.redshift,
+                chi2=np.zeros(len(test_indices)),
             )
 
-            # For NFW lenses with fewer than 20 lenses, find best combinations
-            if lens_type == 'NFW' and len(x) < 20:
-                x, y, te_or_mass, concentration, chi2 = find_best_combination(
-                    x, y, te_or_mass, lenses.concentration, chi2
-                )
-
-            # Create new lenses
-            test_lenses = lens_update_fn(x, y, te_or_mass, chi2)
             current_chi2 = test_lenses.update_chi2_values(sources, use_flags)
-            new_dist = abs(current_chi2 - 1)
+            chi2_without_lens.append((idx, current_chi2))
 
-            if new_dist < best_dist:
-                best_dist = new_dist
-                best_lenses = test_lenses
+        # Find the lens whose removal leads to the best chi-squared improvement
+        chi2_without_lens = sorted(chi2_without_lens, key=lambda x: abs(x[1] - chi2_threshold))
 
-        # Update lenses with the best found lenses
-        lenses.x = best_lenses.x
-        lenses.y = best_lenses.y
-        lenses.chi2 = best_lenses.chi2
-        if lens_type == 'SIS':
-            lenses.te = best_lenses.te
-        elif lens_type == 'NFW':
-            lenses.mass = best_lenses.mass
-            lenses.concentration = best_lenses.concentration
+        # Check if removing any lens improves the chi-squared value
+        best_removal = chi2_without_lens[0]
+        idx_to_remove, new_chi2 = best_removal
 
-        calculate_fn()  # Calculate additional lens parameters if needed
+        if abs(new_chi2 - chi2_threshold) < abs(best_chi2 - chi2_threshold) - tolerance:
+            # Update best lenses
+            remaining_indices = remaining_indices[remaining_indices != idx_to_remove]
+            best_chi2 = new_chi2
+            best_lenses = halo_obj.NFW_Lens(
+                x=lenses.x[remaining_indices],
+                y=lenses.y[remaining_indices],
+                z=lenses.z[remaining_indices],
+                concentration=lenses.concentration[remaining_indices],
+                mass=lenses.mass[remaining_indices],
+                redshift=lenses.redshift,
+                chi2=np.zeros(len(remaining_indices)),
+            )
+            print(f'Removed lens {idx_to_remove}; new reduced chi-squared: {new_chi2:.4f}')
+        else:
+            # No improvement, stop the iteration
+            break
 
-    if lens_type == 'SIS':
-        eliminate_lenses(
-            lenses,
-            range(1, len(lenses.x) + 1),
-            lambda x, y, te, chi2: halo_obj.SIS_Lens(x, y, te, chi2),
-            lambda: None  # No additional calculation needed
-        )
+    print(f'Started with {n_lenses} lenses, ended with {len(best_lenses.x)} lenses')
+    return best_lenses
 
-    elif lens_type == 'NFW':
-        eliminate_lenses(
-            lenses,
-            range(1, min(len(lenses.x) + 1, 1000)),
-            lambda x, y, mass, chi2: halo_obj.NFW_Lens(
-                x, y, np.zeros_like(x), lenses.concentration, mass, lenses.redshift, chi2
-            ),
-            lenses.calculate_concentration
-        )
-
-    return lenses
 
 
 def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iterations=10**3, learning_rates=1e-2):
@@ -492,7 +506,7 @@ def update_chi2_values(sources, lenses, use_flags):
         float: Reduced chi-squared value.
     """
     # Calculate global chi-squared and degrees of freedom
-    global_chi2 = metric.calculate_chi_squared(sources, lenses, use_flags, lensing='NFW')
+    global_chi2 = metric.calculate_chi_squared(sources, lenses, use_flags, lens_type='NFW')
     dof = metric.calc_degrees_of_freedom(sources, lenses, use_flags)
     reduced_chi2 = global_chi2 / dof if dof != 0 else np.inf
 
@@ -511,7 +525,7 @@ def update_chi2_values(sources, lenses, use_flags):
                 lenses.redshift, [0]
             )
             chi2_values[i] = metric.calculate_chi_squared(
-                sources, one_halo, use_flags, lensing='NFW', use_weights=False
+                sources, one_halo, use_flags, lens_type='NFW', use_weights=False
             )
 
     lenses.chi2 = chi2_values

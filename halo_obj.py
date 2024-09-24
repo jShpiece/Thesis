@@ -78,6 +78,38 @@ class NFW_Lens:
         # Ensure masses are positive
         self.mass = np.abs(self.mass)
 
+    def copy(self):
+        """
+        Creates a deep copy of the NFW_Lens object.
+
+        Returns:
+            NFW_Lens: Deep copy of the NFW_Lens object.
+        """
+        return NFW_Lens(
+            x=self.x.copy(),
+            y=self.y.copy(),
+            z=self.z.copy(),
+            concentration=self.concentration.copy(),
+            mass=self.mass.copy(),
+            redshift=self.redshift,
+            chi2=self.chi2.copy()
+        )
+    
+    def merge(self, other):
+        """
+        Merges another NFW_Lens object into this one.
+
+        Parameters:
+            other (NFW_Lens): Another NFW_Lens object to merge into this one.
+        """
+        assert self.redshift == other.redshift, "Redshifts must match for merging."
+        self.x = np.concatenate((self.x, other.x))
+        self.y = np.concatenate((self.y, other.y))
+        self.z = np.concatenate((self.z, other.z))
+        self.concentration = np.concatenate((self.concentration, other.concentration))
+        self.mass = np.concatenate((self.mass, other.mass))
+        self.chi2 = np.concatenate((self.chi2, other.chi2))
+
     def project_to_2D(self):
         """
         Projects 3D positions onto a 2D plane formed by the first two principal components.

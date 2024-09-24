@@ -54,7 +54,7 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
         lenses (Lens): Lens object containing lens properties.
         flags (list of bool): Flags indicating which lensing effects to include 
                             [use_shear, use_flexion, use_g_flexion].
-        lensing (str): The lensing model to use ('SIS' or 'NFW'). Default is 'SIS'.
+        lens_type (str): The lensing model to use ('SIS' or 'NFW'). Default is 'SIS'.
         use_weights (bool): If True, weight the chi-squared contributions by source weights.
                             Default is False.
 
@@ -135,3 +135,36 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
 
     # Return the total chi-squared including penalties
     return total_chi_squared
+
+
+def compute_bic(sources, lenses, use_flags, lens_type='NFW'):
+    """
+    Computes the Bayesian Information Criterion (BIC) for the given sources and lenses.
+
+    Parameters:
+        sources (Source): Object containing source positions and measured lensing signals.
+        lenses (NFW_Lens): NFW_Lens object containing lens parameters.
+        use_flags (list of bool): Flags indicating which lensing signals to use [shear, flexion, second flexion].
+        lens_type (str): Type of lensing model ('SIS' or 'NFW'). Default is 'NFW'.
+
+    Returns:
+        bic (float): The computed BIC value.
+        chi2 (float): The chi-squared value.
+    """
+    # Calculate chi-squared using the provided function
+    chi2 = calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
+
+    # Calculate degrees of freedom using the provided function
+    dof = calc_degrees_of_freedom(sources, lenses, use_flags)
+
+    # Total number of data points is the number of observations
+    num_signals = np.sum(use_flags)
+    n_data_points = 2 * num_signals * len(sources.x)
+
+    # Number of parameters
+    n_parameters = 3 * len(lenses.x)  # 3 parameters per lens: x, y, strength
+
+    # Compute BIC
+    bic = chi2 + n_parameters * np.log(n_data_points)
+
+    return bic, chi2

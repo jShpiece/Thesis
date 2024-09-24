@@ -22,6 +22,7 @@ import source_obj
 import utils
 import time
 import copy
+import metric
 
 plt.style.use('scientific_presentation.mplstyle')  # Use the scientific presentation style sheet for all plots
 
@@ -174,7 +175,7 @@ def build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=False):
 # Testing Functions
 # --------------------------------------------
 
-def pipeline_breakdown(sources, lenses, xmax, use_flags, noisy, name=None, print_steps=False):
+def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, print_steps=False):
     """
     Runs the pipeline step by step and visualizes the results at each step.
 
@@ -193,28 +194,36 @@ def pipeline_breakdown(sources, lenses, xmax, use_flags, noisy, name=None, print
     # Step 1: Generate initial list of lenses from source guesses
     lenses = pipeline.generate_initial_guess(sources, lens_type='NFW', z_l=0.194)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, halos, 'Initial Guesses', reduced_chi2, xmax, ax=axarr[0, 0], legend=True)
+    plot_results(lenses, true_lenses, 'Initial Guesses', reduced_chi2, xmax, ax=axarr[0, 0], legend=True)
     if print_steps:
         print('Finished initial guesses')
 
     # Step 2: Optimize guesses with local minimization
     lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, halos, 'Initial Optimization', reduced_chi2, xmax, ax=axarr[0, 1], legend=False)
+    plot_results(lenses, true_lenses, 'Initial Optimization', reduced_chi2, xmax, ax=axarr[0, 1], legend=False)
     if print_steps:
         print('Finished optimization')
 
     # Step 3: Filter out lenses that are too far from the source population
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, lenses, 'Filtering', reduced_chi2, xmax, ax=axarr[0, 2], legend=False)
+    plot_results(lenses, true_lenses, 'Filtering', reduced_chi2, xmax, ax=axarr[0, 2], legend=False)
     if print_steps:
         print('Finished filtering')
 
-    # Step 4: Iterative elimination
-    lenses = pipeline.iterative_elimination(sources, lenses, reduced_chi2, use_flags, lens_type='NFW')
+    # Step 6: Final minimization
+    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, lenses, 'Lens Number Selection', reduced_chi2, xmax, ax=axarr[1, 0], legend=False)
+    plot_results(lenses, true_lenses, 'Final Minimization', reduced_chi2, xmax, ax=axarr[1, 0], legend=False, show_mass=False)
+    if print_steps:
+        print('Finished final minimization')
+
+    # Step 4: Iterative elimination
+    lenses = pipeline.iterative_elimination(sources, lenses, reduced_chi2, use_flags)
+    # lenses, _ = pipeline.select_best_lenses_bic(sources, lenses, use_flags, lens_type='NFW')
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    plot_results(lenses, true_lenses, 'Lens Number Selection', reduced_chi2, xmax, ax=axarr[1, 1], legend=False, show_chi2=True)
     if print_steps:
         print('Finished iterative elimination')
 
@@ -224,24 +233,19 @@ def pipeline_breakdown(sources, lenses, xmax, use_flags, noisy, name=None, print
     merger_threshold = (1 / np.sqrt(ns)) if ns > 0 else 1.0  # Avoid division by zero
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold=merger_threshold, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, lenses, 'Merging', reduced_chi2, xmax, ax=axarr[1, 1], legend=False, show_chi2=True)
+    plot_results(lenses, true_lenses, 'Merging', reduced_chi2, xmax, ax=axarr[1, 2], legend=False, show_mass=True)
     if print_steps:
         print('Finished merging')
 
-    # Step 6: Final minimization
-    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, lenses, 'Final Minimization', reduced_chi2, xmax, ax=axarr[1, 2], legend=False, show_mass=True)
-    if print_steps:
-        print('Finished final minimization')
+
 
     # Add overall title to the figure
-    total_true_mass = np.sum(lenses.mass)
+    total_true_mass = np.sum(true_lenses.mass)
     total_recovered_mass = np.sum(lenses.mass)
     fig.suptitle(f'True Mass: {total_true_mass:.2e} $M_\\odot$ \n Recovered Mass: {total_recovered_mass:.2e} $M_\\odot$')
 
     # Determine plot naming based on parameters
-    halo_mass = lenses.mass[0]
+    halo_mass = true_lenses.mass[0]
     if halo_mass == 1e14:
         size = 'large'
     elif halo_mass == 1e13:
@@ -262,7 +266,7 @@ def pipeline_breakdown(sources, lenses, xmax, use_flags, noisy, name=None, print
     else:
         directory = 'other'
 
-    Nlens = len(lenses.x)
+    Nlens = len(true_lenses.x)
 
     if name is None:
         plot_name = f'Images/NFW_tests/standard_tests/{directory}/{size}_Nlens_{Nlens}_{noisy}.png'
@@ -288,7 +292,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, lens_mass, use_noise=True, use_flags=[
     start = time.time()
     lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise)
     pipeline.update_chi2_values(sources, lenses, use_flags)
-    pipeline_breakdown(sources, lenses, xmax, use_flags, noisy)
+    pipeline_breakdown(sources, lenses, xmax, use_flags, noisy, print_steps=True)
     end = time.time()
     print(f'Test complete - Time taken: {end - start:.2f} seconds')
 
@@ -304,11 +308,12 @@ def run_simple_tests():
     masses = [1e14, 1e13]
     lens_numbers = [1, 2]
     noise_use = [True, False]
+    use_flags = [True, True, True]
 
     for mass in masses:
         for Nlens in lens_numbers:
             for noise in noise_use:
-                simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=[True, True, True])
+                simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=use_flags)
 
 
 def test_mass_recovery_with_noise(lenses, sources, Ntrials=1000):
@@ -548,9 +553,46 @@ def one_source_optimization(Nlens, Nsource, Ntrials, lens_mass, xmax, perturb_lo
         print('Finished Nsource = {}'.format(N))
 
 
+def test_iter_elim():
+    # Create a standardized field
+    Nlens = 1
+    Nsource = 100
+    lens_mass = 1e14
+    xmax = 50
+    use_flags = [True, True, True]
+    true_lens, sources, _ = build_standardized_field(Nlens, Nsource, lens_mass, xmax, True)
+    
+    # Create a bunch of random lenses
+    Nlenses = 100
+    xl = np.random.uniform(-xmax, xmax, Nlenses)
+    yl = np.random.uniform(-xmax, xmax, Nlenses)
+    ml = np.random.uniform(1e13, 1e14, Nlenses)
+    lenses = halo_obj.NFW_Lens(xl, yl, np.zeros_like(xl), np.zeros(Nlenses), ml, 0.194, np.zeros_like(xl))
+    lenses.calculate_concentration()
+    # Add the true lens
+    lenses.merge(true_lens)
+    
+    # Use the BIC-based selection
+    lenses, best_bic = pipeline.select_best_lenses_bic(sources, lenses, use_flags, lens_type='NFW')
+    
+    # Compute final chi-squared for reporting
+    final_bic, final_chi2 = metric.compute_bic(sources, lenses, use_flags, lens_type='NFW')
+    reduced_chi2 = final_chi2 / metric.calc_degrees_of_freedom(sources, lenses, use_flags)
+
+    # Now run the minimization
+    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
+    
+    # Plot the results
+    plot_results(lenses, true_lens, 'Number Selection', reduced_chi2, xmax, show_mass=True)
+    plt.show()
+
+
+
 if __name__ == '__main__':
     start = time.time()
     # str_opt_tester(1, 1, 1e14, 50, perturb_loc=True, perturb_sig=True)
-    one_source_optimization(1, 1, 100, 1e14, 50, perturb_loc=True)
+    # one_source_optimization(1, 1, 100, 1e14, 50, perturb_loc=True)
+    # test_iter_elim()
+    run_simple_tests()
     end = time.time()
     print(f'Test complete - Time taken: {end - start:.2f} seconds')
