@@ -233,8 +233,8 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
         print('Finished merging')
 
     # Step 6: Final minimization
-    # lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
-    lenses = pipeline.optimize_nfw_lens_strength(sources, lenses, use_flags)
+    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
+    # lenses = pipeline.optimize_nfw_lens_strength(sources, lenses, use_flags)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Final Minimization', reduced_chi2, xmax, ax=axarr[1, 2], legend=False, show_mass=True)
     if print_steps:
@@ -276,6 +276,7 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
 
     fig.savefig(plot_name)
     plt.close()
+    return lenses
 
 
 def simple_nfw_test(Nlens, Nsource, xmax, lens_mass, use_noise=True, use_flags=[True, True, True]):
@@ -291,9 +292,23 @@ def simple_nfw_test(Nlens, Nsource, xmax, lens_mass, use_noise=True, use_flags=[
         use_flags (list of bool, optional): Flags indicating which lensing signals to use. Default is [True, True, True].
     """
     start = time.time()
-    lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise)
-    pipeline.update_chi2_values(sources, lenses, use_flags)
-    pipeline_breakdown(sources, lenses, xmax, use_flags, noisy, print_steps=True)
+    true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise)
+    pipeline.update_chi2_values(sources, true_lenses, use_flags)
+    optimized_lenses = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
+    
+    # Remove sources that are far from the optimized lenses, then rerun the pipeline
+    indices = []
+    for i in range(len(sources.x)):
+        for j in range(len(optimized_lenses.x)):
+            r = np.sqrt((sources.x[i] - optimized_lenses.x[j]) ** 2 + (sources.y[i] - optimized_lenses.y[j]) ** 2)
+            if r > 10:
+                indices.append(i)
+                break
+    
+    sources.remove_sources(indices)
+    pipeline.update_chi2_values(sources, optimized_lenses, use_flags)
+    optimized_lenses = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
+
     end = time.time()
     print(f'Test complete - Time taken: {end - start:.2f} seconds')
 
@@ -310,7 +325,8 @@ def run_simple_tests():
     masses = [1e14, 1e13, 1e12]
     lens_numbers = [1, 2]
     noise_use = [True]
-    use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
+    # use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
+    use_flags = [[True, True, True], [True, True, False]]
 
     for mass in masses:
         for Nlens in lens_numbers:
@@ -532,7 +548,8 @@ def one_source_optimization(Nlens, Nsource, Ntrials, lens_mass, xmax, perturb_lo
                 lens.y[0] += np.random.normal(0, 0.5, 1)
 
             # Run the final minimization
-            lens = pipeline.optimize_lens_strength(source_clone, lens, [True, True, False], lens_type='NFW')
+            # lens = pipeline.optimize_lens_strength(source_clone, lens, [True, True, False], lens_type='NFW')
+            lens = pipeline.optimize_nfw_lens_strength(source_clone, lens, [True, True, False])
             final_masses.append(lens.mass[0])
 
             # Update the progress bar
