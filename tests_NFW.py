@@ -214,9 +214,7 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
         print('Finished filtering')
 
     # Step 4: Iterative elimination
-    # lenses = pipeline.iterative_elimination(sources, lenses, reduced_chi2, use_flags)
     lenses, _ = pipeline.select_best_lenses_forward_selection(sources, lenses, use_flags, lens_type='NFW')
-    # lenses, _ = pipeline.select_best_lenses_bic(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Lens Number Selection', reduced_chi2, xmax, ax=axarr[1, 0], legend=False, show_chi2=True)
     if print_steps:
@@ -301,7 +299,7 @@ def simple_nfw_test(Nlens, Nsource, xmax, lens_mass, use_noise=True, use_flags=[
     for i in range(len(sources.x)):
         for j in range(len(optimized_lenses.x)):
             r = np.sqrt((sources.x[i] - optimized_lenses.x[j]) ** 2 + (sources.y[i] - optimized_lenses.y[j]) ** 2)
-            if r > 10:
+            if r > 20:
                 indices.append(i)
                 break
     
