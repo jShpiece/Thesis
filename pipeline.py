@@ -188,56 +188,56 @@ def optimize_lens_positions(sources, lenses, use_flags, lens_type='SIS'):
             # Update lens parameters
             lenses.x[i], lenses.y[i], lenses.te[i] = result[0], result[1], result[2]
 
+    elif lens_type == 'NFW':
+        for i in range(len(lenses.x)):
+            # Initial guess: [x, y, log10(mass)]
+            initial_guess = [lenses.x[i], lenses.y[i], np.log10(lenses.mass[i])]
 
-    for i in range(len(lenses.x)):
-        # Initial guess: [x, y, log10(mass)]
-        initial_guess = [lenses.x[i], lenses.y[i], np.log10(lenses.mass[i])]
+            # Define bounds for x, y, and log10(mass)
+            bounds = [
+                (lenses.x[i] - 50, lenses.x[i] + 50),  # Adjust as appropriate
+                (lenses.y[i] - 50, lenses.y[i] + 50),  # Adjust as appropriate
+                (12, 16)  # Mass bounds in log10(M_sun)
+            ]
 
-        # Define bounds for x, y, and log10(mass)
-        bounds = [
-            (lenses.x[i] - 50, lenses.x[i] + 50),  # Adjust as appropriate
-            (lenses.y[i] - 50, lenses.y[i] + 50),  # Adjust as appropriate
-            (12, 16)  # Mass bounds in log10(M_sun)
-        ]
+            # Objective function to minimize
+            def objective_function(params):
+                xi, yi, log_mass = params
+                mass = 10 ** log_mass
 
-        # Objective function to minimize
-        def objective_function(params):
-            xi, yi, log_mass = params
-            mass = 10 ** log_mass
+                # Update lens parameters
+                lens = halo_obj.NFW_Lens(
+                    x=xi,
+                    y=yi,
+                    z=lenses.z[i],
+                    concentration=lenses.concentration[i],
+                    mass=mass,
+                    redshift=lenses.redshift,
+                    chi2=0.0
+                )
+                # Update concentration based on mass
+                lens.calculate_concentration()
 
-            # Update lens parameters
-            lens = halo_obj.NFW_Lens(
-                x=xi,
-                y=yi,
-                z=lenses.z[i],
-                concentration=lenses.concentration[i],
-                mass=mass,
-                redshift=lenses.redshift,
-                chi2=0.0
+                # Compute chi-squared for this lens and all sources
+                chi2 = metric.calculate_chi_squared(sources, lens, use_flags, lens_type='NFW')
+                return chi2
+
+            # Run the optimizer
+            result = minimize(
+                objective_function,
+                initial_guess,
+                method='L-BFGS-B',
+                bounds=bounds,
+                options={'maxiter': 1000, 'ftol': 1e-6}
             )
-            # Update concentration based on mass
-            lens.calculate_concentration()
 
-            # Compute chi-squared for this lens and all sources
-            chi2 = metric.calculate_chi_squared(sources, lens, use_flags, lens_type='NFW')
-            return chi2
-
-        # Run the optimizer
-        result = minimize(
-            objective_function,
-            initial_guess,
-            method='L-BFGS-B',
-            bounds=bounds,
-            options={'maxiter': 1000, 'ftol': 1e-6}
-        )
-
-        # Update lens parameters with optimized values
-        optimized_params = result.x
-        lenses.x[i] = optimized_params[0]
-        lenses.y[i] = optimized_params[1]
-        lenses.mass[i] = 10 ** optimized_params[2]
-        # Update concentration after mass change
-        lenses.calculate_concentration()
+            # Update lens parameters with optimized values
+            optimized_params = result.x
+            lenses.x[i] = optimized_params[0]
+            lenses.y[i] = optimized_params[1]
+            lenses.mass[i] = 10 ** optimized_params[2]
+            # Update concentration after mass change
+            lenses.calculate_concentration()
 
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
@@ -533,7 +533,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
     return lenses
 
 
-def update_chi2_values(sources, lenses, use_flags):
+def update_chi2_values(sources, lenses, use_flags, lens_type='NFW'):
     """
     Updates the chi-squared values for each lens based on the current source data.
 
@@ -623,4 +623,4 @@ def chi2wrapper(guess, params):
             lenses.calculate_concentration()
             return metric.calculate_chi_squared(params[4], lenses, params[5], lens_type='NFW', use_weights=False)
         else:
-        raise ValueError(f"Invalid lensing model: {model_type}")
+            raise ValueError(f"Invalid lensing model: {model_type}")

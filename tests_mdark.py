@@ -1,32 +1,40 @@
 import numpy as np 
 import matplotlib.pyplot as plt
 import pandas as pd
-from astropy.visualization import hist as fancy_hist
-import pipeline
-import metric
 import halo_obj
 import source_obj
-import utils
 import astropy.units as u
 from astropy.cosmology import Planck15 as cosmo
 from multiprocessing import Pool
 import time
-import copy
 import main
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
-dir = 'MDARK/'
-column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
+
+# Physical constants
+c = 3e8  # Speed of light in m/s
+G = 6.674e-11  # Gravitational constant in m^3/kg/s^2
+h = 0.677  # Hubble constant
+M_solar = 1.989e30  # Solar mass in kg
+z_source = 0.8  # Redshift of the source galaxies
+
+# Directory paths
+data_dir = 'MDARK/'
+gof_dir = 'Data/MDARK_Test/Goodness_of_Fit/'
+
+# Column names
+column_names = [
+    'MainHaloID', 'Total Mass', 'Redshift', 'Halo Number',
+    'Mass Fraction', 'Characteristic Size'
+]
+
 # Important Notes!
 # Total Mass is in units of M_sun/h
 # Characteristic Size is in units of arcseconds
-plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
 
-# Physical constants
-c = 3 * 10**8 # Speed of light in m/s
-G = 6.674 * 10**-11 # Gravitational constant in m^3/kg/s^2
-h = 0.677 # Hubble constant
-M_solar = 1.989 * 10**30 # Solar mass in kg
-z_source = 0.8 # Redshift of the source galaxies
+# Use the scientific presentation style sheet for all plots
+plt.style.use('scientific_presentation.mplstyle')
 
 
 def build_mass_correlation_plot(ID_file, file_name, plot_name):
@@ -94,69 +102,137 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
 # File Management Functions
 # --------------------------------------------
 
-def chunk_data(file):
-    # Define the data types for each column to improve performance
-    data_types = {f'column_{i}': 'float' for i in range(6)}
-    # Read the CSV file in chunks
-    chunk_size = 50000  # Adjust based on your memory constraints
-    chunks = pd.read_csv(file, dtype=data_types, chunksize=chunk_size)
-    return chunks
+def read_csv_in_chunks(file_path, usecols=None, dtype=None, chunksize=50000):
+    """
+    Reads a CSV file in chunks and returns an iterator.
+
+    Parameters:
+        file_path (str): Path to the CSV file.
+        usecols (list or None): List of columns to read.
+        dtype (dict or None): Dictionary specifying data types for columns.
+        chunksize (int): Number of rows per chunk.
+
+    Returns:
+        Iterator over DataFrame chunks.
+    """
+    try:
+        return pd.read_csv(
+            file_path,
+            usecols=usecols,
+            dtype=dtype,
+            chunksize=chunksize
+        )
+    except FileNotFoundError:
+        print(f'File not found: {file_path}')
+        return None
 
 
 def GOF_file_reader(IDs):
-    # Given a list of IDs, read in the goodness of fit data
-    # and return the chi2 values and mass values
-    chi2_values = []
-    mass_values = []
+    """
+    Reads goodness of fit data for a list of IDs in parallel.
 
-    for ID in IDs:
-        file = 'Data/MDARK_Test/Goodness_of_Fit/Goodness_of_Fit_{}.csv'.format(ID)
-        data = pd.read_csv(file)
-        chi2_values.append(data[[' chi2_all_signals', ' chi2_gamma_F', ' chi2_F_G', ' chi2_gamma_G']].values)
-        mass_values.append(data[[' mass_all_signals', ' mass_gamma_F', ' mass_F_G', ' mass_gamma_G']].values)
+    Parameters:
+        IDs (list): List of IDs.
+
+    Returns:
+        chi2_values (dict): Dictionary of chi2 values keyed by ID.
+        mass_values (dict): Dictionary of mass values keyed by ID.
+    """
+    chi2_columns = ['chi2_all_signals', 'chi2_gamma_F', 'chi2_F_G', 'chi2_gamma_G']
+    mass_columns = ['mass_all_signals', 'mass_gamma_F', 'mass_F_G', 'mass_gamma_G']
+
+    chi2_values = {}
+    mass_values = {}
+
+    def read_file(ID):
+        file_path = f'{gof_dir}Goodness_of_Fit_{ID}.csv'
+        try:
+            data = pd.read_csv(file_path, usecols=chi2_columns + mass_columns)
+            return ID, data[chi2_columns].values, data[mass_columns].values
+        except FileNotFoundError:
+            print(f'File not found: {file_path}')
+            return ID, None, None
+
+    with ThreadPoolExecutor() as executor:
+        futures = {executor.submit(read_file, ID): ID for ID in IDs}
+        for future in as_completed(futures):
+            ID, chi2_vals, mass_vals = future.result()
+            if chi2_vals is not None and mass_vals is not None:
+                chi2_values[ID] = chi2_vals
+                mass_values[ID] = mass_vals
 
     return chi2_values, mass_values
+
+
+def process_chunk(chunk, id_set):
+    """
+    Processes a single chunk of data.
+
+    Parameters:
+        chunk (DataFrame): The data chunk.
+        id_set (set): Set of IDs to filter.
+
+    Returns:
+        dict: Filtered data grouped by 'MainHaloID'.
+    """
+    filtered_chunk = chunk[(chunk['GalaxyType'] != 2) & (chunk['MainHaloID'].isin(id_set))]
+    grouped = filtered_chunk.groupby('MainHaloID')
+    return {id_: group for id_, group in grouped}
 
 
 # --------------------------------------------
 # MDARK Processing Functions
 # --------------------------------------------
 
+
 def find_halos(ids, z):
-    # Read a large data file and filter rows based on multiple IDs, 
-    # creating a separate Halo object for each ID
-    
-    file_path = f'{dir}Halos_{z}.MDARK'  # Construct the file path
+    """
+    Reads halo data for specified IDs and constructs Halo objects.
+
+    Parameters:
+        ids (list): List of halo IDs.
+        z (float): Redshift.
+
+    Returns:
+        dict: Halo objects keyed by ID.
+    """
+    file_path = f'{data_dir}Halos_{z}.MDARK'
     cols_to_use = ['MainHaloID', 'x', 'y', 'z', 'concentration_NFW', 'HaloMass', 'GalaxyType']
-    
-    # Dictionary to hold accumulated data for each ID
-    data_accumulator = {id: [] for id in ids}
-    
+    id_set = set(ids)
+    data_accumulator = defaultdict(list)
+
     # Read the file in chunks
-    iterator = pd.read_csv(file_path, chunksize=10000, usecols=cols_to_use)
-    for chunk in iterator:
-        filtered_chunk = chunk[chunk['MainHaloID'].isin(ids) & (chunk['GalaxyType'] != 2)]
-        for id in ids:
-            # Accumulate data for each ID
-            data_accumulator[id].append(filtered_chunk[filtered_chunk['MainHaloID'] == id])
-    
-    # Dictionary to hold Halo objects, keyed by ID
+    iterator = read_csv_in_chunks(file_path, usecols=cols_to_use, chunksize=100000)
+
+    if iterator is None:
+        return {}
+
+    with ProcessPoolExecutor() as executor:
+        futures = [executor.submit(process_chunk, chunk, id_set) for chunk in iterator]
+
+        for future in as_completed(futures):
+            chunk_data = future.result()
+            for id_, group in chunk_data.items():
+                data_accumulator[id_].append(group)
+
     halos = {}
-    
-    # Create Halo objects after all chunks have been processed
-    for id, data_list in data_accumulator.items():
+
+    for id_ in ids:
+        data_list = data_accumulator.get(id_)
         if data_list:
-            complete_data = pd.concat(data_list)
-            xhalo = complete_data['x'].to_numpy()
-            yhalo = complete_data['y'].to_numpy()
-            zhalo = complete_data['z'].to_numpy()
-            chalo = complete_data['concentration_NFW'].to_numpy()
-            masshalo = complete_data['HaloMass'].to_numpy()
-            
+            complete_data = pd.concat(data_list, ignore_index=True)
+            xhalo = complete_data['x'].values
+            yhalo = complete_data['y'].values
+            zhalo = complete_data['z'].values
+            chalo = complete_data['concentration_NFW'].values
+            masshalo = complete_data['HaloMass'].values
+
             # Create and store the Halo object
-            halos[id] = pipeline.Halo(xhalo, yhalo, zhalo, chalo, masshalo, z, np.zeros_like(xhalo))
+            halos[id_] = halo_obj.NFW_Lens(
+                xhalo, yhalo, zhalo, chalo, masshalo, z, np.zeros_like(masshalo)
+            )
         else:
-            print(f'No data found for ID {id}')
+            print(f'No data found for ID {id_}')
 
     return halos
 
@@ -232,13 +308,20 @@ def build_lensing_field(halos, z, Nsource = None):
     # Generate a set of background galaxies
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    sources = utils.createSources(halos, Nsource, randompos=True, sigs=0.1, sigf=0.01, sigg=0.02, xmax=xmax, lens_type='NFW')
+    rs = np.sqrt(np.random.random(Nsource)) * xmax
+    theta = np.random.random(Nsource) * 2 * np.pi
+    xs = rs * np.cos(theta)
+    ys = rs * np.sin(theta)
+    sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
+    sources.apply_lensing(halos, lens_type='NFW', z_source=z_source)
+    sources.apply_noise()
+    sources.filter_sources(xmax)
 
     return halos, sources, xmax
 
 
 # --------------------------------------------
-# Random Realization Functions
+# Test Functions
 # --------------------------------------------
 
 def run_single_test(args):
@@ -259,7 +342,7 @@ def run_single_test(args):
 
     np.random.seed()
     noisy_sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
-    noisy_sources.apply_NFW_lensing(halos)
+    noisy_sources.apply_lensing(halos, lens_type='NFW', z_source=z_source)
 
     # Apply noise
     noisy_sources.apply_noise()
@@ -292,10 +375,10 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
     # IDs = IDs[:5] # For testing purposes, only use the first 5 clusters
 
     signal_choices = [
-        [True, True, True], 
-        [True, True, False], 
-        [False, True, True], 
-        [True, False, True]
+        [True, True, True], # All signals
+        [True, True, False], # Shear and Flexion
+        [False, True, True], # Flexion and G-Flexion
+        [True, False, True] # Shear and G-Flexion
     ]
 
     # Build halos
@@ -310,14 +393,14 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
         # Create a new source object, without noise
         xs = sources.x
         ys = sources.y
-        clean_source = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
+        clean_source = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
         if lensing_type == 'NFW':
-            clean_source.apply_NFW_lensing(halos[ID])
+            clean_source.apply_lensing(halos[ID], lens_type='NFW', z_source=z_source)
         elif lensing_type == 'SIS':
             tE = halos[ID].calc_corresponding_einstein_radius(z_source)
             print('Einstein radius: {}'.format(tE))
-            lens = pipeline.Lens(halos[ID].x, halos[ID].y, tE, 0)
-            clean_source.apply_SIS_lensing(lens)
+            lens = halo_obj.SIS_Lens(halos[ID].x, halos[ID].y, tE, 0)
+            clean_source.apply_lensing(lens, lens_type='SIS')
         else:
             raise ValueError('Invalid lensing type specified')
 

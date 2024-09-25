@@ -11,6 +11,7 @@ Functions:
 """
 
 import pipeline
+import numpy as np
 
 def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], lens_type='SIS'):
     """
@@ -54,40 +55,37 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
     # Step 1: Generate initial candidate lenses from source guesses
     z_lens = 0.194  # Example redshift of the lens
     lenses = pipeline.generate_initial_guess(sources, lens_type=lens_type, z_l=z_lens)
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "Initial Guesses:", lenses, reduced_chi2)
 
     # Step 2: Optimize lens positions via local minimization
-    lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type)
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type=lens_type)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "After Local Minimization:", lenses, reduced_chi2)
 
     # Step 3: Filter out lenses that are too close to sources or too far from the center
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type=lens_type)
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "After Filtering:", lenses, reduced_chi2)
 
     # Step 4: Iteratively eliminate lenses to find the best reduced chi-squared value
-    lenses = pipeline.iterative_elimination(sources, lenses, reduced_chi2, use_flags, lens_type)
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    lenses, _ = pipeline.select_best_lenses_forward_selection(sources, lenses, use_flags, lens_type=lens_type)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "After Iterative Elimination:", lenses, reduced_chi2)
 
     # Step 5: Merge lenses that are too close to each other
     # Calculate source density (ns) for merger threshold calculation
     area = (2 * xmax) ** 2  # Total area of the field
     ns = len(sources.x) / area  # Source density per unit area
-    if ns > 0:
-        merger_threshold = (1 / ns) ** 0.5  # Merger threshold based on source density
-    else:
-        merger_threshold = 0.1  # Default small value if ns is zero
+    merger_threshold = (1 / np.sqrt(ns)) if ns > 0 else 1.0  # Avoid division by zero
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold=merger_threshold, lens_type=lens_type)
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "After Merging Lenses:", lenses, reduced_chi2)
 
     # Step 6: Perform a final optimization on the lens strengths
-    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type)
+    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type=lens_type)
     # Always use all signals for final fit
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, [True, True, True])
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, [True, True, True], lens_type=lens_type)
     print_step_info(flags, "After Final Optimization:", lenses, reduced_chi2)
 
     return lenses, reduced_chi2
