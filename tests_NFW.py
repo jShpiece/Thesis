@@ -180,100 +180,88 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     Runs the pipeline step by step and visualizes the results at each step.
 
     Parameters:
-        lenses (NFW_Lens): True lens object used in the simulation.
         sources (Source): Source object containing source properties.
+        true_lenses (NFW_Lens): True lens object used in the simulation.
         xmax (float): Maximum x and y limits for the plots.
         use_flags (list of bool): Flags indicating which lensing signals to use.
         noisy (str): Indicator of whether noise was applied ('noisy' or 'noiseless').
         name (str, optional): Custom name for saving the plot. If None, a default name is generated.
         print_steps (bool, optional): Whether to print progress messages. Default is False.
     """
-    # Arrange a plot with 6 subplots in 2 rows
+    # Set up plot with 6 subplots in a 2x3 layout
     fig, axarr = plt.subplots(2, 3, figsize=(20, 15), sharex=True, sharey=True)
 
-    # Step 1: Generate initial list of lenses from source guesses
+    # Step 1: Generate initial lens guesses
     lenses = pipeline.generate_initial_guess(sources, lens_type='NFW', z_l=0.194)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Initial Guesses', reduced_chi2, xmax, ax=axarr[0, 0], legend=True)
+    plot_results(lenses, true_lenses, 'Candidate Lens Generation', reduced_chi2, xmax, ax=axarr[0, 0], legend=True)
     if print_steps:
-        print('Finished initial guesses')
+        print('Step 1: Finished initial guesses')
 
-    # Step 2: Optimize guesses with local minimization
-    # lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type='NFW')
-    lenses = pipeline.optimize_nfw_lens_positions(sources, lenses, use_flags)
+    # Step 2: Optimize lens positions
+    lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Initial Optimization', reduced_chi2, xmax, ax=axarr[0, 1], legend=False)
+    plot_results(lenses, true_lenses, 'Individual Lens Optimization', reduced_chi2, xmax, ax=axarr[0, 1])
     if print_steps:
-        print('Finished optimization')
+        print('Step 2: Finished optimization')
 
-    # Step 3: Filter out lenses that are too far from the source population
+    # Step 3: Filter lenses by proximity to sources
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Filtering', reduced_chi2, xmax, ax=axarr[0, 2], legend=False)
+    plot_results(lenses, true_lenses, 'Physical Criteria Filtering', reduced_chi2, xmax, ax=axarr[0, 2])
     if print_steps:
-        print('Finished filtering')
+        print('Step 3: Finished filtering')
 
-    # Step 4: Iterative elimination
+    # Step 4: Iterative lens elimination
     lenses, _ = pipeline.select_best_lenses_forward_selection(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Lens Number Selection', reduced_chi2, xmax, ax=axarr[1, 0], legend=False, show_chi2=True)
+    plot_results(lenses, true_lenses, 'Forward Lens Selection', reduced_chi2, xmax, ax=axarr[1, 0], show_chi2=True)
     if print_steps:
-        print('Finished iterative elimination')
+        print('Step 4: Finished iterative elimination')
 
-    # Step 5: Merge lenses that are too close to each other
+    # Step 5: Merge closely positioned lenses
     area = np.pi * xmax ** 2
     ns = len(sources.x) / area
-    merger_threshold = (1 / np.sqrt(ns)) if ns > 0 else 1.0  # Avoid division by zero
+    merger_threshold = (1 / np.sqrt(ns)) if ns > 0 else 1.0
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold=merger_threshold, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Merging', reduced_chi2, xmax, ax=axarr[1, 1], legend=False, show_mass=False)
+    plot_results(lenses, true_lenses, 'Lens Merging', reduced_chi2, xmax, ax=axarr[1, 1])
     if print_steps:
-        print('Finished merging')
+        print('Step 5: Finished merging')
 
-    # Step 6: Final minimization
+    # Step 6: Final lens strength optimization
     lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
-    # lenses = pipeline.optimize_nfw_lens_strength(sources, lenses, use_flags)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Final Minimization', reduced_chi2, xmax, ax=axarr[1, 2], legend=False, show_mass=True)
+    plot_results(lenses, true_lenses, 'Mass Refinement Optimization', reduced_chi2, xmax, ax=axarr[1, 2], show_mass=True)
     if print_steps:
-        print('Finished final minimization')
+        print('Step 6: Finished final minimization')
 
-    # Add overall title to the figure
+    # Overall figure title
     total_true_mass = np.sum(true_lenses.mass)
     total_recovered_mass = np.sum(lenses.mass)
     fig.suptitle(f'True Mass: {total_true_mass:.2e} $M_\\odot$ \n Recovered Mass: {total_recovered_mass:.2e} $M_\\odot$')
 
     # Determine plot naming based on parameters
-    halo_mass = true_lenses.mass[0]
-    if halo_mass == 1e14:
-        size = 'large'
-    elif halo_mass == 1e13:
-        size = 'medium'
-    elif halo_mass == 1e12:
-        size = 'small'
-    else:
-        size = 'other'
+    size_map = {1e14: 'large', 1e13: 'medium', 1e12: 'small'}
+    size = size_map.get(true_lenses.mass[0], 'other')
 
-    if use_flags == [True, True, True]:
-        directory = 'all'
-    elif use_flags == [True, True, False]:
-        directory = 'shear_f'
-    elif use_flags == [False, True, True]:
-        directory = 'f_g'
-    elif use_flags == [True, False, True]:
-        directory = 'shear_g'
-    else:
-        directory = 'other'
+    flag_dirs = {
+        (True, True, True): 'all',
+        (True, True, False): 'shear_f',
+        (False, True, True): 'f_g',
+        (True, False, True): 'shear_g'
+    }
+    directory = flag_dirs.get(tuple(use_flags), 'other')
 
     Nlens = len(true_lenses.x)
 
-    if name is None:
-        plot_name = f'Images/NFW_tests/standard_tests/{directory}/{size}_Nlens_{Nlens}_{noisy}.png'
-    else:
-        plot_name = f'Images/NFW_tests/standard_tests/{name}.png'
+    # Generate plot name
+    plot_name = (f'Images/NFW_tests/standard_tests/{directory}/{size}_Nlens_{Nlens}_{noisy}.png'
+                if name is None else f'Images/NFW_tests/standard_tests/{name}.png')
 
     fig.savefig(plot_name)
     plt.close()
+    
     return lenses
 
 
@@ -293,20 +281,6 @@ def simple_nfw_test(Nlens, Nsource, xmax, lens_mass, use_noise=True, use_flags=[
     true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise)
     pipeline.update_chi2_values(sources, true_lenses, use_flags)
     optimized_lenses = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
-    
-    # Remove sources that are far from the optimized lenses, then rerun the pipeline
-    indices = []
-    for i in range(len(sources.x)):
-        for j in range(len(optimized_lenses.x)):
-            r = np.sqrt((sources.x[i] - optimized_lenses.x[j]) ** 2 + (sources.y[i] - optimized_lenses.y[j]) ** 2)
-            if r > 20:
-                indices.append(i)
-                break
-    
-    sources.remove_sources(indices)
-    pipeline.update_chi2_values(sources, optimized_lenses, use_flags)
-    optimized_lenses = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
-
     end = time.time()
     print(f'Test complete - Time taken: {end - start:.2f} seconds')
 

@@ -12,6 +12,7 @@ from astropy.cosmology import Planck15 as cosmo
 from multiprocessing import Pool
 import time
 import copy
+import main
 
 dir = 'MDARK/'
 column_names = ['MainHaloID', ' Total Mass', ' Redshift', 'Halo Number', ' Mass Fraction', ' Characteristic Size'] # Column names for the key files
@@ -257,14 +258,14 @@ def run_single_test(args):
     chi_scores = []
 
     np.random.seed()
-    noisy_sources = pipeline.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
+    noisy_sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
     noisy_sources.apply_NFW_lensing(halos)
 
     # Apply noise
     noisy_sources.apply_noise()
 
     for signal_choice in signal_choices:
-        candidate_lenses, candidate_chi2 = pipeline.fit_lensing_field(noisy_sources, xmax, False, signal_choice, lens_type='NFW')
+        candidate_lenses, candidate_chi2 = main.fit_lensing_field(noisy_sources, xmax, False, signal_choice, lens_type='NFW')
 
         mass = np.sum(candidate_lenses.mass)
         candidate_num = len(candidate_lenses.x)
@@ -357,8 +358,11 @@ def process_md_set(test_number):
     result_file = test_dir + '/results_{}.csv'.format(test_number)
     plot_name = 'Images/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
 
-
     run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     build_mass_correlation_plot(ID_file, result_file, plot_name)
+
+
+if __name__ == '__main__':
+    process_md_set(15)

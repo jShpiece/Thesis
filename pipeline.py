@@ -149,21 +149,45 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
 
-def optimize_nfw_lens_positions(sources, lenses, use_flags, lens_type='NFW'):
+def optimize_lens_positions(sources, lenses, use_flags, lens_type='SIS'):
     """
-    Optimizes NFW lens positions and masses via local minimization.
+    Optimizes lens positions via local minimization.
 
     Parameters:
-        sources (Source): Source object containing positions and lensing signals.
-        lenses (NFW_Lens): Initial NFW_Lens object with estimated positions and masses.
+        sources (Source): Source object containing source positions and lensing signals.
+        lenses (SIS_Lens or NFW_Lens): Initial lens object with estimated positions and parameters.
         use_flags (list): Flags indicating which data to use in optimization.
-        lens_type (str): Type of lens model ('NFW').
+        lens_type (str): Type of lens model ('SIS' or 'NFW').
 
     Returns:
-        NFW_Lens: Lenses with optimized positions and masses.
+        SIS_Lens or NFW_Lens: Lenses with optimized positions.
     """
-    if lens_type != 'NFW':
-        raise ValueError('This function only supports NFW lens type.')
+    # Optimizer parameters
+    learning_rates = [1e-2, 1e-2, 1e-2]  # Learning rates for position and strength
+    num_iterations = 1000
+    beta1 = 0.9
+    beta2 = 0.999
+
+    if lens_type == 'SIS':
+        for i in range(len(lenses.x)):
+            # Create a single-source object
+            one_source = source_obj.Source(
+                sources.x[i], sources.y[i],
+                sources.e1[i], sources.e2[i],
+                sources.f1[i], sources.f2[i],
+                sources.g1[i], sources.g2[i],
+                sources.sigs[i], sources.sigf[i], sources.sigg[i]
+            )
+            # Initial guess for the optimizer
+            guess = [lenses.x[i], lenses.y[i], lenses.te[i]]
+            params = ['SIS', 'unconstrained', one_source, use_flags]
+            # Optimize using custom Adam optimizer
+            result, _ = minimizer.adam_optimizer(
+                chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params
+            )
+            # Update lens parameters
+            lenses.x[i], lenses.y[i], lenses.te[i] = result[0], result[1], result[2]
+
 
     for i in range(len(lenses.x)):
         # Initial guess: [x, y, log10(mass)]
@@ -215,60 +239,6 @@ def optimize_nfw_lens_positions(sources, lenses, use_flags, lens_type='NFW'):
         # Update concentration after mass change
         lenses.calculate_concentration()
 
-    return lenses
-
-
-def optimize_lens_positions(sources, lenses, use_flags, lens_type='SIS'):
-    """
-    Optimizes lens positions via local minimization.
-
-    Parameters:
-        sources (Source): Source object containing source positions and lensing signals.
-        lenses (SIS_Lens or NFW_Lens): Initial lens object with estimated positions and parameters.
-        use_flags (list): Flags indicating which data to use in optimization.
-        lens_type (str): Type of lens model ('SIS' or 'NFW').
-
-    Returns:
-        SIS_Lens or NFW_Lens: Lenses with optimized positions.
-    """
-    # Optimizer parameters
-    learning_rates = [1e-2, 1e-2, 1e-2]  # Learning rates for position and strength
-    num_iterations = 1000
-    beta1 = 0.9
-    beta2 = 0.999
-
-    if lens_type == 'SIS':
-        for i in range(len(lenses.x)):
-            # Create a single-source object
-            one_source = source_obj.Source(
-                sources.x[i], sources.y[i],
-                sources.e1[i], sources.e2[i],
-                sources.f1[i], sources.f2[i],
-                sources.g1[i], sources.g2[i],
-                sources.sigs[i], sources.sigf[i], sources.sigg[i]
-            )
-            # Initial guess for the optimizer
-            guess = [lenses.x[i], lenses.y[i], lenses.te[i]]
-            params = ['SIS', 'unconstrained', one_source, use_flags]
-            # Optimize using custom Adam optimizer
-            result, _ = minimizer.adam_optimizer(
-                chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params
-            )
-            # Update lens parameters
-            lenses.x[i], lenses.y[i], lenses.te[i] = result[0], result[1], result[2]
-
-    elif lens_type == 'NFW':
-        for i in range(len(lenses.x)):
-            # Initial guess: x, y, log10(mass)
-            guess = [lenses.x[i], lenses.y[i], np.log10(lenses.mass[i])]
-            params = ['NFW', 'unconstrained', sources, use_flags, lenses.concentration[i], lenses.redshift]
-            # Optimize using custom Adam optimizer
-            result, _ = minimizer.adam_optimizer(
-                chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params
-            )
-            # Update lens parameters
-            lenses.x[i], lenses.y[i], lenses.mass[i] = result[0], result[1], 10 ** result[2]
-            lenses.calculate_concentration()  # Update concentration
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
@@ -393,36 +363,46 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
     return lenses
 
 
-def select_best_lenses_forward_selection(sources, candidate_lenses, use_flags, lens_type='NFW', chi2_threshold=1.0, tolerance=0.01):
+def select_best_lenses_forward_selection(sources, candidate_lenses, use_flags, lens_type='SIS', chi2_threshold=1.0, tolerance=0.01):
     """
     Selects the best combination of lenses by iteratively adding lenses
     to minimize the reduced chi-squared value.
     
     Parameters:
         sources (Source): Object containing source positions and measured lensing signals.
-        candidate_lenses (NFW_Lens): NFW_Lens object containing candidate lenses.
-        use_flags (list of bool): Flags indicating which lensing signals to use [shear, flexion, second flexion].
-        lens_type (str): Type of lensing model ('SIS' or 'NFW'). Default is 'NFW'.
+        candidate_lenses (Lens): Candidate lenses (NFW_Lens or SIS_Lens object).
+        use_flags (list of bool): Flags indicating which lensing signals to use.
+        lens_type (str): Type of lensing model ('NFW' or 'SIS'). Default is 'NFW'.
         chi2_threshold (float): Target reduced chi-squared value.
         tolerance (float): Tolerance for improvement.
     
     Returns:
-        best_lenses (NFW_Lens): NFW_Lens object with selected lenses that minimize the reduced chi-squared.
+        best_lenses (Lens): Lens object with selected lenses that minimize the reduced chi-squared.
         best_reduced_chi2 (float): The minimized reduced chi-squared value.
     """
     import copy
     import numpy as np
 
-    # Start with an empty set of lenses
-    selected_lenses = halo_obj.NFW_Lens(
-        x=np.array([]),
-        y=np.array([]),
-        z=np.array([]),
-        concentration=np.array([]),
-        mass=np.array([]),
-        redshift=candidate_lenses.redshift,
-        chi2=np.array([])
-    )
+    # Initialize an empty lens object based on lens_type
+    if lens_type == 'NFW':
+        selected_lenses = halo_obj.NFW_Lens(
+            x=np.array([]),
+            y=np.array([]),
+            z=np.array([]),
+            concentration=np.array([]),
+            mass=np.array([]),
+            redshift=candidate_lenses.redshift,
+            chi2=np.array([])
+        )
+    elif lens_type == 'SIS':
+        selected_lenses = halo_obj.SIS_Lens(
+            x=np.array([]),
+            y=np.array([]),
+            te=np.array([]),
+            chi2=np.array([])
+        )
+    else:
+        raise ValueError("Unsupported lens type. Choose 'NFW' or 'SIS'.")
 
     remaining_indices = np.arange(len(candidate_lenses.x))
     best_reduced_chi2 = np.inf
@@ -436,15 +416,24 @@ def select_best_lenses_forward_selection(sources, candidate_lenses, use_flags, l
         # Evaluate the effect of adding each remaining lens
         for idx in remaining_indices:
             # Create a test lens set with the candidate lens added
-            test_lenses = halo_obj.NFW_Lens(
-                x=np.append(selected_lenses.x, candidate_lenses.x[idx]),
-                y=np.append(selected_lenses.y, candidate_lenses.y[idx]),
-                z=np.append(selected_lenses.z, candidate_lenses.z[idx]),
-                concentration=np.append(selected_lenses.concentration, candidate_lenses.concentration[idx]),
-                mass=np.append(selected_lenses.mass, candidate_lenses.mass[idx]),
-                redshift=candidate_lenses.redshift,
-                chi2=np.append(selected_lenses.chi2, candidate_lenses.chi2[idx])
-            )
+            if lens_type == 'NFW':
+                test_lenses = halo_obj.NFW_Lens(
+                    x=np.append(selected_lenses.x, candidate_lenses.x[idx]),
+                    y=np.append(selected_lenses.y, candidate_lenses.y[idx]),
+                    z=np.append(selected_lenses.z, candidate_lenses.z[idx]),
+                    concentration=np.append(selected_lenses.concentration, candidate_lenses.concentration[idx]),
+                    mass=np.append(selected_lenses.mass, candidate_lenses.mass[idx]),
+                    redshift=candidate_lenses.redshift,
+                    chi2=np.append(selected_lenses.chi2, candidate_lenses.chi2[idx])
+                )
+            elif lens_type == 'SIS':
+                test_lenses = halo_obj.SIS_Lens(
+                    x=np.append(selected_lenses.x, candidate_lenses.x[idx]),
+                    y=np.append(selected_lenses.y, candidate_lenses.y[idx]),
+                    te=np.append(selected_lenses.te, candidate_lenses.te[idx]),
+                    chi2=np.append(selected_lenses.chi2, candidate_lenses.chi2[idx])
+                )
+
             # Compute chi-squared and reduced chi-squared
             chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type)
             dof = metric.calc_degrees_of_freedom(sources, test_lenses, use_flags)
@@ -461,84 +450,34 @@ def select_best_lenses_forward_selection(sources, candidate_lenses, use_flags, l
             # Update the best lenses and reduced chi-squared
             best_reduced_chi2 = min_chi2
             idx_to_add = lens_indices[min_index]
-            print(f"Adding lens {idx_to_add} improves reduced chi-squared to {best_reduced_chi2:.4f}")
+
             # Add the lens to selected_lenses
-            selected_lenses = halo_obj.NFW_Lens(
-                x=np.append(selected_lenses.x, candidate_lenses.x[idx_to_add]),
-                y=np.append(selected_lenses.y, candidate_lenses.y[idx_to_add]),
-                z=np.append(selected_lenses.z, candidate_lenses.z[idx_to_add]),
-                concentration=np.append(selected_lenses.concentration, candidate_lenses.concentration[idx_to_add]),
-                mass=np.append(selected_lenses.mass, candidate_lenses.mass[idx_to_add]),
-                redshift=candidate_lenses.redshift,
-                chi2=np.append(selected_lenses.chi2, candidate_lenses.chi2[idx_to_add])
-            )
+            if lens_type == 'NFW':
+                selected_lenses = halo_obj.NFW_Lens(
+                    x=np.append(selected_lenses.x, candidate_lenses.x[idx_to_add]),
+                    y=np.append(selected_lenses.y, candidate_lenses.y[idx_to_add]),
+                    z=np.append(selected_lenses.z, candidate_lenses.z[idx_to_add]),
+                    concentration=np.append(selected_lenses.concentration, candidate_lenses.concentration[idx_to_add]),
+                    mass=np.append(selected_lenses.mass, candidate_lenses.mass[idx_to_add]),
+                    redshift=candidate_lenses.redshift,
+                    chi2=np.append(selected_lenses.chi2, candidate_lenses.chi2[idx_to_add])
+                )
+            elif lens_type == 'SIS':
+                selected_lenses = halo_obj.SIS_Lens(
+                    x=np.append(selected_lenses.x, candidate_lenses.x[idx_to_add]),
+                    y=np.append(selected_lenses.y, candidate_lenses.y[idx_to_add]),
+                    te=np.append(selected_lenses.te, candidate_lenses.te[idx_to_add]),
+                    chi2=np.append(selected_lenses.chi2, candidate_lenses.chi2[idx_to_add])
+                )
+
             # Remove the lens from remaining_indices
             remaining_indices = np.delete(remaining_indices, min_index)
             improved = True
         else:
             # No improvement, stop the iteration
-            print("No further improvement found.")
             break
 
     return selected_lenses, best_reduced_chi2
-
-
-def optimize_nfw_lens_strength(sources, lenses, use_flags, num_iterations=1000):
-    """
-    Optimizes the mass parameters of NFW lenses via local minimization.
-
-    Parameters:
-        sources (Source): Source object containing positions and lensing signals.
-        lenses (NFW_Lens): NFW_Lens object containing lens positions and masses.
-        use_flags (list): Flags indicating which data to use in optimization.
-        num_iterations (int): Maximum number of iterations for the optimizer.
-
-    Returns:
-        NFW_Lens: Lenses with optimized masses.
-    """
-    for i in range(len(lenses.x)):
-        # Initial guess: log10(mass)
-        initial_guess = np.log10(lenses.mass[i])
-
-        # Define bounds for log10(mass)
-        mass_bounds = (10, 16)  # Adjust as appropriate for your data
-
-        # Objective function to minimize
-        def objective_function(log_mass):
-            mass = 10 ** log_mass
-            # Create a lens with the current mass and fixed position
-            lens = halo_obj.NFW_Lens(
-                x=lenses.x[i],
-                y=lenses.y[i],
-                z=lenses.z[i],
-                concentration=lenses.concentration[i],
-                mass=mass,
-                redshift=lenses.redshift,
-                chi2=0.0
-            )
-            # Update concentration based on mass
-            lens.calculate_concentration()
-
-            # Compute chi-squared for this lens and all sources
-            chi2 = metric.calculate_chi_squared(sources, lens, use_flags, lens_type='NFW')
-            return chi2
-
-        # Run the optimizer
-        result = minimize(
-            objective_function,
-            initial_guess,
-            method='L-BFGS-B',
-            bounds=[mass_bounds],
-            options={'maxiter': num_iterations, 'ftol': 1e-6}
-        )
-
-        # Update lens mass with optimized value
-        optimized_log_mass = result.x[0]
-        lenses.mass[i] = 10 ** optimized_log_mass
-        # Update concentration after mass change
-        lenses.calculate_concentration()
-
-    return lenses
 
 
 def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iterations=10**3, learning_rates=1e-2):
@@ -683,12 +622,5 @@ def chi2wrapper(guess, params):
             )
             lenses.calculate_concentration()
             return metric.calculate_chi_squared(params[4], lenses, params[5], lens_type='NFW', use_weights=False)
-        elif constraint_type == 'dual_constraint':
-            # Optimize both mass and concentration
-            lenses = halo_obj.NFW_Lens(
-                params[0], params[1], np.zeros_like(params[0]),
-                guess[1], 10 ** guess[0], params[2], np.empty_like(params[0])
-            )
-            return metric.calculate_chi_squared(params[3], lenses, params[4], lens_type='NFW', use_weights=False)
-    else:
+        else:
         raise ValueError(f"Invalid lensing model: {model_type}")
