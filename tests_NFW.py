@@ -199,7 +199,8 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
         print('Finished initial guesses')
 
     # Step 2: Optimize guesses with local minimization
-    lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type='NFW')
+    # lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type='NFW')
+    lenses = pipeline.optimize_nfw_lens_positions(sources, lenses, use_flags)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Initial Optimization', reduced_chi2, xmax, ax=axarr[0, 1], legend=False)
     if print_steps:
@@ -212,18 +213,12 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     if print_steps:
         print('Finished filtering')
 
-    # Step 6: Final minimization
-    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Final Minimization', reduced_chi2, xmax, ax=axarr[1, 0], legend=False, show_mass=False)
-    if print_steps:
-        print('Finished final minimization')
-
     # Step 4: Iterative elimination
-    lenses = pipeline.iterative_elimination(sources, lenses, reduced_chi2, use_flags)
+    # lenses = pipeline.iterative_elimination(sources, lenses, reduced_chi2, use_flags)
+    lenses, _ = pipeline.select_best_lenses_forward_selection(sources, lenses, use_flags, lens_type='NFW')
     # lenses, _ = pipeline.select_best_lenses_bic(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Lens Number Selection', reduced_chi2, xmax, ax=axarr[1, 1], legend=False, show_chi2=True)
+    plot_results(lenses, true_lenses, 'Lens Number Selection', reduced_chi2, xmax, ax=axarr[1, 0], legend=False, show_chi2=True)
     if print_steps:
         print('Finished iterative elimination')
 
@@ -233,11 +228,17 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     merger_threshold = (1 / np.sqrt(ns)) if ns > 0 else 1.0  # Avoid division by zero
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold=merger_threshold, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Merging', reduced_chi2, xmax, ax=axarr[1, 2], legend=False, show_mass=True)
+    plot_results(lenses, true_lenses, 'Merging', reduced_chi2, xmax, ax=axarr[1, 1], legend=False, show_mass=False)
     if print_steps:
         print('Finished merging')
 
-
+    # Step 6: Final minimization
+    # lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
+    lenses = pipeline.optimize_nfw_lens_strength(sources, lenses, use_flags)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    plot_results(lenses, true_lenses, 'Final Minimization', reduced_chi2, xmax, ax=axarr[1, 2], legend=False, show_mass=True)
+    if print_steps:
+        print('Finished final minimization')
 
     # Add overall title to the figure
     total_true_mass = np.sum(true_lenses.mass)
@@ -304,16 +305,19 @@ def run_simple_tests():
     ns = 0.01  # Source density per unit area
     xmax = 50
     area = np.pi * xmax ** 2
-    Nsource = int(ns * area)  # Number of sources
-    masses = [1e14, 1e13]
+    # Nsource = int(ns * area)  # Number of sources
+    Nsource = 100
+    masses = [1e14, 1e13, 1e12]
     lens_numbers = [1, 2]
-    noise_use = [True, False]
-    use_flags = [True, True, True]
+    noise_use = [True]
+    use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
 
     for mass in masses:
         for Nlens in lens_numbers:
             for noise in noise_use:
-                simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=use_flags)
+                for flags in use_flags:
+                    simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=flags)
+                # simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=use_flags)
 
 
 def test_mass_recovery_with_noise(lenses, sources, Ntrials=1000):
@@ -566,22 +570,15 @@ def test_iter_elim():
     Nlenses = 100
     xl = np.random.uniform(-xmax, xmax, Nlenses)
     yl = np.random.uniform(-xmax, xmax, Nlenses)
-    ml = np.random.uniform(1e13, 1e14, Nlenses)
+    ml = 10**np.random.uniform(12, 15, Nlenses)
     lenses = halo_obj.NFW_Lens(xl, yl, np.zeros_like(xl), np.zeros(Nlenses), ml, 0.194, np.zeros_like(xl))
     lenses.calculate_concentration()
     # Add the true lens
     lenses.merge(true_lens)
     
-    # Use the BIC-based selection
-    lenses, best_bic = pipeline.select_best_lenses_bic(sources, lenses, use_flags, lens_type='NFW')
-    
-    # Compute final chi-squared for reporting
-    final_bic, final_chi2 = metric.compute_bic(sources, lenses, use_flags, lens_type='NFW')
-    reduced_chi2 = final_chi2 / metric.calc_degrees_of_freedom(sources, lenses, use_flags)
+    lenses, reduced_chi2 = pipeline.select_best_lenses_forward_selection(sources, lenses, use_flags=use_flags, lens_type='NFW')
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
 
-    # Now run the minimization
-    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
-    
     # Plot the results
     plot_results(lenses, true_lens, 'Number Selection', reduced_chi2, xmax, show_mass=True)
     plt.show()

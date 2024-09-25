@@ -33,6 +33,44 @@ class SIS_Lens:
         self.y = np.atleast_1d(y)
         self.te = np.atleast_1d(te)
         self.chi2 = np.atleast_1d(chi2)
+    
+    def copy(self):
+        """
+        Creates a deep copy of the SIS_Lens object.
+
+        Returns:
+            SIS_Lens: Deep copy of the SIS_Lens object.
+        """
+        return SIS_Lens(
+            x=self.x.copy(),
+            y=self.y.copy(),
+            te=self.te.copy(),
+            chi2=self.chi2.copy()
+        )
+    
+    def merge(self, other):
+        """
+        Merges another SIS_Lens object into this one.
+
+        Parameters:
+            other (SIS_Lens): Another SIS_Lens object to merge into this one.
+        """
+        self.x = np.concatenate((self.x, other.x))
+        self.y = np.concatenate((self.y, other.y))
+        self.te = np.concatenate((self.te, other.te))
+        self.chi2 = np.concatenate((self.chi2, other.chi2))
+
+    def remove(self, indices):
+        """
+        Removes lenses at the specified indices.
+
+        Parameters:
+            indices (array_like): Indices of lenses to remove.
+        """
+        self.x = np.delete(self.x, indices)
+        self.y = np.delete(self.y, indices)
+        self.te = np.delete(self.te, indices)
+        self.chi2 = np.delete(self.chi2, indices)
 
 class NFW_Lens:
     """
@@ -70,11 +108,6 @@ class NFW_Lens:
         self.chi2 = np.atleast_1d(chi2)
         self.redshift = redshift
 
-        # Check if mass array is empty
-        if self.mass.size == 0:
-            print(self.mass)
-            raise ValueError('Mass cannot be empty')
-
         # Ensure masses are positive
         self.mass = np.abs(self.mass)
 
@@ -109,6 +142,20 @@ class NFW_Lens:
         self.concentration = np.concatenate((self.concentration, other.concentration))
         self.mass = np.concatenate((self.mass, other.mass))
         self.chi2 = np.concatenate((self.chi2, other.chi2))
+
+    def remove(self, indices):
+        """
+        Removes halos at the specified indices.
+
+        Parameters:
+            indices (array_like): Indices of halos to remove.
+        """
+        self.x = np.delete(self.x, indices)
+        self.y = np.delete(self.y, indices)
+        self.z = np.delete(self.z, indices)
+        self.concentration = np.delete(self.concentration, indices)
+        self.mass = np.delete(self.mass, indices)
+        self.chi2 = np.delete(self.chi2, indices)
 
     def project_to_2D(self):
         """
