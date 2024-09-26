@@ -33,6 +33,28 @@ class Source:
         self.sigf = np.atleast_1d(sigf)
         self.sigg = np.atleast_1d(sigg)
 
+
+    def copy(self):
+        """
+        Creates a deep copy of the Source object.
+
+        Returns:
+            Source: Deep copy of the Source object.
+        """
+        return Source(
+            x=self.x.copy(),
+            y=self.y.copy(),
+            e1=self.e1.copy(),
+            e2=self.e2.copy(),
+            f1=self.f1.copy(),
+            f2=self.f2.copy(),
+            g1=self.g1.copy(),
+            g2=self.g2.copy(),
+            sigs=self.sigs.copy(),
+            sigf=self.sigf.copy(),
+            sigg=self.sigg.copy()
+        )
+
     def add_source(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
         """
         Adds a new source to the catalog.
@@ -176,3 +198,39 @@ class Source:
             df.to_json(filename, orient='records')
         else:
             raise ValueError("Unsupported format. Use 'csv' or 'json'.")
+    
+    def import_from_file(cls, filename, file_format='csv'):
+        """
+        Imports a source catalog from a file in the specified format.
+
+        Parameters:
+            filename (str): Name of the file to import from.
+            file_format (str): The format of the input file ('csv' or 'json'). Default is 'csv'.
+
+        Returns:
+            Source: A Source object containing the imported catalog.
+        """
+        import pandas as pd
+
+        # Import the data from the specified file format
+        if file_format == 'csv':
+            df = pd.read_csv(filename)
+        elif file_format == 'json':
+            df = pd.read_json(filename)
+        else:
+            raise ValueError("Unsupported format. Use 'csv' or 'json'.")
+
+        # Create a Source object from the DataFrame
+        return cls(
+            x=df['x'].values,
+            y=df['y'].values,
+            e1=df['e1'].values,
+            e2=df['e2'].values,
+            f1=df['f1'].values,
+            f2=df['f2'].values,
+            g1=df['g1'].values,
+            g2=df['g2'].values,
+            sigs=df['sigs'].values,
+            sigf=df['sigf'].values,
+            sigg=df['sigg'].values
+        )

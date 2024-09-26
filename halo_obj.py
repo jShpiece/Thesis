@@ -156,6 +156,16 @@ class NFW_Lens:
         self.concentration = np.delete(self.concentration, indices)
         self.mass = np.delete(self.mass, indices)
         self.chi2 = np.delete(self.chi2, indices)
+    
+    def export_to_csv(self, filename):
+        """
+        Exports the NFW_Lens object to a CSV file.
+
+        Parameters:
+            filename (str): Name of the CSV file to create.
+        """
+        data = np.vstack((self.x, self.y, self.z, self.concentration, self.mass, self.chi2)).T
+        np.savetxt(filename, data, delimiter=",", header="x,y,z,concentration,mass,chi2")
 
     def project_to_2D(self):
         """

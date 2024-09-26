@@ -19,10 +19,10 @@ from astropy.visualization import hist as fancy_hist
 import pipeline
 import halo_obj
 import source_obj
-import utils
 import time
-import copy
-import metric
+import main
+import utils
+
 
 plt.style.use('scientific_presentation.mplstyle')  # Use the scientific presentation style sheet for all plots
 
@@ -308,277 +308,144 @@ def run_simple_tests():
                 # simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=use_flags)
 
 
-def test_mass_recovery_with_noise(lenses, sources, Ntrials=1000):
+def plot_random_realizations(recovered_params, true_params, title, xmax):
     """
-    Tests mass recovery by optimizing lens strength with noisy sources.
+    Plots the recovered lens parameters from random realizations.
 
     Parameters:
-        lenses (NFW_Lens): True lens object used in the simulation.
-        sources (Source): Source object containing source properties.
-        Ntrials (int): Number of trials to run. Default is 1000.
+        recovered_params (dict): Dictionary with arrays of the recovered lens parameters (x, y, mass).
+        true_params (dict): Dictionary with arrays of the true lens parameters (x, y, mass).
+        title (str): Title for the plot.
+        xmax (float): Maximum x and y limits for the plot.
     """
-    masses = []
+    fig, axarr = plt.subplots(1, 2, figsize=(20, 6))
 
-    # Initialize progress bar
-    utils.print_progress_bar(0, Ntrials, prefix='Progress:', suffix='Complete', length=50)
-    for n in range(Ntrials):
-        # Clone the source object, apply noise
-        source_clone = copy.deepcopy(sources)
-        source_clone.apply_noise()
+    # Plot x and y positions
+    axarr[0].hist2d(recovered_params['x'], recovered_params['y'], bins=50, cmap='viridis')
+    axarr[0].scatter(true_params['x'], true_params['y'], s=100, c='red', marker='*', label='True Lens', alpha=0.5)
+    axarr[0].set_xlabel('X Position')
+    axarr[0].set_ylabel('Y Position')
+    axarr[0].set_title(f'{title} - Position Distribution')
+    axarr[0].set_xlim(-xmax, xmax)
+    axarr[0].set_ylim(-xmax, xmax)
+    axarr[0].set_aspect('equal')
 
-        # Create a lens object with correct position and concentration
-        lens = copy.deepcopy(lenses)
-        # Randomize the starting mass
-        starting_mass = np.random.normal(1e14, 1e12)
-        lens.mass[0] = starting_mass
-
-        # Run the final minimization
-        lens = pipeline.optimize_lens_strength(source_clone, lens, [True, True, False], lens_type='NFW')
-        masses.append(lens.mass[0])
-
-        # Update the progress bar
-        utils.print_progress_bar(n+1, Ntrials, prefix='Progress:', suffix='Complete', length=50)
-
-    # Convert masses to log scale
-    masses_log = np.log10(np.array(masses))
-
-    # Plot the histogram
-    fig, ax = plt.subplots(figsize=(10, 10))
-    fancy_hist(masses_log, ax=ax, bins='freedman', color='black', histtype='step', density=True, label='No Perturbation', linestyle='-')
-    ax.set_title('Optimized Mass - One Source')
-    ax.axvline(np.log10(1e14), color='black', linestyle='--', label='True Mass')
-    ax.axvline(np.mean(masses_log), color='red', linestyle='--', label='Mean Mass')
-    ax.legend()
+    # Plot mass distribution
+    recovered_mass = np.log10(recovered_params['mass'])
+    axarr[1].hist(recovered_mass, bins=30, color='skyblue', edgecolor='black', alpha=0.7, label='Recovered Mass')
+    axarr[1].axvline(np.log10(true_params['mass']), color='red', linestyle='--', label='True Mass')
+    axarr[1].set_xlabel('Recovered Mass (log $M_\\odot$)')
+    axarr[1].set_ylabel('Frequency')
+    axarr[1].set_title(f'{title} - Mass Distribution')
+    axarr[1].legend()
+    # axarr[1].set_aspect('equal')
+    
     plt.tight_layout()
+    plt.savefig(f'Images/NFW_tests/random_realization/{title}.png')
     plt.show()
 
 
-def str_opt_tester(Nlens, Nsource, lens_mass, xmax, use_noise=False, perturb_loc=False, perturb_sig=False):
+
+def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], 
+                            random_seed=None, substructure=False):
     """
-    Test the strength optimization pipeline.
+    Runs Ntrials random realizations of the lensing pipeline and collects the recovered lens parameters.
 
     Parameters:
-        Nlens (int): Number of lenses.
-        Nsource (int): Number of sources.
-        lens_mass (float): Mass of the lenses.
-        xmax (float): Maximum x and y limits for the field.
-        use_noise (bool, optional): Whether to add noise to the sources. Default is False.
+        Ntrials (int): Number of random realizations to run.
+        Nlenses (int): Number of lenses to create in each realization. Default is 1.
+        Nsources (int): Number of sources to create in each realization. Default is 100.
+        xmax (float): Maximum x and y position for the random lenses. Default is 50.
+        lens_mass_range (tuple): Minimum and maximum mass for the random lenses. Default is (1e12, 1e15).
+        z_l (float): Redshift of the lens. Default is 0.194.
+        use_flags (list): Flags indicating which data to use in calculations. Default is [True, True, False].
+        random_seed (int): Seed for random number generator. Default is None (no seed).
+
+    Returns:
+        dict: A dictionary with arrays of the recovered lens parameters (x, y, mass).
     """
-    true_lens, sources, xmax = build_standardized_field(Nlens, Nsource, lens_mass, xmax, False)
-    
-    # Randomly place a single source
-    xs = np.array([10.0])
-    ys = np.array([0.0])
-    sigs = np.array([0.1])
-    sigf = np.array([0.01])
-    sigg = np.array([0.02])
-    sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sigs, sigf, sigg)
-    sources.apply_lensing(true_lens, lens_type='NFW', z_source=0.8)
-    
-    masses = []
-    perturbation_1 = []
-    perturbation_2 = []
-    perturbation_3 = []
-    perturbation_4 = []
 
-    def perturb_source_signals(target_source, shear_dir, flex_dir):
-        if shear_dir == 'plus':
-            target_source.e1 *= 1.05
-            # target_source.e2 *= 1.05
-        elif shear_dir == 'minus':
-            target_source.e1 *= 0.95
-            # target_source.e2 *= 0.95
-        else:
-            raise ValueError('Invalid shear direction specified')
-        
-        if flex_dir == 'plus':
-            target_source.f1 *= 1.05
-            # target_source.f2 *= 1.05
-        elif flex_dir == 'minus':
-            target_source.f1 *= 0.95
-            # target_source.f2 *= 0.95
-        else:
-            raise ValueError('Invalid flexion direction specified')
-        return target_source
+    # Set random seed for reproducibility
+    if random_seed is not None:
+        np.random.seed(random_seed)
 
-    Ntrials = 1000
+    # Initialize arrays to store recovered lens parameters
+    recovered_x = []
+    recovered_y = []
+    recovered_mass = []
+
+    # Use the same true lens for all trials
+    # Lenses are distributed uniformly - if there's one lens it's at the origin, if there are two they're in a line, otherwise they're in a grid
+    if Nlenses == 1:
+        x = np.array([0])
+        y = np.array([0])
+    elif Nlenses == 2:
+        x = np.linspace(-xmax / 2, xmax / 2, Nlenses)
+        y = np.array([0, 0])
+    else:
+        x = np.linspace(-xmax / 2, xmax / 2, Nlenses)
+        y = np.linspace(-xmax / 2, xmax / 2, Nlenses)
+    mass = np.full(Nlenses, lens_mass)
+
+    if substructure: # Make the first lens the primary lens, all others are substructure
+        mass[:1] /= 10
+    
+    true_lens = halo_obj.NFW_Lens(x, y, np.zeros_like(x), np.zeros(Nlenses), mass, z_l, np.zeros_like(x))
+    true_lens.calculate_concentration()
+    true_params = {'x': x, 'y': y, 'mass': mass}
+
     # Initialize progress bar
     utils.print_progress_bar(0, Ntrials, prefix='Progress:', suffix='Complete', length=50)
-    for n in range(Ntrials):
-        # Clone the source object, otherwise we add noise to the same object each time
-        source_clone = copy.deepcopy(sources)
-        source_clone.apply_noise()
-
-        # Create a lens object with the exactly correct position and concentration - this assumes that we perfectly located the halo, and the only thing we need to do is to calculate the mass
-        lens = copy.deepcopy(true_lens)
-        # Randomize the mass
-        starting_mass = np.random.normal(1e14, 1e13, 1)
-        lens.mass[0] = starting_mass[0]
-
-        if perturb_loc:
-            # Randomly perturb the lens location by a *small* amount
-            lens.x[0] += np.random.normal(0, 0.1, 1)
-            lens.y[0] += np.random.normal(0, 0.1, 1)
-
-        # Run the final minimization
-        lens = pipeline.optimize_lens_strength(source_clone, lens, [True, True, False], lens_type='NFW')
-        masses.append((lens.mass))
-
-        # Now, clone the source object and perturb it in different ways
-        perturbations = [['plus', 'plus'], ['plus', 'minus'], ['minus', 'plus'], ['minus', 'minus']]
-        results = [perturbation_1, perturbation_2, perturbation_3, perturbation_4]
-        
-        if perturb_sig:
-            for perturbation in perturbations:
-                source_clone_perturbation = copy.deepcopy(source_clone)
-                source_clone_perturbation = perturb_source_signals(source_clone_perturbation, perturbation[0], perturbation[1])
-                lens_clone = copy.deepcopy(lens)
-                lens_clone.mass[0] = starting_mass[0]
-                lens_clone = pipeline.optimize_lens_strength(source_clone_perturbation, lens_clone, [True, True, False], lens_type='NFW')
-                results[perturbations.index(perturbation)].append((lens_clone.mass))
-        
-        # Update the progress bar
-        utils.print_progress_bar(n+1, Ntrials, prefix='Progress:', suffix='Complete', length=50)
-
-    # Turn lists into numpy arrays, convert to log space
-    masses = np.log10(np.array(masses))
-    perturbations = [np.log10(np.array(perturbation)) for perturbation in [perturbation_1, perturbation_2, perturbation_3, perturbation_4]]
-    # Check that each perturbation has the same length
-    assert len(perturbation_1) == len(perturbation_2) == len(perturbation_3) == len(perturbation_4)
-
-    if perturb_sig:
-        # Plot the results
-        fig, ax = plt.subplots(5, 1, figsize=(10, 20))
-        ax = ax.flatten()
-        fancy_hist(masses, ax=ax[0], bins='freedman', color='black', histtype='step', density=True)
-        ax[0].axvline(np.log10(1e14), color='black', linestyle='--', label='True Mass = {:.2e}'.format(1e14))
-        ax[0].axvline(np.mean(masses), color='red', linestyle='--', label='Mean Mass = {:.2e}'.format(10**np.mean(masses)))
-        ax[0].set_title('No Perturbation')
-        titles = ['Shear +, Flexion +', 'Shear +, Flexion -', 'Shear -, Flexion +', 'Shear -, Flexion -']
-        for i in range(4):
-            fancy_hist(masses, ax=ax[i+1], bins='freedman', color='black', histtype='step', density=True, label = 'No Perturbation', linestyle='-')
-            fancy_hist(perturbations[i], ax=ax[i+1], bins='freedman', color='red', histtype='step', density=True, label = 'Perturbed', linestyle='--')
-            ax[i+1].axvline(np.log10(1e14), color='black', linestyle='--', label='True Mass = {:.2e}'.format(1e14))
-            ax[i+1].axvline(np.mean(masses), color='red', linestyle='--', label='Mean Mass = {:.2e}'.format(10**np.mean(masses)))
-            ax[i+1].axvline(np.mean(perturbations[i]), color='blue', linestyle='--', label='Mean Mass = {:.2e}'.format(10**np.mean(perturbations[i])))
-            ax[i+1].set_title(titles[i])
-            ax[i+1].legend()
-        plt.tight_layout()
-        plt.show()
-    else:
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        fancy_hist(masses, ax=ax, bins='freedman', color='black', histtype='step', density=True, label = 'No Perturbation', linestyle='-')
-        ax.set_title('Optimized Mass - One Source - Imperfect Lens Location')
-        ax.axvline(np.log10(1e14), color='black', linestyle='--', label='True Mass = {:.2e}'.format(1e14))
-        ax.axvline(np.mean(masses), color='red', linestyle='--', label='Mean Mass = {:.2e}'.format(10**np.mean(masses)))
-        ax.legend()
-        plt.tight_layout()
-        plt.savefig('Images/NFW_tests/strength_opt/one_source_mass_imperfect_location.png')
+    # Loop over Ntrials random realizations
+    for trial in range(Ntrials):
 
 
-def one_source_optimization(Nlens, Nsource, Ntrials, lens_mass, xmax, perturb_loc=False):
-    true_lens, sources, _ = build_standardized_field(Nlens, Nsource, lens_mass, xmax, False)
-    
-    Nsources = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 50, 100]
-    
-    for N in Nsources:
-        # Arrange the sources uniformly around the lens
-        # r = 10
-        # theta = np.linspace(0, 2*np.pi, Nsource)
-        # Arrange sources randomly (spherically symmetric)
-        r = np.sqrt(np.random.random(N)) * xmax
-        theta = np.random.uniform(0, 2*np.pi, N)
-        xs = r * np.cos(theta)
-        ys = r * np.sin(theta)
 
-        sigs = np.ones_like(xs) * 0.1
-        sigf = np.ones_like(xs) * 0.01
-        sigg = np.ones_like(xs) * 0.02
-        sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sigs, sigf, sigg)
+        # Now create a random distribution of sources (spherical distribution)
+        r_s = np.sqrt(np.random.random(Nsources)) * xmax
+        theta_s = np.random.random(Nsources) * 2 * np.pi
+        xs = r_s * np.cos(theta_s)
+        ys = r_s * np.sin(theta_s)
+        sig_s = np.full(Nsources, 0.1)
+        sig_f = np.full(Nsources, 0.01)
+        sig_g = np.full(Nsources, 0.02)
+        sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
+                                    np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
         sources.apply_lensing(true_lens, lens_type='NFW', z_source=0.8)
-        
-        starting_masses = np.logspace(13, 15, Ntrials)
+        sources.apply_noise()
+        sources.filter_sources()
 
-        
-        # Initialize progress bar
-        utils.print_progress_bar(0, Ntrials, prefix='Progress:', suffix='Complete', length=50)
-        final_masses = []
+        # Run the pipeline on the sources
+        lenses, reduced_chi2 = main.fit_lensing_field(sources, xmax, flags=False, use_flags=use_flags, lens_type='NFW')
 
-        # Initialize progress bar
-        for i, starting_mass in enumerate(starting_masses):
-            # Clone the source object, otherwise we add noise to the same object each time
-            source_clone = copy.deepcopy(sources)
-            source_clone.apply_noise()
+        # Extract the recovered lens parameters
+        recovered_x.extend(lenses.x)
+        recovered_y.extend(lenses.y)
+        recovered_mass.extend(lenses.mass)
 
-            # Create a lens object with the exactly correct position and concentration - this assumes that we perfectly located the halo, and the only thing we need to do is to calculate the mass
-            lens = copy.deepcopy(true_lens)
-            # Randomize the mass
-            lens.mass[0] = starting_mass
-            if perturb_loc:
-                # Randomly perturb the lens location by a *small* amount
-                lens.x[0] += np.random.normal(0, 0.5, 1)
-                lens.y[0] += np.random.normal(0, 0.5, 1)
+        # Update progress bar
+        utils.print_progress_bar(trial + 1, Ntrials, prefix='Progress:', suffix='Complete', length=50)
 
-            # Run the final minimization
-            # lens = pipeline.optimize_lens_strength(source_clone, lens, [True, True, False], lens_type='NFW')
-            lens = pipeline.optimize_nfw_lens_strength(source_clone, lens, [True, True, False])
-            final_masses.append(lens.mass[0])
+    # Convert lists to numpy arrays
+    recovered_x = np.array(recovered_x)
+    recovered_y = np.array(recovered_y)
+    recovered_mass = np.array(recovered_mass)
+    recovered_params = {'x': recovered_x, 'y': recovered_y, 'mass': recovered_mass}
 
-            # Update the progress bar
-            utils.print_progress_bar(i+1, len(starting_masses), prefix='Progress:', suffix='Complete', length=50)
-        
-
-        # Plot the results
-        fig, ax = plt.subplots(1, 1, figsize=(10, 20))
-        ax.plot(starting_masses, final_masses, color='black', linestyle='-', label='Reduced Chi-Squared')
-        ax.set_title('Optimized Mass (Perturbed Loc) - Random Placement - Nsource = {}'.format(N))
-        ax.set_xlabel('Starting Mass')
-        ax.set_ylabel('Final Mass')
-        ax.axhline(1e14, color='red', linestyle='--', label='True Mass')
-        ax.legend()
-        ax.set_xscale('log')
-        ax.set_yscale('log')
-        plt.tight_layout()
-        title = 'Images/NFW_tests/strength_opt/Nsource_{}.png'.format(N)
-        if perturb_loc:
-            title = 'Images/NFW_tests/strength_opt/Nsource_{}_imperfect_location_random.png'.format(N)
-        plt.savefig(title)
-        print('Finished Nsource = {}'.format(N))
-
-
-def test_iter_elim():
-    # Create a standardized field
-    Nlens = 1
-    Nsource = 100
-    lens_mass = 1e14
-    xmax = 50
-    use_flags = [True, True, True]
-    true_lens, sources, _ = build_standardized_field(Nlens, Nsource, lens_mass, xmax, True)
-    
-    # Create a bunch of random lenses
-    Nlenses = 100
-    xl = np.random.uniform(-xmax, xmax, Nlenses)
-    yl = np.random.uniform(-xmax, xmax, Nlenses)
-    ml = 10**np.random.uniform(12, 15, Nlenses)
-    lenses = halo_obj.NFW_Lens(xl, yl, np.zeros_like(xl), np.zeros(Nlenses), ml, 0.194, np.zeros_like(xl))
-    lenses.calculate_concentration()
-    # Add the true lens
-    lenses.merge(true_lens)
-    
-    lenses, reduced_chi2 = pipeline.select_best_lenses_forward_selection(sources, lenses, use_flags=use_flags, lens_type='NFW')
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-
-    # Plot the results
-    plot_results(lenses, true_lens, 'Number Selection', reduced_chi2, xmax, show_mass=True)
-    plt.show()
+    # Return the recovered lens parameters
+    return recovered_params, true_params
 
 
 
 if __name__ == '__main__':
     start = time.time()
-    # str_opt_tester(1, 1, 1e14, 50, perturb_loc=True, perturb_sig=True)
-    # one_source_optimization(1, 1, 100, 1e14, 50, perturb_loc=True)
-    # test_iter_elim()
-    run_simple_tests()
+    Ntrial = 1000
+    results, true_results = run_random_realizations(Ntrial, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], random_seed=None, substructure=False)
+
+    # Save the results
+    np.save('Data/NFW_tests/random_realization/Ntrial_{}.npy'.format(Ntrial), results)
+    # results = np.load('Data/NFW_tests/random_realization/Ntrial_{Ntrial}.npy', allow_pickle=True).item()
+
+    plot_random_realizations(results, true_results, 'Random Realizations', 50)
     end = time.time()
     print(f'Test complete - Time taken: {end - start:.2f} seconds')
