@@ -72,9 +72,6 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
         xl = sources.x + r * np.cos(phi)
         yl = sources.y + r * np.sin(phi)
 
-        # Initial mass guess
-        initial_mass_guess = 1e13  # Solar masses
-
         # Prepare arrays to store estimated masses
         masses = np.zeros_like(sources.x)
 
@@ -420,7 +417,7 @@ def forward_lens_selection(sources, candidate_lenses, use_flags, lens_type='SIS'
                 )
 
             # Compute chi-squared and reduced chi-squared
-            chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type)
+            chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type, use_weights=False)
             dof = metric.calc_degrees_of_freedom(sources, test_lenses, use_flags)
             reduced_chi2 = chi2 / dof if dof > 0 else np.inf
             chi2_list.append(reduced_chi2)

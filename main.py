@@ -69,7 +69,7 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
     print_step_info(flags, "After Filtering:", lenses, reduced_chi2)
 
     # Step 4: Iteratively eliminate lenses to find the best reduced chi-squared value
-    lenses, _ = pipeline.select_best_lenses_forward_selection(sources, lenses, use_flags, lens_type=lens_type)
+    lenses, _ = pipeline.forward_lens_selection(sources, lenses, use_flags, lens_type=lens_type)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "After Iterative Elimination:", lenses, reduced_chi2)
 

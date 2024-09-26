@@ -154,7 +154,7 @@ def build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=False):
         ys = ys.flatten()
         Nsource = len(xs)
 
-    sig_s = np.full(Nsource, 0.1)
+    sig_s = np.full(Nsource, 0.1) 
     sig_f = np.full(Nsource, 0.01)
     sig_g = np.full(Nsource, 0.02)
     sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
@@ -169,6 +169,34 @@ def build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=False):
     sources.apply_lensing(lenses, lens_type='NFW', z_source=0.8)
     sources.filter_sources()
     return lenses, sources, noisy
+
+
+def write_plot_name(Nlens, lens_mass, noisy, use_flags, append=None, directory=None):
+    # Determine plot naming based on parameters
+    size_map = {1e14: 'large', 1e13: 'medium', 1e12: 'small'}
+    size = size_map.get(lens_mass, 'other')
+
+    flag_dirs = {
+        (True, True, True): 'all',
+        (True, True, False): 'shear_f',
+        (False, True, True): 'f_g',
+        (True, False, True): 'shear_g'
+    }
+
+    if directory is None:
+        directory = 'standard_tests/'
+        directory.append(flag_dirs.get(tuple(use_flags), 'other'))
+
+
+    # Generate plot name
+    plot_name = (f'Images/NFW_tests/{directory}/{size}_Nlens_{Nlens}_{noisy}.png'
+                if append is None else f'Images/NFW_tests/standard_tests/{append}.png')
+    
+    return plot_name
+
+# --------------------------------------------
+# Pipeline Alternatives
+# --------------------------------------------
 
 
 # --------------------------------------------
@@ -241,16 +269,7 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     total_recovered_mass = np.sum(lenses.mass)
     fig.suptitle(f'True Mass: {total_true_mass:.2e} $M_\\odot$ \n Recovered Mass: {total_recovered_mass:.2e} $M_\\odot$')
 
-    # Determine plot naming based on parameters
-    size_map = {1e14: 'large', 1e13: 'medium', 1e12: 'small'}
-    size = size_map.get(true_lenses.mass[0], 'other')
 
-    flag_dirs = {
-        (True, True, True): 'all',
-        (True, True, False): 'shear_f',
-        (False, True, True): 'f_g',
-        (True, False, True): 'shear_g'
-    }
     directory = flag_dirs.get(tuple(use_flags), 'other')
 
     Nlens = len(true_lenses.x)
@@ -296,9 +315,9 @@ def run_simple_tests():
     # Nsource = 100
     masses = [1e14, 1e13, 1e12]
     lens_numbers = [1, 2]
-    noise_use = [True, False]
-    use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
-    # use_flags = [[True, True, True], [True, True, False]]
+    noise_use = [True]
+    # use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
+    use_flags = [[True, True, False]]
 
     for mass in masses:
         for Nlens in lens_numbers:
@@ -343,7 +362,6 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     plt.tight_layout()
     plt.savefig(f'Images/NFW_tests/random_realization/{title}.png')
     plt.show()
-
 
 
 def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], 
@@ -437,16 +455,15 @@ def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass
 
 if __name__ == '__main__':
     start = time.time()
-    run_simple_tests()
-    '''
+    
     Ntrial = 1000
     results, true_results = run_random_realizations(Ntrial, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], random_seed=None, substructure=False)
 
     # Save the results
     np.save('Data/NFW_tests/random_realization/Ntrial_{}_stn10.npy'.format(Ntrial), results)
     # results = np.load('Data/NFW_tests/random_realization/Ntrial_{Ntrial}.npy', allow_pickle=True).item()
-
+    plot_name = write_plot_name(1, 1e14, 'noisy', [True, True, False], append='random_realization/Ntrial_1000_stn10')
     plot_random_realizations(results, true_results, 'Random Realizations Signal to Noise 10', 50)
-    '''
+    
     end = time.time()
     print(f'Test complete - Time taken: {end - start:.2f} seconds')

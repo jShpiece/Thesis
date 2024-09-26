@@ -1,5 +1,8 @@
 import numpy as np
 import utils
+import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter
+from skimage.feature import peak_local_max
 
 class Source:
     """
@@ -33,7 +36,6 @@ class Source:
         self.sigf = np.atleast_1d(sigf)
         self.sigg = np.atleast_1d(sigg)
 
-
     def copy(self):
         """
         Creates a deep copy of the Source object.
@@ -55,7 +57,7 @@ class Source:
             sigg=self.sigg.copy()
         )
 
-    def add_source(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
+    def add(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
         """
         Adds a new source to the catalog.
 
@@ -85,7 +87,7 @@ class Source:
         self.sigf = np.append(self.sigf, sigf)
         self.sigg = np.append(self.sigg, sigg)
 
-    def remove_sources(self, indices):
+    def remove(self, indices):
         """
         Removes sources from the catalog based on given indices.
 
@@ -114,12 +116,14 @@ class Source:
         Returns:
             np.ndarray: Boolean array indicating the valid sources after filtering.
         """
+        # Identify valid sources where both f1 and f2 are within the allowed flexion
         valid_indices = (np.abs(self.f1) <= max_flexion) & (np.abs(self.f2) <= max_flexion)
-        for attr in [
-            'x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg'
-        ]:
-            setattr(self, attr, getattr(self, attr)[valid_indices])
-        return valid_indices
+        
+        # Identify bad indices where the condition is not met
+        bad_indices = np.where(~valid_indices)[0]
+        
+        # Remove the bad indices using the class's remove method
+        self.remove(bad_indices)
 
     def apply_noise(self):
         """

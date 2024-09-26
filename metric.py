@@ -12,7 +12,7 @@ Functions:
 
 import numpy as np
 import copy
-import utils  # Custom utility functions
+
 
 def calc_degrees_of_freedom(sources, lenses, use_flags):
     """
@@ -41,7 +41,7 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
     return dof
 
 
-def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=False) -> float:
+def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=False, sigma=1.0) -> float:
     """
     Calculate the chi-squared statistic for the difference between observed and modeled source properties.
 
@@ -57,6 +57,7 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
         lens_type (str): The lensing model to use ('SIS' or 'NFW'). Default is 'SIS'.
         use_weights (bool): If True, weight the chi-squared contributions by source weights.
                             Default is False.
+        sigma (float): Standard deviation for Gaussian weighting. Default is 1.0.
 
     Returns:
         float: The total chi-squared value, including any penalties for lens properties.
@@ -101,8 +102,8 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
 
     # Sum over all sources, optionally using weights
     if use_weights:
-        # Compute weights (e.g., based on lens-source distance)
-        weights = utils.compute_source_weights(lenses, sources)
+        # Compute Gaussian weights based on lens-source distances
+        weights = gaussian_weighting(sources, lenses, sigma)
         total_chi_squared = np.sum(weights * total_chi_squared_array)
     else:
         total_chi_squared = np.sum(total_chi_squared_array)
@@ -137,34 +138,50 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
     return total_chi_squared
 
 
-def compute_bic(sources, lenses, use_flags, lens_type='NFW'):
+def gaussian_weighting(sources, lenses, sigma=10.0, min_distance_threshold=1e-5):
     """
-    Computes the Bayesian Information Criterion (BIC) for the given sources and lenses.
-
+    Computes Gaussian weights for each source based on its distance to the closest lens.
+    
     Parameters:
-        sources (Source): Object containing source positions and measured lensing signals.
-        lenses (NFW_Lens): NFW_Lens object containing lens parameters.
-        use_flags (list of bool): Flags indicating which lensing signals to use [shear, flexion, second flexion].
-        lens_type (str): Type of lensing model ('SIS' or 'NFW'). Default is 'NFW'.
-
+        sources (Source): Source object containing source positions (sources.x, sources.y).
+        lenses (NFW_Lens): NFW_Lens object containing lens positions (lenses.x, lenses.y).
+        sigma (float): Standard deviation of the Gaussian function. Controls the weight fall-off. Default is 1.0.
+        min_distance_threshold (float): Minimum distance to avoid zero distance issues. Default is 1e-5.
+        
     Returns:
-        bic (float): The computed BIC value.
-        chi2 (float): The chi-squared value.
+        np.ndarray: Array of weights for each source.
     """
-    # Calculate chi-squared using the provided function
-    chi2 = calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
+    # Check if sigma is valid
+    if sigma <= 0:
+        raise ValueError(f"Invalid sigma value: {sigma}. Sigma must be positive and non-zero.")
 
-    # Calculate degrees of freedom using the provided function
-    dof = calc_degrees_of_freedom(sources, lenses, use_flags)
+    # Number of sources
+    n_sources = len(sources.x)
+    
+    # Initialize weight array
+    weights = np.zeros(n_sources)
 
-    # Total number of data points is the number of observations
-    num_signals = np.sum(use_flags)
-    n_data_points = 2 * num_signals * len(sources.x)
+    # Calculate weights for each source based on the distance to the nearest lens
+    for i in range(n_sources):
+        # Calculate the distance from the current source to all lenses
+        distances = np.sqrt((sources.x[i] - lenses.x) ** 2 + (sources.y[i] - lenses.y) ** 2)
+        
+        # Apply minimum distance threshold to avoid zero distances
+        distances = np.clip(distances, min_distance_threshold, None)
+        
+        # Find the minimum distance to any lens
+        min_distance = np.min(distances)
+        
+        # Calculate Gaussian weight based on the minimum distance
+        weights[i] = np.exp(-min_distance ** 2 / (2 * sigma ** 2))
+    
+    # Check for sum of weights before normalization to avoid division by zero
+    weight_sum = np.sum(weights)
+    if weight_sum == 0:
+        # raise ValueError("Sum of Gaussian weights is zero. Check source and lens positions or modify sigma.")
+        weights += 1e-5
 
-    # Number of parameters
-    n_parameters = 3 * len(lenses.x)  # 3 parameters per lens: x, y, strength
-
-    # Compute BIC
-    bic = chi2 + n_parameters * np.log(n_data_points)
-
-    return bic, chi2
+    # Normalize weights to sum to 1
+    weights /= weight_sum
+    
+    return weights
