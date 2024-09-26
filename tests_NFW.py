@@ -213,11 +213,11 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
         print('Step 3: Finished filtering')
 
     # Step 4: Iterative lens elimination
-    lenses, _ = pipeline.select_best_lenses_forward_selection(sources, lenses, use_flags, lens_type='NFW')
+    lenses, _ = pipeline.forward_lens_selection(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Forward Lens Selection', reduced_chi2, xmax, ax=axarr[1, 0], show_chi2=True)
     if print_steps:
-        print('Step 4: Finished iterative elimination')
+        print('Step 4: Finished forward selection')
 
     # Step 5: Merge closely positioned lenses
     area = np.pi * xmax ** 2
@@ -292,13 +292,13 @@ def run_simple_tests():
     ns = 0.01  # Source density per unit area
     xmax = 50
     area = np.pi * xmax ** 2
-    # Nsource = int(ns * area)  # Number of sources
-    Nsource = 100
+    Nsource = int(ns * area)  # Number of sources
+    # Nsource = 100
     masses = [1e14, 1e13, 1e12]
     lens_numbers = [1, 2]
-    noise_use = [True]
-    # use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
-    use_flags = [[True, True, True], [True, True, False]]
+    noise_use = [True, False]
+    use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
+    # use_flags = [[True, True, True], [True, True, False]]
 
     for mass in masses:
         for Nlens in lens_numbers:
@@ -399,16 +399,14 @@ def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass
     # Loop over Ntrials random realizations
     for trial in range(Ntrials):
 
-
-
         # Now create a random distribution of sources (spherical distribution)
         r_s = np.sqrt(np.random.random(Nsources)) * xmax
         theta_s = np.random.random(Nsources) * 2 * np.pi
         xs = r_s * np.cos(theta_s)
         ys = r_s * np.sin(theta_s)
-        sig_s = np.full(Nsources, 0.1)
-        sig_f = np.full(Nsources, 0.01)
-        sig_g = np.full(Nsources, 0.02)
+        sig_s = np.full(Nsources, 0.01)
+        sig_f = np.full(Nsources, 0.001)
+        sig_g = np.full(Nsources, 0.002)
         sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
                                     np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
         sources.apply_lensing(true_lens, lens_type='NFW', z_source=0.8)
@@ -439,13 +437,16 @@ def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass
 
 if __name__ == '__main__':
     start = time.time()
+    run_simple_tests()
+    '''
     Ntrial = 1000
     results, true_results = run_random_realizations(Ntrial, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], random_seed=None, substructure=False)
 
     # Save the results
-    np.save('Data/NFW_tests/random_realization/Ntrial_{}.npy'.format(Ntrial), results)
+    np.save('Data/NFW_tests/random_realization/Ntrial_{}_stn10.npy'.format(Ntrial), results)
     # results = np.load('Data/NFW_tests/random_realization/Ntrial_{Ntrial}.npy', allow_pickle=True).item()
 
-    plot_random_realizations(results, true_results, 'Random Realizations', 50)
+    plot_random_realizations(results, true_results, 'Random Realizations Signal to Noise 10', 50)
+    '''
     end = time.time()
     print(f'Test complete - Time taken: {end - start:.2f} seconds')

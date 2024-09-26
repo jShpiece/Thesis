@@ -324,22 +324,7 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
         # Update strength of lens i
         strength[i] = total_weight / 2  # Adjust strength as needed
         # Remove lens j
-        delete_indices(j)
-
-    def delete_indices(index):
-        """
-        Deletes lens at the specified index from all lens properties.
-
-        Parameters:
-            index (int): Index of the lens to remove.
-        """
-        nonlocal strength
-        lenses.x = np.delete(lenses.x, index)
-        lenses.y = np.delete(lenses.y, index)
-        lenses.chi2 = np.delete(lenses.chi2, index)
-        strength = np.delete(strength, index)
-        if lens_type == 'NFW':
-            lenses.concentration = np.delete(lenses.concentration, index)
+        lenses.remove([j])
 
     i = 0
     while i < len(lenses.x):
@@ -363,7 +348,7 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
     return lenses
 
 
-def select_best_lenses_forward_selection(sources, candidate_lenses, use_flags, lens_type='SIS', chi2_threshold=1.0, tolerance=0.01):
+def forward_lens_selection(sources, candidate_lenses, use_flags, lens_type='SIS', chi2_threshold=1.0, tolerance=0.01):
     """
     Selects the best combination of lenses by iteratively adding lenses
     to minimize the reduced chi-squared value.
@@ -513,7 +498,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
         lenses.te = best_params
 
     elif lens_type == 'NFW':
-        # Optimize mass for each lens individually
+        # Optimize mass for each lens individually - this is verified to be the better approach as of 9/26/2024
         for i in range(len(lenses.x)):
             guess = [np.log10(lenses.mass[i])]
             params = [
