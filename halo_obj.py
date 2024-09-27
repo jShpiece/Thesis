@@ -233,7 +233,7 @@ class NFW_Lens:
         Returns:
             np.ndarray: Characteristic density contrast values.
         """
-        c = self.concentration
+        c = self.concentration # Concentration parameter - rename for brevity
         delta_c = (200 / 3) * (c ** 3) / (np.log(1 + c) - c / (1 + c))
         return delta_c
 
@@ -244,12 +244,5 @@ class NFW_Lens:
         Updates:
             self.concentration (np.ndarray): Updated concentration parameters.
         """
-        # Avoid division by zero
-        mass_corrected = self.mass + 1e-10
-
-        # Calculate concentration parameter
-        self.concentration = (
-            5.71
-            * (mass_corrected / 2e12) ** (-0.084)
-            * (1 + self.redshift) ** (-0.47)
-        )
+        mass_corrected = self.mass + 1e-10 # Avoid division by zero
+        self.concentration = (5.71 * (mass_corrected / 2e12) ** (-0.084) * (1 + self.redshift) ** (-0.47))

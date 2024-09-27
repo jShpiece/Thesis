@@ -138,7 +138,7 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
     return total_chi_squared
 
 
-def gaussian_weighting(sources, lenses, sigma=10.0, min_distance_threshold=1e-5):
+def gaussian_weighting(sources, lenses, sigma=50.0, min_distance_threshold=1e-5):
     """
     Computes Gaussian weights for each source based on its distance to the closest lens.
     

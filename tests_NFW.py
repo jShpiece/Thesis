@@ -185,7 +185,7 @@ def write_plot_name(Nlens, lens_mass, noisy, use_flags, append=None, directory=N
 
     if directory is None:
         directory = 'standard_tests/'
-        directory.append(flag_dirs.get(tuple(use_flags), 'other'))
+        directory += flag_dirs.get(tuple(use_flags), 'other')
 
 
     # Generate plot name
@@ -227,7 +227,7 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
         print('Step 1: Finished initial guesses')
 
     # Step 2: Optimize lens positions
-    lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type='NFW')
+    lenses = pipeline.optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Individual Lens Optimization', reduced_chi2, xmax, ax=axarr[0, 1])
     if print_steps:
@@ -243,7 +243,7 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     # Step 4: Iterative lens elimination
     lenses, _ = pipeline.forward_lens_selection(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Forward Lens Selection', reduced_chi2, xmax, ax=axarr[1, 0], show_chi2=True)
+    plot_results(lenses, true_lenses, 'Forward Lens Selection', reduced_chi2, xmax, ax=axarr[1, 0])
     if print_steps:
         print('Step 4: Finished forward selection')
 
@@ -253,7 +253,7 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     merger_threshold = (1 / np.sqrt(ns)) if ns > 0 else 1.0
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold=merger_threshold, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Lens Merging', reduced_chi2, xmax, ax=axarr[1, 1])
+    plot_results(lenses, true_lenses, 'Lens Merging', reduced_chi2, xmax, ax=axarr[1, 1], show_mass=True)
     if print_steps:
         print('Step 5: Finished merging')
 
@@ -269,61 +269,50 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     total_recovered_mass = np.sum(lenses.mass)
     fig.suptitle(f'True Mass: {total_true_mass:.2e} $M_\\odot$ \n Recovered Mass: {total_recovered_mass:.2e} $M_\\odot$')
 
-
-    directory = flag_dirs.get(tuple(use_flags), 'other')
-
-    Nlens = len(true_lenses.x)
-
-    # Generate plot name
-    plot_name = (f'Images/NFW_tests/standard_tests/{directory}/{size}_Nlens_{Nlens}_{noisy}.png'
-                if name is None else f'Images/NFW_tests/standard_tests/{name}.png')
+    plot_name = write_plot_name(len(true_lenses.x), true_lenses.mass[0], noisy, use_flags, append=name)
 
     fig.savefig(plot_name)
     plt.close()
-    
+    print(f'Plot saved as {plot_name}')
     return lenses
-
-
-def simple_nfw_test(Nlens, Nsource, xmax, lens_mass, use_noise=True, use_flags=[True, True, True]):
-    """
-    Creates a simple lensing field and tests the pipeline on it.
-
-    Parameters:
-        Nlens (int): Number of lenses to simulate.
-        Nsource (int): Number of sources to simulate.
-        xmax (float): Maximum x and y limits for the field.
-        lens_mass (float): Mass of the lens.
-        use_noise (bool, optional): Whether to add noise to the sources. Default is True.
-        use_flags (list of bool, optional): Flags indicating which lensing signals to use. Default is [True, True, True].
-    """
-    start = time.time()
-    true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise)
-    pipeline.update_chi2_values(sources, true_lenses, use_flags)
-    optimized_lenses = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
-    end = time.time()
-    print(f'Test complete - Time taken: {end - start:.2f} seconds')
 
 
 def run_simple_tests():
     """
     Runs a series of simple tests with varying parameters.
     """
+
+    def simple_test(Nlens, Nsource, xmax, lens_mass, use_noise=True, use_flags=[True, True, True]):
+        """
+        Creates a simple lensing field and tests the pipeline on it.
+
+        Parameters:
+            Nlens (int): Number of lenses to simulate.
+            Nsource (int): Number of sources to simulate.
+            xmax (float): Maximum x and y limits for the field.
+            lens_mass (float): Mass of the lens.
+            use_noise (bool, optional): Whether to add noise to the sources. Default is True.
+            use_flags (list of bool, optional): Flags indicating which lensing signals to use. Default is [True, True, True].
+        """
+        true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise)
+        pipeline.update_chi2_values(sources, true_lenses, use_flags)
+        optimized_lenses = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
+
     ns = 0.01  # Source density per unit area
     xmax = 50
     area = np.pi * xmax ** 2
     Nsource = int(ns * area)  # Number of sources
-    # Nsource = 100
     masses = [1e14, 1e13, 1e12]
-    lens_numbers = [1, 2]
+    lens_numbers = [1, 2, 3]
     noise_use = [True]
     # use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
-    use_flags = [[True, True, False]]
+    use_flags = [[True, True, True], [True, True, False]]
 
     for mass in masses:
         for Nlens in lens_numbers:
             for noise in noise_use:
                 for flags in use_flags:
-                    simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=flags)
+                    simple_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=flags)
                 # simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=use_flags)
 
 
@@ -339,8 +328,11 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     """
     fig, axarr = plt.subplots(1, 2, figsize=(20, 6))
 
+    # print(recovered_params['x'])
+    # print(recovered_params['y'])
     # Plot x and y positions
-    axarr[0].hist2d(recovered_params['x'], recovered_params['y'], bins=50, cmap='viridis')
+    axarr[0].hist2d(recovered_params['x'], recovered_params['y'], bins=20, cmap='viridis')
+    # axarr[0].scatter(recovered_params['x'], recovered_params['y'], s=50, c='blue', alpha=0.5, label='Recovered Lenses')
     axarr[0].scatter(true_params['x'], true_params['y'], s=100, c='red', marker='*', label='True Lens', alpha=0.5)
     axarr[0].set_xlabel('X Position')
     axarr[0].set_ylabel('Y Position')
@@ -351,7 +343,7 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
 
     # Plot mass distribution
     recovered_mass = np.log10(recovered_params['mass'])
-    axarr[1].hist(recovered_mass, bins=30, color='skyblue', edgecolor='black', alpha=0.7, label='Recovered Mass')
+    axarr[1].hist(recovered_mass, bins=100, color='skyblue', edgecolor='black', alpha=0.7, label='Recovered Mass')
     axarr[1].axvline(np.log10(true_params['mass']), color='red', linestyle='--', label='True Mass')
     axarr[1].set_xlabel('Recovered Mass (log $M_\\odot$)')
     axarr[1].set_ylabel('Frequency')
@@ -422,9 +414,9 @@ def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass
         theta_s = np.random.random(Nsources) * 2 * np.pi
         xs = r_s * np.cos(theta_s)
         ys = r_s * np.sin(theta_s)
-        sig_s = np.full(Nsources, 0.01)
-        sig_f = np.full(Nsources, 0.001)
-        sig_g = np.full(Nsources, 0.002)
+        sig_s = np.full(Nsources, 0.1)
+        sig_f = np.full(Nsources, 0.01)
+        sig_g = np.full(Nsources, 0.02)
         sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
                                     np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
         sources.apply_lensing(true_lens, lens_type='NFW', z_source=0.8)
@@ -452,18 +444,31 @@ def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass
     return recovered_params, true_params
 
 
-
 if __name__ == '__main__':
     start = time.time()
     
-    Ntrial = 1000
+    run_simple_tests()
+    '''
+    Ntrial = 100
+    Nlenses = 1
+    Nsources = 100
+    xmax = 50
+    lens_mass = 1e13
+    z_l = 0.194
+    use_flags = [True, True, False]
+
     results, true_results = run_random_realizations(Ntrial, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], random_seed=None, substructure=False)
 
     # Save the results
-    np.save('Data/NFW_tests/random_realization/Ntrial_{}_stn10.npy'.format(Ntrial), results)
-    # results = np.load('Data/NFW_tests/random_realization/Ntrial_{Ntrial}.npy', allow_pickle=True).item()
-    plot_name = write_plot_name(1, 1e14, 'noisy', [True, True, False], append='random_realization/Ntrial_1000_stn10')
-    plot_random_realizations(results, true_results, 'Random Realizations Signal to Noise 10', 50)
-    
+    np.save('Data/NFW_tests/random_realization/medium_Nlens_1.npy', results)
+    # results = np.load('Data/NFW_tests/random_realization/Ntrial_1000_stn10.npy', allow_pickle=True).item()
+    plot_name = write_plot_name(1, lens_mass, 'noisy', use_flags, append='random_realization/medium_Nlens_1')
+
+    true_x = [0]
+    true_y = [0]
+    true_mass = [lens_mass]
+    true_results = {'x': true_x, 'y': true_y, 'mass': true_mass}
+    plot_random_realizations(results, true_results, 'Random Realizations', xmax)
+    '''
     end = time.time()
-    print(f'Test complete - Time taken: {end - start:.2f} seconds')
+    print(f'Script complete - Time taken: {end - start:.2f} seconds')
