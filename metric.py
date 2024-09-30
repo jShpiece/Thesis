@@ -13,7 +13,6 @@ Functions:
 import numpy as np
 import copy
 
-
 def calc_degrees_of_freedom(sources, lenses, use_flags):
     """
     Calculate the degrees of freedom for a given set of sources and lenses.
@@ -39,7 +38,6 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
     if dof <= 0:
         return np.inf
     return dof
-
 
 def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=False, sigma=1.0) -> float:
     """
@@ -136,7 +134,6 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
 
     # Return the total chi-squared including penalties
     return total_chi_squared
-
 
 def gaussian_weighting(sources, lenses, sigma=50.0, min_distance_threshold=1e-5):
     """

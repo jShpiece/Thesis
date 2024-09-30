@@ -218,24 +218,26 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     """
     # Set up plot with 6 subplots in a 2x3 layout
     fig, axarr = plt.subplots(2, 3, figsize=(20, 15), sharex=True, sharey=True)
+    reduced_chi2 = 1.0
 
     # Step 1: Generate initial lens guesses
-    lenses = pipeline.generate_initial_guess(sources, lens_type='NFW', z_l=0.194)
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    # lenses = pipeline.generate_initial_guess(sources, lens_type='NFW', z_l=0.194)
+    lenses = pipeline.alt_generate_initial_guess(sources, xmax, lens_type='NFW')
+    # reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Candidate Lens Generation', reduced_chi2, xmax, ax=axarr[0, 0], legend=True)
     if print_steps:
         print('Step 1: Finished initial guesses')
 
     # Step 2: Optimize lens positions
     lenses = pipeline.optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='NFW')
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    # reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Individual Lens Optimization', reduced_chi2, xmax, ax=axarr[0, 1])
     if print_steps:
         print('Step 2: Finished optimization')
 
     # Step 3: Filter lenses by proximity to sources
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type='NFW')
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    # reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Physical Criteria Filtering', reduced_chi2, xmax, ax=axarr[0, 2])
     if print_steps:
         print('Step 3: Finished filtering')
@@ -303,7 +305,7 @@ def run_simple_tests():
     area = np.pi * xmax ** 2
     Nsource = int(ns * area)  # Number of sources
     masses = [1e14, 1e13, 1e12]
-    lens_numbers = [1, 2, 3]
+    lens_numbers = [1, 2]
     noise_use = [True]
     # use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
     use_flags = [[True, True, True], [True, True, False]]
