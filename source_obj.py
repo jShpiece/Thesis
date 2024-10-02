@@ -169,18 +169,17 @@ class Source:
         ):
             setattr(self, attr, getattr(self, attr) + delta)
 
-    def export_to_file(self, filename, file_format='csv'):
+    def export_to_csv(self, filename):
         """
-        Exports the source catalog to a file in the specified format.
+        Exports the source catalog to a CSV file.
 
         Parameters:
             filename (str): Name of the file to export to.
-            file_format (str): The format of the output file ('csv' or 'json'). Default is 'csv'.
         """
         import pandas as pd
 
-        # Create a DataFrame from the source attributes
-        data = {
+        # Create a DataFrame from the Source object
+        df = pd.DataFrame({
             'x': self.x,
             'y': self.y,
             'e1': self.e1,
@@ -192,49 +191,23 @@ class Source:
             'sigs': self.sigs,
             'sigf': self.sigf,
             'sigg': self.sigg
-        }
-        df = pd.DataFrame(data)
+        })
 
-        # Export the DataFrame to the specified file format
-        if file_format == 'csv':
-            df.to_csv(filename, index=False)
-        elif file_format == 'json':
-            df.to_json(filename, orient='records')
-        else:
-            raise ValueError("Unsupported format. Use 'csv' or 'json'.")
+        # Export the DataFrame to a CSV file
+        df.to_csv(filename, index=False)
     
-    def import_from_file(cls, filename, file_format='csv'):
+    def import_from_csv(self, filename):
         """
-        Imports a source catalog from a file in the specified format.
+        Imports a source catalog from a CSV file.
 
         Parameters:
             filename (str): Name of the file to import from.
-            file_format (str): The format of the input file ('csv' or 'json'). Default is 'csv'.
-
-        Returns:
-            Source: A Source object containing the imported catalog.
         """
         import pandas as pd
 
-        # Import the data from the specified file format
-        if file_format == 'csv':
-            df = pd.read_csv(filename)
-        elif file_format == 'json':
-            df = pd.read_json(filename)
-        else:
-            raise ValueError("Unsupported format. Use 'csv' or 'json'.")
+        # Read the CSV file into a DataFrame
+        df = pd.read_csv(filename)
 
-        # Create a Source object from the DataFrame
-        return cls(
-            x=df['x'].values,
-            y=df['y'].values,
-            e1=df['e1'].values,
-            e2=df['e2'].values,
-            f1=df['f1'].values,
-            f2=df['f2'].values,
-            g1=df['g1'].values,
-            g2=df['g2'].values,
-            sigs=df['sigs'].values,
-            sigf=df['sigf'].values,
-            sigg=df['sigg'].values
-        )
+        # Assign the DataFrame columns to the Source object attributes
+        for attr in ['x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg']:
+            setattr(self, attr, df[attr].values)

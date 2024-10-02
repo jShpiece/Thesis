@@ -72,6 +72,29 @@ class SIS_Lens:
         self.te = np.delete(self.te, indices)
         self.chi2 = np.delete(self.chi2, indices)
 
+    def export_to_csv(self, filename):
+        """
+        Exports the SIS_Lens object to a CSV file.
+
+        Parameters:
+            filename (str): Name of the CSV file to create.
+        """
+        data = np.vstack((self.x, self.y, self.te, self.chi2)).T
+        np.savetxt(filename, data, delimiter=",", header="x,y,te,chi2")
+
+    def import_from_csv(self, filename):
+        """
+        Imports data from a CSV file into the SIS_Lens object.
+
+        Parameters:
+            filename (str): Name of the CSV file to read.
+        """
+        data = np.loadtxt(filename, delimiter=",", skiprows=1)
+        self.x = data[:, 0]
+        self.y = data[:, 1]
+        self.te = data[:, 2]
+        self.chi2 = data[:, 3]
+
 class NFW_Lens:
     """
     Represents a Navarro-Frenk-White (NFW) lens or halo.
@@ -166,6 +189,21 @@ class NFW_Lens:
         """
         data = np.vstack((self.x, self.y, self.z, self.concentration, self.mass, self.chi2)).T
         np.savetxt(filename, data, delimiter=",", header="x,y,z,concentration,mass,chi2")
+
+    def import_from_csv(self, filename):
+        """
+        Imports data from a CSV file into the NFW_Lens object.
+
+        Parameters:
+            filename (str): Name of the CSV file to read.
+        """
+        data = np.loadtxt(filename, delimiter=",", skiprows=1)
+        self.x = data[:, 0]
+        self.y = data[:, 1]
+        self.z = data[:, 2]
+        self.concentration = data[:, 3]
+        self.mass = data[:, 4]
+        self.chi2 = data[:, 5]
 
     def project_to_2D(self):
         """

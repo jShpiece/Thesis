@@ -196,13 +196,8 @@ class JWSTPipeline:
         """
         Saves the lenses and sources to files.
         """
-        np.save(self.output_dir / 'lenses.npy', [self.lenses.x, self.lenses.y, self.lenses.mass, self.lenses.chi2])
-        np.save(self.output_dir / 'sources.npy', [
-            self.sources.x, self.sources.y, 
-            self.sources.e1, self.sources.e2,
-            self.sources.f1, self.sources.f2, 
-            self.sources.sigs, self.sources.sigf
-        ])
+        self.lenses.export_to_csv(self.output_dir / 'lenses.csv')
+        self.sources.export_to_csv(self.output_dir / 'sources.csv')
 
     def plot_results(self):
         """
@@ -216,16 +211,12 @@ class JWSTPipeline:
 
         # Load lens positions
         if self.lenses is None:
-            x, y, mass, chi2 = np.load(self.output_dir / 'lenses.npy')
-            self.lenses = halo_obj.NFW_Lens(x, y, np.zeros_like(x), np.zeros_like(x), mass, 0.2, chi2)
-            self.lenses.calculate_concentration()
-        
+            self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
+            self.lenses.import_from_csv(self.output_dir / 'lenses.csv')
         # Load source positions
         if self.sources is None:
-            x, y, e1, e2, f1, f2, sigs, sigf = np.load(self.output_dir / 'sources.npy')
-            x += 69 # Adjust for centroid shift
-            y += 69
-            self.sources = source_obj.Source(x, y, e1, e2, f1, f2, f1, f2, sigs, sigf, sigf)
+            self.sources = source_obj.Source([0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0])
+            self.sources.import_from_csv(self.output_dir / 'sources.csv')
 
         # Calculate convergence map
         X, Y, kappa = utils.calculate_kappa(
@@ -290,5 +281,5 @@ if __name__ == '__main__':
 
     # Initialize and run the pipeline
     pipeline = JWSTPipeline(config)
-    # pipeline.run()
-    pipeline.plot_results()
+    pipeline.run()
+    # pipeline.plot_results()
