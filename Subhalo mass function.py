@@ -15,7 +15,7 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     term1 = eR * np.sqrt(np.pi * n) / (sigma)
     term2 = (1 - rmin/rmax) / np.sqrt(1 - (rmin/rmax)**2)
     return term1 * term2
- 
+
 #Plotting
 mu = np.logspace(-5, -2, 1000)
 
