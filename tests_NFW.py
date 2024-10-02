@@ -187,8 +187,8 @@ def write_plot_name(Nlens, lens_mass, noisy, use_flags, append=None, directory=N
 
 
     # Generate plot name
-    plot_name = (f'Images/NFW_tests/{directory}/{size}_Nlens_{Nlens}_{noisy}.png'
-                if append is None else f'Images/NFW_tests/standard_tests/{append}.png')
+    plot_name = (f'Output/NFW_tests/{directory}/{size}_Nlens_{Nlens}_{noisy}.png'
+                if append is None else f'Output/NFW_tests/standard_tests/{append}.png')
     
     return plot_name
 
@@ -393,7 +393,7 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     # axarr[1].set_aspect('equal')
     
     plt.tight_layout()
-    plt.savefig(f'Images/NFW_tests/random_realization/{title}.png')
+    plt.savefig(f'Output/NFW_tests/random_realization/{title}.png')
     plt.show()
 
 
@@ -503,8 +503,8 @@ if __name__ == '__main__':
     # results, true_results = run_random_realizations(Ntrial, Nlenses, Nsources, xmax, lens_mass, z_l, use_flags=use_flags, random_seed=42)
 
     # Save the results
-    # np.save('Images/NFW_tests/random_realization/medium_Nlens_1.npy', results)
-    results = np.load('Images/NFW_tests/random_realization/Ntrial_1000_stn10.npy', allow_pickle=True).item()
+    # np.save('Output/NFW_tests/random_realization/medium_Nlens_1.npy', results)
+    results = np.load('Output/NFW_tests/random_realization/Ntrial_1000_stn10.npy', allow_pickle=True).item()
     plot_name = write_plot_name(1, lens_mass, 'noisy', use_flags, append='random_realization/medium_Nlens_1')
 
     true_x = [0]

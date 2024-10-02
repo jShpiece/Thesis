@@ -282,9 +282,9 @@ class JWSTPipeline:
 if __name__ == '__main__':
     # Configuration dictionary
     config = {
-        'flexion_catalog_path': 'Data/JWST/Cluster_Field/Catalogs/F115W_flexion.pkl',
-        'source_catalog_path': 'Data/JWST/Cluster_Field/Catalogs/stacked_cat.ecsv',
-        'image_path': 'Data/JWST/Cluster_Field/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
+        'flexion_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/F115W_flexion.pkl',
+        'source_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/stacked_cat.ecsv',
+        'image_path': 'JWST_Data/JWST/Cluster_Field/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
         'output_dir': 'Output/JWST',
     }
 

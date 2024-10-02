@@ -21,7 +21,7 @@ z_source = 0.8  # Redshift of the source galaxies
 
 # Directory paths
 data_dir = 'MDARK/'
-gof_dir = 'Data/MDARK_Test/Goodness_of_Fit/'
+gof_dir = 'Output/MDARK_Test/Goodness_of_Fit/'
 
 # Column names
 column_names = [
@@ -402,11 +402,11 @@ def process_md_set(test_number):
     start = time.time()
     Ntrials = 1 # Number of trials to run for each cluster in the test set
 
-    test_dir = 'Data/MDARK_Test/Test{}'.format(test_number)
+    test_dir = 'Output/MDARK_Test/Test{}'.format(test_number)
     halos_file = 'MDARK/Halos_{}.MDARK'.format(z_chosen)
     ID_file = test_dir + '/ID_file_{}.csv'.format(test_number)
     result_file = test_dir + '/results_{}.csv'.format(test_number)
-    plot_name = 'Images/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
+    plot_name = 'Output/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
 
     run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
