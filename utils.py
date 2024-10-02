@@ -237,7 +237,7 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     return term1 * term2
 
 
-def calculate_kappa(lenses, extent, smoothing_scale):
+def calculate_kappa(lenses, extent, smoothing_scale, lens_type='SIS'):
     """
     Calculates the convergence (kappa) map for a given set of lenses.
 
@@ -256,11 +256,45 @@ def calculate_kappa(lenses, extent, smoothing_scale):
     kappa = np.zeros_like(X)
 
     # Calculate the convergence map
-    for k in range(len(lenses.x)):
-        dx = X - lenses.x[k]
-        dy = Y - lenses.y[k]
-        r = np.hypot(dx, dy) + 0.5  # Avoid division by zero
-        kappa += lenses.te[k] / (2 * r)
+    def radial_term_1(x):
+        sol = np.zeros_like(x)
+        mask1 = x < 1
+        mask2 = x >= 1
+
+        sol[mask1] = 1 - (2 / np.sqrt(1 - x[mask1] ** 2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
+        sol[mask2] = 1 - (2 / np.sqrt(x[mask2] ** 2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
+
+        return sol
+    
+    if lens_type == 'SIS':
+        for k in range(len(lenses.x)):
+            dx = X - lenses.x[k]
+            dy = Y - lenses.y[k]
+            r = np.hypot(dx, dy) + 0.5  # Avoid division by zero
+            kappa += lenses.te[k] / (2 * r)
+
+    elif lens_type == 'NFW':
+        # Critical surface density at lens redshift
+        sigma_crit = critical_surface_density(lenses.redshift, 0.8)
+        rho_c = cosmo.critical_density(lenses.redshift).to(u.kg / u.m**3).value
+        delta_c = lenses.calc_delta_c()
+        rho_s = rho_c * delta_c
+        r200, r200_arcsec = lenses.calc_R200()
+        rs_1 = r200 / lenses.concentration  # Scale radius in meters
+        rs_2 = r200_arcsec / lenses.concentration  # Scale radius in arcseconds
+
+        for k in range(len(lenses.x)):
+            dx = X - lenses.x[k]
+            dy = Y - lenses.y[k]
+            r = np.hypot(dx, dy) + 0.5
+            x = np.abs(r / rs_2[k])
+            term_1 = radial_term_1(x)
+            kappa_s = rho_s[k] * rs_1[k] / sigma_crit  # Dimensionless surface density
+            kappa += kappa_s * term_1 / (x ** 2 - 1)
+
+    return X, Y, kappa
+                
+
 
     # Apply Gaussian smoothing if smoothing_scale is provided
     if smoothing_scale:

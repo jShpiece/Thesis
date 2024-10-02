@@ -1,475 +1,294 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.io import fits
-from astropy.visualization import ImageNormalize, LogStretch
-from astropy.visualization import hist as fancy_hist
-from astropy import units as u
 from astropy.table import Table
-import pipeline
-import utils
-import warnings
+from astropy.visualization import ImageNormalize, LogStretch
 from pathlib import Path
+import warnings
 
-plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
+# Import custom modules (ensure these are in your Python path)
+import main
+import source_obj
+import halo_obj
+import utils
 
-# File paths that we will need
-jwst_cat_dir = Path('Data/JWST/Cluster Field/Catalogs/')
-img_dir = Path('Data/JWST/Cluster Field/Image Data/')
-lenser_path = jwst_cat_dir / 'F115W_flexion.pkl'
-img_path = img_dir / 'jw02756-o003_t001_nircam_clear-f115w_i2d.fits' 
-cat_path = jwst_cat_dir / 'stacked_cat.ecsv'
+# Set matplotlib style
+plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
 
-# Couple of other global parameters worth declaring, with JWST data
-cdelt = 8.54006306703281e-6 # degrees/pixel
-cdelt = cdelt * 3600 # arcsec/pixel
+# Suppress specific warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-
-def read_file(path):
+class JWSTPipeline:
     """
-    Read in the JWST flexion catalog and return a pandas dataframe
+    A class to encapsulate the JWST lensing pipeline.
     """
-    df = pd.read_pickle(path)
-    # Column names are as follows
-    # ID, q, phi, F1_fit, F2_fit, a 
-    # Read these in
-    ID = df['label']
-    q = df['q']
-    phi = df['phi']
-    F1_fit = df['F1_fit']
-    F2_fit = df['F2_fit']
-    a = df['a']
-    chi2 = df['rchi2']
+    def __init__(self, config):
+        """
+        Initializes the pipeline with the given configuration.
 
-    # Convert to numpy arrays, remove nans
-    ID = np.array(ID)
-    q = np.array(q)
-    phi = np.array(phi)
-    F1_fit = np.array(F1_fit) / cdelt # Convert to arcsec
-    F2_fit = np.array(F2_fit) / cdelt # Convert to arcsec
-    a = np.array(a) * cdelt # Convert to arcsec
-    chi2 = np.array(chi2)
+        Parameters:
+            config (dict): Configuration parameters for the pipeline.
+        """
+        self.config = config
+        self.CDELT = 8.54006306703281e-6 * 3600  # degrees/pixel converted to arcsec/pixel
 
-    # Remove nans
-    cuts = np.where((np.isfinite(q)) & (np.isfinite(phi)) & (np.isfinite(F1_fit)) & (np.isfinite(F2_fit)) & (np.isfinite(a)))[0]
-    ID = ID[cuts]
-    q = q[cuts]
-    phi = phi[cuts]
-    F1_fit = F1_fit[cuts]
-    F2_fit = F2_fit[cuts]
-    a = a[cuts]
-    chi2 = chi2[cuts]
+        # Paths
+        self.flexion_catalog_path = Path(config['flexion_catalog_path'])
+        self.source_catalog_path = Path(config['source_catalog_path'])
+        self.image_path = Path(config['image_path'])
+        self.output_dir = Path(config['output_dir'])
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    return ID, q, phi, F1_fit, F2_fit, a, chi2
+        # Data placeholders
+        self.IDs = None
+        self.q = None
+        self.phi = None
+        self.F1_fit = None
+        self.F2_fit = None
+        self.a = None
+        self.chi2 = None
+        self.xc = None
+        self.yc = None
+        self.lenses = None
+        self.sources = None
+        self.centroid_x = None
+        self.centroid_y = None
 
+    def run(self):
+        """
+        Runs the entire pipeline.
+        """
+        self.read_flexion_catalog()
+        self.read_source_catalog()
+        self.match_sources()
+        self.initialize_sources()
+        self.run_lens_fitting()
+        self.save_results()
+        self.plot_results()
 
-def get_img_data(fits_file_path) -> np.ndarray:
-    # Get the image data from the fits file
-    fits_file = fits.open(fits_file_path)
-    img_data = fits_file['SCI'].data
-    header = fits_file['SCI'].header
-    return img_data, header
+    def read_source_catalog(self):
+        """
+        Reads the source catalog.
+        """
+        table = Table.read(self.source_catalog_path)
+        self.x_centroids = np.array(table['xcentroid'])
+        self.y_centroids = np.array(table['ycentroid'])
+        self.labels = np.array(table['label'])
 
+    def read_flexion_catalog(self):
+        """
+        Reads the JWST flexion catalog.
+        """
+        df = pd.read_pickle(self.flexion_catalog_path)
+        self.IDs = df['label'].to_numpy()
+        self.q = df['q'].to_numpy()
+        self.phi = df['phi'].to_numpy()
+        self.phi = np.deg2rad(self.phi)  # Convert phi to radians if necessary
+        self.F1_fit = df['F1_fit'].to_numpy() / self.CDELT  # Convert flexion to arcsec^-1
+        self.F2_fit = df['F2_fit'].to_numpy() / self.CDELT  
+        self.a = df['a'].to_numpy() * self.CDELT # Convert scale to arcsec
+        self.chi2 = df['rchi2'].to_numpy()
 
-def filter_data(ID, xc, yc, q, phi, f1, f2, a, chi2):
-    # Remove flexions that are too large and q values that are not finite
-    F = np.sqrt(f1**2 + f2**2)
-    cuts = np.where(
-        (a*F < 0.5) & # This is the cut that we want to make
-        (np.abs(f1) < 1) &
-        (np.abs(f2) < 1) &
-        (np.isfinite(q)) & 
-        (chi2 < 5))[0]
-    ID = ID[cuts]
-    xc = xc[cuts]
-    yc = yc[cuts]
-    q = q[cuts]
-    phi = phi[cuts]
-    f1 = f1[cuts]
-    f2 = f2[cuts]
-    a = a[cuts]
+        # Check for NaN values
+        nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
+        if np.any(nan_indices):
+            warnings.warn(f"Found NaN values in flexion catalog. Removing {np.sum(nan_indices)} entries.")
+            self.IDs = self.IDs[~nan_indices]
+            self.q = self.q[~nan_indices]
+            self.phi = self.phi[~nan_indices]
+            self.F1_fit = self.F1_fit[~nan_indices]
+            self.F2_fit = self.F2_fit[~nan_indices]
+            self.a = self.a[~nan_indices]
+            self.chi2 = self.chi2[~nan_indices]
 
-    return ID, xc, yc, q, phi, f1, f2, a, chi2
+    def initialize_sources(self):
+        """
+        Prepares the Source object with calculated lensing signals and uncertainties.
+        """
+        # Convert positions to arcseconds
+        self.xc_arcsec = self.xc * self.CDELT
+        self.yc_arcsec = self.yc * self.CDELT
 
+        # Calculate shear components
+        shear_magnitude = (self.q - 1) / (self.q + 1)
+        e1 = shear_magnitude * np.cos(2 * self.phi)
+        e2 = shear_magnitude * np.sin(2 * self.phi)
 
-def naive_run():
-    # Ignore warnings
-    warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
-    ID, q, phi, f1, f2, a, chi2 = read_file(lenser_path)
-    t = Table.read(cat_path)
-    # print(t.colnames)
+        # Center coordinates
+        self.centroid_x = np.mean(self.xc_arcsec) # Store centroid for later use
+        self.centroid_y = np.mean(self.yc_arcsec)
+        self.xc_centered = self.xc_arcsec - self.centroid_x
+        self.yc_centered = self.yc_arcsec - self.centroid_y
 
-    xc = t['xcentroid']
-    yc = t['ycentroid']
-    label = t['label']
+        # Estimate noise
+        sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
+        sigaf = np.mean([np.std(self.a * self.F1_fit), np.std(self.a * self.F2_fit)])
+        epsilon = 1e-8 # Small value to avoid division by zero
+        sigf = sigaf / (self.a + epsilon)
 
-    xc = np.array(xc)
-    yc = np.array(yc)
-    label = np.array(label)
+        # Create Source object
+        self.sources = source_obj.Source(
+            x=self.xc_centered,
+            y=self.yc_centered,
+            e1=e1,
+            e2=e2,
+            f1=self.F1_fit,
+            f2=self.F2_fit,
+            g1=self.F1_fit,  
+            g2=self.F2_fit,  
+            sigs=sigs,
+            sigf=sigf,
+            sigg=sigf  # Adjust if necessary
+        )
 
-    # Match coordinates to lensing data - this is label to ID
-    new_xc = []
-    new_yc = []
-    for i in range(len(ID)):
-        new_xc.append(xc[label == ID[i]][0])
-        new_yc.append(yc[label == ID[i]][0])
-    
-    xc = np.array(new_xc)
-    yc = np.array(new_yc)
+        self.sources.filter_sources()
 
-    # Convert coords to arcsec (has already been done for a and flexion)
-    xc = xc * cdelt
-    yc = yc * cdelt
+    def match_sources(self):
+        """
+        Matches flexion data with source positions based on IDs.
+        """
+        label_to_index = {label: idx for idx, label in enumerate(self.labels)}
+        matched_indices = []
+        for ID in self.IDs:
+            idx = label_to_index.get(ID)
+            if idx is not None:
+                matched_indices.append(idx)
+            else:
+                warnings.warn(f"ID {ID} not found in source catalog.")
+                matched_indices.append(None)
 
-    ID, xc, yc, q, phi, f1, f2, a, chi2 = filter_data(ID, xc, yc, q, phi, f1, f2, a, chi2)
+        # Extract matched positions
+        self.xc = np.array([
+            self.x_centroids[idx] if idx is not None else np.nan
+            for idx in matched_indices
+        ])
+        self.yc = np.array([
+            self.y_centroids[idx] if idx is not None else np.nan
+            for idx in matched_indices
+        ])
 
-    shear_mag = (q-1)/(q+1)
-    e1, e2 = shear_mag * np.cos(2*phi), shear_mag * np.sin(2*phi)
+        # Remove entries with no matching source
+        valid = ~np.isnan(self.xc) & ~np.isnan(self.yc)
+        self.IDs = self.IDs[valid]
+        self.q = self.q[valid]
+        self.phi = self.phi[valid]
+        self.F1_fit = self.F1_fit[valid]
+        self.F2_fit = self.F2_fit[valid]
+        self.a = self.a[valid]
+        self.chi2 = self.chi2[valid]
+        self.xc = self.xc[valid]
+        self.yc = self.yc[valid]
 
-    # Set xmax to be the largest distance from the center
-    centroid = np.mean(xc), np.mean(yc)
-    xmax = np.max(np.sqrt((xc - centroid[0])**2 + (yc - centroid[1])**2))
+    def run_lens_fitting(self):
+        """
+        Runs the lens fitting pipeline.
+        """
+        xmax = np.max(np.hypot(self.sources.x, self.sources.y))
+        self.lenses, _ = main.fit_lensing_field(
+            self.sources, xmax, flags=True, use_flags=[True, True, False], lens_type='NFW'
+        )
+        # Adjust lens positions back to original coordinates
+        self.lenses.x += self.centroid_x
+        self.lenses.y += self.centroid_y
 
-    # Move the centroid to the center of the image
-    xc = xc - centroid[0]
-    yc = yc - centroid[1]
+    def save_results(self):
+        """
+        Saves the lenses and sources to files.
+        """
+        np.save(self.output_dir / 'lenses.npy', [self.lenses.x, self.lenses.y, self.lenses.mass, self.lenses.chi2])
+        np.save(self.output_dir / 'sources.npy', [
+            self.sources.x, self.sources.y, 
+            self.sources.e1, self.sources.e2,
+            self.sources.f1, self.sources.f2, 
+            self.sources.sigs, self.sources.sigf
+        ])
 
-    # Get the noise
-    sigs_mag = np.mean([np.std(e1), np.std(e2)])
-    sigs = np.ones_like(xc) * sigs_mag
+    def plot_results(self):
+        """
+        Plots the convergence map overlaid on the JWST image.
+        """
+        img_data, img_header = self.get_image_data()
+        img_extent = [
+            0, img_data.shape[1] * self.CDELT,
+            0, img_data.shape[0] * self.CDELT
+        ]
 
-    sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
-    sigf = sigaf / a 
+        # Load lens positions
+        if self.lenses is None:
+            x, y, mass, chi2 = np.load(self.output_dir / 'lenses.npy')
+            self.lenses = halo_obj.NFW_Lens(x, y, np.zeros_like(x), np.zeros_like(x), mass, 0.2, chi2)
+            self.lenses.calculate_concentration()
+        
+        # Load source positions
+        if self.sources is None:
+            x, y, e1, e2, f1, f2, sigs, sigf = np.load(self.output_dir / 'sources.npy')
+            x += 69 # Adjust for centroid shift
+            y += 69
+            self.sources = source_obj.Source(x, y, e1, e2, f1, f2, f1, f2, sigs, sigf, sigf)
 
-    sources = pipeline.Source(xc, yc, e1, e2, f1, f2, f1, f2, sigs, sigf, sigf)
-    lenses, _ = pipeline.fit_lensing_field(sources, xmax, flags = True, use_flags=[True,True,False])
-
-    # Move the centroid back to the original position
-    lenses.x = lenses.x + centroid[0]
-    lenses.y = lenses.y + centroid[1]
-
-    # Save these
-    np.save('Data/JWST/lenses.npy', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
-    np.save('Data/JWST/sources.npy', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
-
-
-def reconstructor():
-    z_lens = 0.308
-    z_source = 0.5
-    
-    warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
-    # naive_run()
-
-    # Load in the data
-    lenses = pipeline.Lens(*np.load('Data/JWST/lenses.npy', allow_pickle=True))
-    # sources = pipeline.Source(*np.load('Data/JWST/sources.npy', allow_pickle=True))
-    img, _ = get_img_data(img_path)
-
-    # Plot the results
-    fig, ax = plt.subplots(figsize=(8, 8))
-    extent = [0, img.shape[1] * cdelt, 0, img.shape[0] * cdelt]
-    X, Y, kappa = utils.calculate_kappa(lenses, extent, 5)
-    ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=ImageNormalize(img, vmin=0, vmax=100, stretch=LogStretch()))
-
-    # Adjusted contour levels for better feature representation.
-    contour_levels = np.percentile(kappa, np.linspace(60, 100, 5))
-
-    # Contour lines with enhanced visibility.
-    contours = ax.contour(
-        X, Y, kappa, 
-        levels=contour_levels, 
-        cmap='plasma', 
-        linestyles='-', 
-        linewidths=1.5
-    )
-
-    # Fine-tuned alpha value for better overlay visibility.
-    color_map_overlay = ax.imshow(
-        kappa, 
-        cmap='viridis', 
-        origin='lower', 
-        extent=extent, 
-        alpha=0.2, 
-        vmin=0, 
-        vmax=np.max(contour_levels)
-    )
-
-    # Customized color bar for clarity.
-    color_bar = plt.colorbar(color_map_overlay, ax=ax)
-    color_bar.set_label(r'$\kappa$', rotation=0, labelpad=10)
-
-    ax.scatter(lenses.x, lenses.y, s=10, color='red', label='Lensed Galaxies')
-
-    ax.set_xlabel('x (arcsec)')
-    ax.set_ylabel('y (arcsec)')
-    mass = utils.calculate_mass(kappa, z_lens, z_source, 1)
-
-    ax.set_title('Abell 2744 Convergence Map - JWST Data \n' + f'{mass:.3e}' + r' $h^{-1} M_\odot$')
-    plt.savefig('Images/JWST/map.png', dpi=300)
-    plt.show()
-
-
-def match_sources_and_correlate(rot_angle):
-    ''' READ IN JWST DATA '''
-    t = Table.read(cat_path)
-    # Sky Centroid gives the centroid of the source in the sky
-    # in units of RA and Dec
-
-    ra_jwst = t['sky_centroid'].ra
-    dec_jwst = t['sky_centroid'].dec
-    label = t['label']
-    # Turn these into numpy arrays
-    ra_jwst = np.array(ra_jwst) 
-    dec_jwst = np.array(dec_jwst)
-
-    # Also get the lensing data
-    ID_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2 = read_file(lenser_path)
-
-    new_ra = []
-    new_dec = []
-    for i in range(len(ID_jwst)):
-        new_ra.append(ra_jwst[label == ID_jwst[i]][0])
-        new_dec.append(dec_jwst[label == ID_jwst[i]][0])
-    
-    ra_jwst = np.array(new_ra)
-    dec_jwst = np.array(new_dec)
-
-    ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2 = filter_data(ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2)
-
-    ''' READ IN HST DATA '''
-    hubble_path = 'Data/a2744_clu_lenser.csv'
-    data = np.genfromtxt(hubble_path, delimiter=',')
-    with open(hubble_path, 'r') as f:
-        header = f.readline().strip().split(',')
-
-    ra_hst_col = header.index('X_WORLD')
-    dec_hst_col = header.index('Y_WORLD')
-    
-    # Get lensing data
-    acol = header.index('a') # Shape term
-    qcol, phicol = header.index('q'), header.index('phi') # Shape terms
-    f1col, f2col = header.index('f1'), header.index('f2') # Flexion terms
-
-    a_hst = data[1:, acol]
-    q_hst, phi_hst = data[1:, qcol], data[1:, phicol]
-    f1_hst, f2_hst = data[1:, f1col], data[1:, f2col]
-    
-    ra_hst = data[1:, ra_hst_col]
-    dec_hst = data[1:, dec_hst_col]
+        # Calculate convergence map
+        X, Y, kappa = utils.calculate_kappa(
+            self.lenses, extent=img_extent, smoothing_scale=5, lens_type='NFW'
+        )
 
 
-    ''' FIND MATCHES '''
-    match_count = 0
-    JWST_IDs = []
-    HST_IDs = []
-    for i in range(len(ra_hst)):
-        for j in range(len(ra_jwst)):
-            if np.abs(ra_hst[i] - ra_jwst[j]) < 0.0001 and np.abs(dec_hst[i] - dec_jwst[j]) < 0.0001:
-                match_count += 1
-                JWST_IDs.append(j)
-                HST_IDs.append(i)
+        # Plot settings
+        fig, ax = plt.subplots(figsize=(10, 10))
+        norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
 
-    ''' ONLY KEEP MATCHED DATA '''
-    print('Number of matches: ', match_count)
-    assert len(JWST_IDs) == len(HST_IDs)
+        # Display image
+        ax.imshow(
+            img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
+        )
 
-    ra_hst = ra_hst[HST_IDs]
-    dec_hst = dec_hst[HST_IDs]
-    a_hst = a_hst[HST_IDs]
-    q_hst = q_hst[HST_IDs]
-    phi_hst = phi_hst[HST_IDs]
-    f1_hst = f1_hst[HST_IDs]
-    f2_hst = f2_hst[HST_IDs]
+        
+        # Overlay convergence contours
+        contour_levels = np.linspace(np.min(kappa), np.max(kappa), 10)
+        contours = ax.contour(
+            X, Y, kappa, levels=contour_levels, cmap='plasma', linewidths=1.5
+        )
 
-    # JWST
-    ra_jwst = ra_jwst[JWST_IDs]
-    dec_jwst = dec_jwst[JWST_IDs]
-    a_jwst = a_jwst[JWST_IDs]
-    q_jwst = q_jwst[JWST_IDs]
-    phi_jwst = phi_jwst[JWST_IDs]
-    f1_jwst = f1_jwst[JWST_IDs]
-    f2_jwst = f2_jwst[JWST_IDs]
+        # Add colorbar for convergence
+        cbar = plt.colorbar(contours, ax=ax)
+        cbar.set_label(r'Convergence $\kappa$', rotation=270, labelpad=15)
+        
+        # Plot lens positions
+        ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
 
+        # Plot source positions
+        # ax.scatter(self.sources.x, self.sources.y, s=50, c='blue', label='Sources', marker='.')
 
-    # Also remember to compute shear
-    shear_mag_hst = (q_hst-1)/(q_hst+1)
-    e1_hst, e2_hst = shear_mag_hst * np.cos(2*phi_hst), shear_mag_hst * np.sin(2*phi_hst)
+        # Labels and title
+        ax.set_xlabel('RA Offset (arcsec)')
+        ax.set_ylabel('Dec Offset (arcsec)')
+        ax.set_title('Convergence Map Overlaid on JWST Image')
 
-    shear_mag_jwst = (q_jwst-1)/(q_jwst+1)
-    e1_jwst, e2_jwst = shear_mag_jwst * np.cos(2*phi_jwst), shear_mag_jwst * np.sin(2*phi_jwst)
+        # Save and display
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(self.output_dir / 'convergence_map.png', dpi=300)
+        plt.show()
 
-    # See if we can correct for the rotation
-    # Rotate the JWST shear and flexion by -30 degrees
-    theta = rot_angle * np.pi / 180
-    e1_jwst_rot = e1_jwst * np.cos(2*theta) - e2_jwst * np.sin(2*theta)
-    e2_jwst_rot = e1_jwst * np.sin(2*theta) + e2_jwst * np.cos(2*theta)
-    f1_jwst_rot = f1_jwst * np.cos(theta) - f2_jwst * np.sin(theta)
-    f2_jwst_rot = f1_jwst * np.sin(theta) + f2_jwst * np.cos(theta)
-
-    ''' PLOT THE RESULTS '''
-    # Want flexion flexion and shear shear plots between hst and jwst
-    # Flexion flexion
-    fig, ax = plt.subplots(figsize=(8, 8))
-    # ax.scatter(f1_hst, f1_jwst, s=10, label='F1: correlation = {}'.format(np.round(np.corrcoef(f1_hst, f1_jwst)[0,1], 2)))
-    # ax.scatter(f2_hst, f2_jwst, s=10, label='F2: correlation = {}'.format(np.round(np.corrcoef(f2_hst, f2_jwst)[0,1], 2)))
-    ax.scatter(f1_hst, f1_jwst_rot, s=10, label='F1 (rotated): correlation = {}'.format(np.round(np.corrcoef(f1_hst, f1_jwst_rot)[0,1], 2)))
-    ax.scatter(f2_hst, f2_jwst_rot, s=10, label='F2 (rotated): correlation = {}'.format(np.round(np.corrcoef(f2_hst, f2_jwst_rot)[0,1], 2)))
-    # Create an agreement line
-    x = np.linspace(-1, 1, 100)
-    ax.plot(x, x, color='black', linestyle='--', label='Agreement')
-    ax.set_xlabel('HST')
-    ax.set_ylabel('JWST')
-    ax.set_title('Flexion Flexion Comparison')
-    ax.legend()
-    plt.xlim(-1,1)
-    plt.ylim(-1,1)
-    plt.savefig('Images/JWST/Correlated_Signals/flexion_flexion.png', dpi=300)
-
-    # Shear shear
-    fig, ax = plt.subplots(figsize=(8, 8))
-    # ax.scatter(e1_hst, e1_jwst, s=10, alpha=0.5, label=r'$\gamma_1$: correlation = {}'.format(np.round(np.corrcoef(e1_hst, e1_jwst)[0,1], 2)))
-    # ax.scatter(e2_hst, e2_jwst, s=10, alpha=0.5, label=r'$\gamma_2$: correlation = {}'.format(np.round(np.corrcoef(e2_hst, e2_jwst)[0,1], 2)))
-    ax.scatter(e1_hst, e1_jwst_rot, s=10, label=r'$\gamma_1$ (rotated): correlation = {}'.format(np.round(np.corrcoef(e1_hst, e1_jwst_rot)[0,1], 2)))
-    ax.scatter(e2_hst, e2_jwst_rot, s=10, label=r'$\gamma_2$ (rotated): correlation = {}'.format(np.round(np.corrcoef(e2_hst, e2_jwst_rot)[0,1], 2)))
-    # Create an agreement line
-    x = np.linspace(-1, 1, 100)
-    ax.plot(x, x, color='black', linestyle='--', label='Agreement')
-    ax.set_xlabel('HST')
-    ax.set_ylabel('JWST')
-    ax.set_title('Shear Shear Comparison')
-    ax.legend()
-    plt.savefig('Images/JWST/Correlated_Signals/shear_shear.png', dpi=300)
-
-    # aF
-    fig, ax = plt.subplots(figsize=(8, 8))
-    # ax.scatter(f1_hst*a_hst, f1_jwst*a_jwst, s=10, label='a*F1: correlation = {}'.format(np.round(np.corrcoef(f1_hst*a_hst, f1_jwst*a_jwst)[0,1], 2)))
-    # ax.scatter(f2_hst*a_hst, f2_jwst*a_jwst, s=10, label='a*F2: correlation = {}'.format(np.round(np.corrcoef(f2_hst*a_hst, f2_jwst*a_jwst)[0,1], 2)))
-    ax.scatter(f1_hst*a_hst, f1_jwst_rot*a_jwst, s=10, label='a*F1 (rotated): correlation = {}'.format(np.round(np.corrcoef(f1_hst*a_hst, f1_jwst_rot*a_jwst)[0,1], 2)))
-    ax.scatter(f2_hst*a_hst, f2_jwst_rot*a_jwst, s=10, label='a*F2 (rotated): correlation = {}'.format(np.round(np.corrcoef(f2_hst*a_hst, f2_jwst_rot*a_jwst)[0,1], 2)))
-    # Create an agreement line
-    x = np.linspace(-0.5, 0.5, 100)
-    ax.plot(x, x, color='black', linestyle='--', label='Agreement')
-    ax.set_xlabel('HST')
-    ax.set_ylabel('JWST')
-    ax.set_title('aF Comparison')
-    ax.legend()
-    plt.savefig('Images/JWST/Correlated_Signals/af.png', dpi=300)
-
-    # q
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(q_hst, q_jwst, s=10, label='q: correlation = {}'.format(np.round(np.corrcoef(q_hst, q_jwst)[0,1], 2)))
-    # Create an agreement line
-    x = np.linspace(0, 6, 100)
-    ax.plot(x, x, color='black', linestyle='--', label='Agreement')
-    ax.set_xlabel('HST')
-    ax.set_ylabel('JWST')
-    ax.set_title('q Comparison')
-    ax.legend()
-    plt.savefig('Images/JWST/Correlated_Signals/q.png', dpi=300)
-
+    def get_image_data(self):
+        """
+        Reads image data from a FITS file.
+        """
+        with fits.open(self.image_path) as hdul:
+            img_data = hdul['SCI'].data
+            header = hdul['SCI'].header
+        return img_data, header
 
 if __name__ == '__main__':
-    reconstructor()
-    # match_sources_and_correlate(30.38)
+    # Configuration dictionary
+    config = {
+        'flexion_catalog_path': 'Data/JWST/Cluster_Field/Catalogs/F115W_flexion.pkl',
+        'source_catalog_path': 'Data/JWST/Cluster_Field/Catalogs/stacked_cat.ecsv',
+        'image_path': 'Data/JWST/Cluster_Field/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
+        'output_dir': 'Output/JWST',
+    }
 
-    raise SystemExit
-
-    # Lets look at the distribution of the different terms in the JWST data
-    ''' READ IN JWST DATA '''
-    t = Table.read(cat_path)
-    # Sky Centroid gives the centroid of the source in the sky
-    # in units of RA and Dec
-    ra_jwst = t['sky_centroid'].ra
-    dec_jwst = t['sky_centroid'].dec
-    # Turn these into numpy arrays
-    ra_jwst = np.array(ra_jwst)
-    dec_jwst = np.array(dec_jwst)
-
-    # Also get the lensing data
-    ID_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2 = read_file(lenser_path)
-    # Convert to arcsec
-
-    # I'm interested in the distribution of shear, flexion and a right now. 
-    # Lets stick with testing our filter criteria
-    ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2 = filter_data(ID_jwst, ra_jwst, dec_jwst, q_jwst, phi_jwst, f1_jwst, f2_jwst, a_jwst, chi2)
-    
-    shear_mag_jwst = (q_jwst-1)/(q_jwst+1)
-    e1_jwst, e2_jwst = shear_mag_jwst * np.cos(2*phi_jwst), shear_mag_jwst * np.sin(2*phi_jwst)
-
-    # Shear
-    print('Mean shear: ', np.mean(e1_jwst), np.mean(e2_jwst))
-    print('Std shear: ', np.std(e1_jwst), np.std(e2_jwst))
-    print('Range of shear: ', np.min(e1_jwst), np.max(e1_jwst), np.min(e2_jwst), np.max(e2_jwst))
-
-    # Flexion
-    print('Mean flexion: ', np.mean(f1_jwst), np.mean(f2_jwst))
-    print('Std flexion: ', np.std(f1_jwst), np.std(f2_jwst))
-    print('Range of flexion: ', np.min(f1_jwst), np.max(f1_jwst), np.min(f2_jwst), np.max(f2_jwst))
-    
-    # a
-    print('Mean a: ', np.mean(a_jwst))
-    print('Std a: ', np.std(a_jwst))
-    print('Range of a: ', np.min(a_jwst), np.max(a_jwst))
-
-    # Lets plot these
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(e1_jwst, e2_jwst, s=10)
-    ax.set_xlabel(r'$\gamma_1$')
-    ax.set_ylabel(r'$\gamma_2$')
-    ax.set_title('Shear Distribution')
-    plt.savefig('Images/JWST/shear_dist.png', dpi=300)
-
-    # Flexion
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(f1_jwst, f2_jwst, s=10)
-    ax.set_xlabel('F1')
-    ax.set_ylabel('F2')
-    ax.set_title('Flexion Distribution')
-    plt.savefig('Images/JWST/flexion_dist.png', dpi=300)
-
-    # af
-    fig, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(f1_jwst*a_jwst, f2_jwst*a_jwst, s=10)    
-    ax.set_xlabel('aF1')
-    ax.set_ylabel('aF2')
-    ax.set_title('aF Distribution')
-    plt.savefig('Images/JWST/af_dist.png', dpi=300)
-
-    # Lets also make histograms of these
-    fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
-    fig.suptitle('JWST Shear Distribution')
-    fancy_hist(e1_jwst, bins='freedman', ax=ax[0], histtype='step', label=r'$\gamma_1$')
-    ax[0].set_xlabel(r'$\gamma_1$')
-    ax[0].set_ylabel('Count')
-    fancy_hist(e2_jwst, bins='freedman', ax=ax[1], histtype='step', label=r'$\gamma_2$')
-    ax[1].set_xlabel(r'$\gamma_2$')
-    ax[1].set_ylabel('Count')
-    plt.savefig('Images/JWST/shear_dist_hist.png', dpi=300)
-
-    fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
-    fig.suptitle('JWST Flexion Distribution')
-    fancy_hist(f1_jwst, bins='freedman', ax=ax[0], histtype='step', label='F1')
-    ax[0].set_xlabel('F1')
-    ax[0].set_ylabel('Count')
-    fancy_hist(f2_jwst, bins='freedman', ax=ax[1], histtype='step', label='F2')
-    ax[1].set_xlabel('F2')
-    ax[1].set_ylabel('Count')
-    plt.savefig('Images/JWST/flexion_dist_hist.png', dpi=300)
-
-    fig, ax = plt.subplots(figsize=(8, 8), nrows=2, ncols=1)
-    fig.suptitle('JWST aF Distribution')
-    fancy_hist(f1_jwst*a_jwst, bins='freedman', ax=ax[0], histtype='step', label='aF1')
-    ax[0].set_xlabel('aF1')
-    ax[0].set_ylabel('Count')
-    fancy_hist(f2_jwst*a_jwst, bins='freedman', ax=ax[1], histtype='step', label='aF2')
-    ax[1].set_xlabel('aF2')
-    ax[1].set_ylabel('Count')
-    plt.savefig('Images/JWST/af_dist_hist.png', dpi=300)
-
-    # Lets also look at the distribution of a
-    fig, ax = plt.subplots(figsize=(8, 8))
-    fancy_hist(a_jwst, bins='freedman', ax=ax, histtype='step', label='a')
-    ax.set_xlabel('a')
-    ax.set_ylabel('Count')
-    ax.set_title('a Distribution')
-    plt.savefig('Images/JWST/a_dist_hist.png', dpi=300)
+    # Initialize and run the pipeline
+    pipeline = JWSTPipeline(config)
+    # pipeline.run()
+    pipeline.plot_results()

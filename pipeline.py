@@ -21,34 +21,9 @@ import scipy.optimize as opt
 from scipy.optimize import minimize
 import utils  # Custom utility functions
 import minimizer  # Custom minimizer module
-import source_obj
-import halo_obj
-import metric
-
-def alt_generate_initial_guess(sources, xmax, lens_type='SIS', z_l=0.5, z_s=0.8):
-    # Alternate approach - what if we just flooded the parameter space with all possible lenses?
-    # This is a brute-force approach that may be computationally expensive
-    # but could be useful for small datasets or for testing purposes
-
-    # Lenses may be placed from -xmax to xmax in both x and y directions
-    # and may have masses ranging from 1e10 to 1e16 solar masses
-    # for now, ignore the SIS case and focus on NFW lenses
-    resolution = 15  # Number of points in each dimension
-    x = np.linspace(-xmax, xmax, resolution)
-    y = np.linspace(-xmax, xmax, resolution)
-    mass = np.logspace(10, 16, resolution)
-    concentration = np.zeros_like(mass)  # Placeholder for now 
-
-    # Create a meshgrid of all possible lens positions and masses
-    xx, yy, mm = np.meshgrid(x, y, mass)
-    xx = xx.flatten()
-    yy = yy.flatten()
-    mm = mm.flatten()
-    lenses = halo_obj.NFW_Lens(xx, yy, np.zeros_like(xx), concentration, mm, z_l, np.zeros_like(xx))
-    lenses.calculate_concentration()
-
-    return lenses
-
+import source_obj # Source object
+import halo_obj # Halo object
+import metric # Metric object
 
 def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
     """
@@ -217,8 +192,8 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
 
             # Define bounds for x, y, and log10(mass)
             bounds = [
-                (lenses.x[i] - xmax/2, lenses.x[i] + xmax/2),  # Adjust as appropriate
-                (lenses.y[i] - xmax/2, lenses.y[i] + xmax/2),  # Adjust as appropriate
+                (lenses.x[i] - xmax*2, lenses.x[i] + xmax*2),  
+                (lenses.y[i] - xmax*2, lenses.y[i] + xmax*2),  # Allow the minimizer to move the lens out of the field - corresponds to a "delete" operation
                 (10, 16)  # Mass bounds in log10(M_sun)
             ]
 

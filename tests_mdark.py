@@ -184,7 +184,6 @@ def process_chunk(chunk, id_set):
 # MDARK Processing Functions
 # --------------------------------------------
 
-
 def find_halos(ids, z):
     """
     Reads halo data for specified IDs and constructs Halo objects.
@@ -235,38 +234,6 @@ def find_halos(ids, z):
             print(f'No data found for ID {id_}')
 
     return halos
-
-
-def choose_ID(z, mass_range, substructure_range):
-    # Given a set of criteria, choose a cluster ID
-    file = 'MDARK/fixed_key_{}.MDARK'.format(z)
-    chunks = chunk_data(file)
-
-    # Choose a random cluster with mass in the given range
-    # and more than 1 halo
-    rows = []
-    for chunk in chunks:
-        IDs = chunk['MainHaloID'].values
-        masses = chunk[' Total Mass'].values
-        substructure = chunk[' Mass Fraction'].values
-
-        # Apply the criteria
-        mass_criteria = (masses > mass_range[0]) & (masses < mass_range[1])
-        substructure_criteria = (substructure > substructure_range[0]) & (substructure < substructure_range[1])
-
-        # Find all clusters that satisfy all criteria
-        combined_criteria = mass_criteria & substructure_criteria
-
-        if np.any(combined_criteria):
-            valid_ids = IDs[combined_criteria]
-            rows.append(chunk[chunk['MainHaloID'].isin(valid_ids)])
-    # Choose a random cluster from the list of valid rows
-    if len(rows) > 0:
-        rows = pd.concat(rows) # Concatenate the rows
-        row = rows.sample(n=1) # Choose a random row
-        return row
-    else:
-        return None
 
 
 def build_lensing_field(halos, z, Nsource = None):

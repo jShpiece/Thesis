@@ -23,15 +23,13 @@ import time
 import main
 import utils
 
-
 plt.style.use('scientific_presentation.mplstyle')  # Use the scientific presentation style sheet for all plots
-
 
 # --------------------------------------------
 # Plotting Functions
 # --------------------------------------------
 
-def plot_results(lens, true_lens, title, reduced_chi2, xmax, ax=None, legend=True, show_mass=False, show_chi2=False):
+def plot_results(lens, true_lens, title, reduced_chi2, xmax, ax=None, legend=False, show_mass=False, show_chi2=False):
     """
     Plots the comparison between reconstructed lenses and true lenses.
 
@@ -221,23 +219,23 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     reduced_chi2 = 1.0
 
     # Step 1: Generate initial lens guesses
-    # lenses = pipeline.generate_initial_guess(sources, lens_type='NFW', z_l=0.194)
-    lenses = pipeline.alt_generate_initial_guess(sources, xmax, lens_type='NFW')
-    # reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    lenses = pipeline.generate_initial_guess(sources, lens_type='NFW', z_l=0.194)
+    # lenses = pipeline.alt_generate_initial_guess(sources, xmax, lens_type='NFW')
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Candidate Lens Generation', reduced_chi2, xmax, ax=axarr[0, 0], legend=True)
     if print_steps:
         print('Step 1: Finished initial guesses')
 
     # Step 2: Optimize lens positions
     lenses = pipeline.optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='NFW')
-    # reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Individual Lens Optimization', reduced_chi2, xmax, ax=axarr[0, 1])
     if print_steps:
         print('Step 2: Finished optimization')
 
     # Step 3: Filter lenses by proximity to sources
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type='NFW')
-    # reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Physical Criteria Filtering', reduced_chi2, xmax, ax=axarr[0, 2])
     if print_steps:
         print('Step 3: Finished filtering')
@@ -298,7 +296,7 @@ def run_simple_tests():
         """
         true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise)
         pipeline.update_chi2_values(sources, true_lenses, use_flags)
-        optimized_lenses = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
+        _ = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
 
     ns = 0.01  # Source density per unit area
     xmax = 50
@@ -333,24 +331,65 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     # print(recovered_params['x'])
     # print(recovered_params['y'])
     # Plot x and y positions
-    axarr[0].hist2d(recovered_params['x'], recovered_params['y'], bins=20, cmap='viridis')
-    # axarr[0].scatter(recovered_params['x'], recovered_params['y'], s=50, c='blue', alpha=0.5, label='Recovered Lenses')
+    hist = axarr[0].hist2d(recovered_params['x'], recovered_params['y'], bins=20, cmap='viridis', norm=plt.cm.colors.LogNorm())
+
+    # Add a colorbar
+    cbar = plt.colorbar(hist[3], ax=axarr[0])  # hist[3] is the collection of the artists representing the histogram
+    cbar.set_label('Counts (Log Scale)')  # Set the label for the colorbar    # Display the colorbar
+    
     axarr[0].scatter(true_params['x'], true_params['y'], s=100, c='red', marker='*', label='True Lens', alpha=0.5)
     axarr[0].set_xlabel('X Position')
     axarr[0].set_ylabel('Y Position')
-    axarr[0].set_title(f'{title} - Position Distribution')
+    axarr[0].set_title(f'{title} - Position Distribution (Log Scale)')
     axarr[0].set_xlim(-xmax, xmax)
     axarr[0].set_ylim(-xmax, xmax)
     axarr[0].set_aspect('equal')
 
     # Plot mass distribution
+    # Assuming recovered_params['mass'] is defined and imported
     recovered_mass = np.log10(recovered_params['mass'])
-    axarr[1].hist(recovered_mass, bins=100, color='skyblue', edgecolor='black', alpha=0.7, label='Recovered Mass')
+
+    # Plot mass distribution
+    bin_num = 100
+    fancy_hist(recovered_mass, bins=bin_num, histtype='stepfilled', color='blue', alpha=0.5, label='Recovered Mass', ax=axarr[1], density=True)
+
+    # Define Gaussian function
+    def gaussian(x, amp, mean, stdev):
+        return amp * np.exp(-(x - mean) ** 2 / (2 * stdev ** 2))
+
+    # Define bimodal Gaussian function
+    def bimodal_gaussian(x, amp1, mean1, stdev1, amp2, mean2, stdev2):
+        return (gaussian(x, amp1, mean1, stdev1) + gaussian(x, amp2, mean2, stdev2))
+
+    # Calculate histogram
+    counts, bin_edges = np.histogram(recovered_mass, bins=bin_num, density=True)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    # Fit bimodal distribution
+    from scipy.optimize import curve_fit
+    # initial_guess = [1, 11.5, 1, 1, 14, 0.5]  # Adjust as necessary
+    initial_guess = [1, 13, 1]
+    popt, _ = curve_fit(gaussian, bin_centers, counts, p0=initial_guess)
+
+    # Plot the fitted Gaussian curves
+# Plot the bimodal Gaussian fit with better formatting for results
+    fit_label = (
+        f'Gaussian Fit:\n'
+        f'Mean: {popt[1]:.2f} ± {popt[2]:.2f}\n'
+    )
+
+    axarr[1].plot(bin_centers, gaussian(bin_centers, *popt), 'k--', label=fit_label)
     axarr[1].axvline(np.log10(true_params['mass']), color='red', linestyle='--', label='True Mass')
+
+    # Set axis labels and title
     axarr[1].set_xlabel('Recovered Mass (log $M_\\odot$)')
     axarr[1].set_ylabel('Frequency')
     axarr[1].set_title(f'{title} - Mass Distribution')
-    axarr[1].legend()
+
+    # Display the legend with improved formatting
+    axarr[1].legend(loc='best', fontsize='small', frameon=True)
+
+    # axarr[1].set_xlim(np.log10(1e11), np.log10(1e15))
     # axarr[1].set_aspect('equal')
     
     plt.tight_layout()
@@ -449,28 +488,30 @@ def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass
 if __name__ == '__main__':
     start = time.time()
     
-    run_simple_tests()
-    '''
-    Ntrial = 100
+    # run_simple_tests()
+    
+    # raise SystemExit
+
+    Ntrial = 1000
     Nlenses = 1
     Nsources = 100
     xmax = 50
-    lens_mass = 1e13
+    lens_mass = 1e14
     z_l = 0.194
     use_flags = [True, True, False]
 
-    results, true_results = run_random_realizations(Ntrial, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], random_seed=None, substructure=False)
+    # results, true_results = run_random_realizations(Ntrial, Nlenses, Nsources, xmax, lens_mass, z_l, use_flags=use_flags, random_seed=42)
 
     # Save the results
-    np.save('Data/NFW_tests/random_realization/medium_Nlens_1.npy', results)
-    # results = np.load('Data/NFW_tests/random_realization/Ntrial_1000_stn10.npy', allow_pickle=True).item()
+    # np.save('Images/NFW_tests/random_realization/medium_Nlens_1.npy', results)
+    results = np.load('Images/NFW_tests/random_realization/Ntrial_1000_stn10.npy', allow_pickle=True).item()
     plot_name = write_plot_name(1, lens_mass, 'noisy', use_flags, append='random_realization/medium_Nlens_1')
 
     true_x = [0]
     true_y = [0]
     true_mass = [lens_mass]
     true_results = {'x': true_x, 'y': true_y, 'mass': true_mass}
-    plot_random_realizations(results, true_results, 'Random Realizations', xmax)
-    '''
+    plot_random_realizations(results, true_results, 'Large Lens - StN 10', xmax)
+    
     end = time.time()
     print(f'Script complete - Time taken: {end - start:.2f} seconds')

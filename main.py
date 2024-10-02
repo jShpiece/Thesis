@@ -11,7 +11,6 @@ Functions:
 """
 
 import pipeline
-import numpy as np
 
 def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], lens_type='SIS'):
     """
@@ -59,7 +58,7 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
     print_step_info(flags, "Initial Guesses:", lenses, reduced_chi2)
 
     # Step 2: Optimize lens positions via local minimization
-    lenses = pipeline.optimize_lens_positions(sources, lenses, use_flags, lens_type=lens_type)
+    lenses = pipeline.optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type=lens_type)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "After Local Minimization:", lenses, reduced_chi2)
 
@@ -77,7 +76,7 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
     # Calculate source density (ns) for merger threshold calculation
     area = (2 * xmax) ** 2  # Total area of the field
     ns = len(sources.x) / area  # Source density per unit area
-    merger_threshold = (1 / np.sqrt(ns)) if ns > 0 else 1.0  # Avoid division by zero
+    merger_threshold = ns**(-1/2) if ns > 0 else 1.0  # Avoid division by zero
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold=merger_threshold, lens_type=lens_type)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "After Merging Lenses:", lenses, reduced_chi2)
