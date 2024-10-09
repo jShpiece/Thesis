@@ -22,6 +22,7 @@ import source_obj
 import time
 import main
 import utils
+from scipy.optimize import curve_fit
 
 plt.style.use('scientific_presentation.mplstyle')  # Use the scientific presentation style sheet for all plots
 
@@ -215,28 +216,47 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
         print_steps (bool, optional): Whether to print progress messages. Default is False.
     """
     # Set up plot with 6 subplots in a 2x3 layout
-    fig, axarr = plt.subplots(2, 3, figsize=(20, 15), sharex=True, sharey=True)
+    # fig, axarr = plt.subplots(2, 3, figsize=(20, 15), sharex=True, sharey=True)
+    import matplotlib.gridspec as gridspec
+    fig = plt.figure(figsize=(30, 20))
+    gs = gridspec.GridSpec(2, 4, width_ratios=[1, 1, 1, 2])
+
+    # Create our 6 subplots (2 rows, 3 columns)
+    axarr = []
+    ax1 = plt.subplot(gs[0, 0])
+    ax2 = plt.subplot(gs[0, 1])
+    ax3 = plt.subplot(gs[0, 2])
+    ax4 = plt.subplot(gs[1, 0])
+    ax5 = plt.subplot(gs[1, 1])
+    ax6 = plt.subplot(gs[1, 2])
+    # Then add the 7th plot, taking up the entire right column
+    ax7 = plt.subplot(gs[:, 3])
+    # Now combine all the axes into a list
+    axarr = [ax1, ax2, ax3, ax4, ax5, ax6, ax7]
+
+    plt.subplots_adjust(hspace=0.4)  # Adjust the hspace to reduce the space between rows
+
     reduced_chi2 = 1.0
 
     # Step 1: Generate initial lens guesses
     lenses = pipeline.generate_initial_guess(sources, lens_type='NFW', z_l=0.194)
     # lenses = pipeline.alt_generate_initial_guess(sources, xmax, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Candidate Lens Generation', reduced_chi2, xmax, ax=axarr[0, 0], legend=True)
+    plot_results(lenses, true_lenses, 'Candidate Lens Generation', reduced_chi2, xmax, ax=axarr[0], legend=True)
     if print_steps:
         print('Step 1: Finished initial guesses')
 
     # Step 2: Optimize lens positions
     lenses = pipeline.optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Individual Lens Optimization', reduced_chi2, xmax, ax=axarr[0, 1])
+    plot_results(lenses, true_lenses, 'Individual Lens Optimization', reduced_chi2, xmax, ax=axarr[1])
     if print_steps:
         print('Step 2: Finished optimization')
 
     # Step 3: Filter lenses by proximity to sources
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Physical Criteria Filtering', reduced_chi2, xmax, ax=axarr[0, 2])
+    plot_results(lenses, true_lenses, 'Physical Criteria Filtering', reduced_chi2, xmax, ax=axarr[2])
     if print_steps:
         print('Step 3: Finished filtering')
 
@@ -253,11 +273,10 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
         return lenses
 
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Forward Lens Selection', reduced_chi2, xmax, ax=axarr[1, 0])
+    plot_results(lenses, true_lenses, 'Forward Lens Selection', reduced_chi2, xmax, ax=axarr[3])
     if print_steps:
         print('Step 4: Finished forward selection')
     
-
 
     # Step 5: Merge closely positioned lenses
     area = np.pi * xmax ** 2
@@ -265,16 +284,30 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     merger_threshold = (1 / np.sqrt(ns)) if ns > 0 else 1.0
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold=merger_threshold, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Lens Merging', reduced_chi2, xmax, ax=axarr[1, 1], show_mass=True)
+    plot_results(lenses, true_lenses, 'Lens Merging', reduced_chi2, xmax, ax=axarr[4], show_mass=True)
     if print_steps:
         print('Step 5: Finished merging')
 
     # Step 6: Final lens strength optimization
     lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type='NFW')
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
-    plot_results(lenses, true_lenses, 'Mass Refinement Optimization', reduced_chi2, xmax, ax=axarr[1, 2], show_mass=True)
+    plot_results(lenses, true_lenses, 'Mass Refinement Optimization', reduced_chi2, xmax, ax=axarr[5], show_mass=True)
     if print_steps:
-        print('Step 6: Finished final minimization')
+        print('Step 6: Finished final minimization')\
+        
+    # Add a final plot, where we see the cumulative source number
+    bins = np.linspace(0, xmax, 50)
+    # How many sources are inside each bin? Measure from the origin
+    source_counts = np.zeros(len(bins) - 1)
+    for i in range(len(bins) - 1):
+        source_counts[i] = np.sum((sources.x ** 2 + sources.y ** 2) < bins[i + 1] ** 2)
+    axarr[6].bar(bins[:-1], source_counts, width=bins[1] - bins[0], align='edge')
+    axarr[6].set_xlabel('Radius from Origin')
+    axarr[6].set_ylabel('Number of Sources')
+    axarr[6].set_title('Cumulative Source Distribution')
+    axarr[6].set_xlim(0, xmax)
+    axarr[6].set_ylim(0, np.max(source_counts) + 5)
+    axarr[6].set_aspect('equal')
 
     # Overall figure title
     total_true_mass = np.sum(true_lenses.mass)
@@ -323,8 +356,9 @@ def run_simple_tests():
     Nsource = int(ns * area)  # Number of sources
     masses = [1e14, 1e13, 1e12]
     lens_numbers = [1, 2 ]
-    noise_use = [True, False]
-    use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
+    noise_use = [True]
+    # use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
+    use_flags = [[True, True, False]]
 
     for mass in masses:
         for Nlens in lens_numbers:
@@ -368,7 +402,7 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     recovered_mass = np.log10(recovered_params['mass'])
 
     # Plot mass distribution
-    bin_num = 100
+    bin_num = 40
     fancy_hist(recovered_mass, bins=bin_num, histtype='stepfilled', color='blue', alpha=0.5, label='Recovered Mass', ax=axarr[1], density=True)
 
     # Define Gaussian function
@@ -384,19 +418,44 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
     # Fit bimodal distribution
-    from scipy.optimize import curve_fit
     # initial_guess = [1, 11.5, 1, 1, 14, 0.5]  # Adjust as necessary
     initial_guess = [1, 13, 1]
-    popt, _ = curve_fit(gaussian, bin_centers, counts, p0=initial_guess)
+    # Try fitting both a Gaussian and a bimodal Gaussian - use the one with the best fit
+    try:
+        popt1, pcov1 = curve_fit(gaussian, bin_centers, counts, p0=initial_guess)
+    except RuntimeError:
+        popt1 = [0, 13, 1]
+    try:
+        popt2, pcov2 = curve_fit(bimodal_gaussian, bin_centers, counts, p0=initial_guess * 2)
+    except RuntimeError:
+        popt2 = [0, 13, 1, 0, 13, 1]
+    # Determine which fit is better
+    residuals1 = counts - gaussian(bin_centers, *popt1)
+    residuals2 = counts - bimodal_gaussian(bin_centers, *popt2)
+    ss_res1 = np.sum(residuals1 ** 2)
+    ss_res2 = np.sum(residuals2 ** 2)
+    if ss_res1 < ss_res2:
+        func = gaussian
+        popt = popt1
+    else:
+        func = bimodal_gaussian
+        popt = popt2
 
     # Plot the fitted Gaussian curves
     # Plot the bimodal Gaussian fit with better formatting for results
-    fit_label = (
-        f'Gaussian Fit:\n'
-        f'Mean: {popt[1]:.2f} ± {popt[2]:.2f}\n'
-    )
+    if func == gaussian:
+        fit_label = (
+            f'Gaussian Fit:\n'
+            f'Mean: {popt[1]:.2f} ± {popt[2]:.2f}\n'
+        )
+    else:
+        fit_label = (
+            f'Bimodal Gaussian Fit:\n'
+            f'Mean 1: {popt[1]:.2f} ± {popt[2]:.2f}\n'
+            f'Mean 2: {popt[4]:.2f} ± {popt[5]:.2f}\n'
+        )
 
-    axarr[1].plot(bin_centers, gaussian(bin_centers, *popt), 'k--', label=fit_label)
+    axarr[1].plot(bin_centers, func(bin_centers, *popt), 'k--', label=fit_label)
     axarr[1].axvline(np.log10(true_params['mass']), color='red', linestyle='--', label='True Mass')
 
     # Set axis labels and title
@@ -412,7 +471,8 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     
     plt.tight_layout()
     plt.savefig(f'Output/NFW_tests/random_realization/{title}.png')
-    plt.show()
+    # plt.show()
+    plt.close() # Close the plot to avoid memory issues
 
 
 def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], 
@@ -507,10 +567,125 @@ if __name__ == '__main__':
     start = time.time()
     
     # run_simple_tests()
-    
-    # raise SystemExit
 
-    Ntrial = 1000
+    # Here's what we're going to do
+    # Run 100 tests with 1 lens, xmax = 50, standard source number, noise
+    # We're going to have the code decide whether or not the test was a success or a failure
+    # And we'll record the following:
+    # - The smallest true-lens - source distance
+    # - How many sources were within 10 units of the true lens
+    # - The radius from the true lens which contained 10 sources
+    # Then we'll look at trends between what we deem as a successful test and what we deem as a failed test
+
+    # Define success criteria
+    # 1. The recovered lens is within 5 units of the true lens
+    # 2. The recovered lens is within 20% of the true lens mass
+    # 3. Of the recovered lenses, 80% of the mass is contained within 5 units of the true lens
+
+    Ntrials = 100
+    Nlenses = 1
+    xmax = 50
+    lens_mass = 1e14
+    ns = 0.01  # Source density per unit area
+    area = np.pi * xmax ** 2
+    Nsource = int(ns * area)  # Number of sources
+    use_flags = [True, True, False]
+    true_lenses = halo_obj.NFW_Lens(np.array([0]), np.array([0]), np.zeros(1), np.zeros(1), np.array([lens_mass]), 0.194, np.zeros(1))
+    true_lenses.calculate_concentration()
+    '''   
+    min_lens_source_dist = []
+    sources_within_10 = []
+    radius_10_sources = []
+    success = []
+    for trial in range(Ntrials):
+        rs = np.sqrt(np.random.random(Nsource)) * xmax
+        thetas = np.random.random(Nsource) * 2 * np.pi
+        xs = rs * np.cos(thetas)
+        ys = rs * np.sin(thetas)
+        sig_s = np.full(Nsource, 0.1)
+        sig_f = np.full(Nsource, 0.01)
+        sig_g = np.full(Nsource, 0.02)
+        sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
+                                    np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
+        sources.apply_lensing(true_lenses, lens_type='NFW', z_source=0.8)
+        sources.apply_noise()
+        sources.filter_sources()
+        lenses, reduced_chi2 = main.fit_lensing_field(sources, xmax, flags=False, use_flags=use_flags, lens_type='NFW')
+        if len(lenses.x) == 0:
+            min_lens_source_dist.append(np.nan)
+            sources_within_10.append(np.nan)
+            radius_10_sources.append(np.nan)
+            success.append(False)
+            continue
+        # Calculate the minimum distance between the true lens and any source
+        source_distances = np.sqrt((sources.x - true_lenses.x[0]) ** 2 + (sources.y - true_lenses.y[0]) ** 2)
+        min_lens_source_dist.append(np.min(source_distances))
+        # Calculate the number of sources within 10 units of the true lens
+        sources_within_10.append(np.sum(source_distances < 10))
+        # Calculate the radius from the true lens which contains 10 sources
+        radius_10_sources.append(np.sort(source_distances)[9])
+        # Check if the test was successful
+        total_mass = np.sum(true_lenses.mass)
+        recovered_mass = np.sum(lenses.mass)
+        largest_mass = np.max(lenses.mass)
+        # Determine success
+        lens_distances = np.sqrt((lenses.x - true_lenses.x[0]) ** 2 + (lenses.y - true_lenses.y[0]) ** 2)
+        closest_lens_dist = np.min(lens_distances)
+        closest_mass = lenses.mass[np.argmin(lens_distances)]
+        contained_mass = np.sum(lenses.mass[lens_distances < 5])
+        success.append((np.abs(true_lenses.mass[0] - closest_mass) / true_lenses.mass[0] < 0.2) and closest_lens_dist < 5 and contained_mass / total_mass > 0.8)
+    
+    # Convert lists to numpy arrays
+    min_lens_source_dist = np.array(min_lens_source_dist)
+    sources_within_10 = np.array(sources_within_10)
+    radius_10_sources = np.array(radius_10_sources)
+    success = np.array(success)
+
+    # Save the results
+    np.save('Output/NFW_tests/random_realization/test_results.npy', {'min_dist': min_lens_source_dist, 'within_10': sources_within_10, 'radius_10': radius_10_sources, 'success': success})
+    
+    results = np.load('Output/NFW_tests/random_realization/test_results.npy', allow_pickle=True).item()
+    # Unpack the results
+    min_lens_source_dist = results['min_dist']
+    sources_within_10 = results['within_10']
+    radius_10_sources = results['radius_10']
+    success = results['success']
+
+    # Plot the results - split by success and failure
+    fig, axarr = plt.subplots(1, 3, figsize=(20, 6))
+
+    # Plot the minimum distance between the true lens and any source
+    fancy_hist(min_lens_source_dist[success], bins='freedman', histtype='stepfilled', color='blue', alpha=0.5, label='Successful Tests', ax=axarr[0], density=True)
+    fancy_hist(min_lens_source_dist[~success], bins='freedman', histtype='stepfilled', color='red', alpha=0.5, label='Failed Tests', ax=axarr[0], density=True)
+    axarr[0].set_xlabel('Minimum Lens-Source Distance')
+    axarr[0].set_ylabel('Frequency')
+    axarr[0].set_title('Minimum Lens-Source Distance')
+    axarr[0].legend()
+
+    # Plot the number of sources within 10 units of the true lens
+    fancy_hist(sources_within_10[success], bins='freedman', histtype='stepfilled', color='blue', alpha=0.5, label='Successful Tests', ax=axarr[1], density=True)
+    fancy_hist(sources_within_10[~success], bins='freedman', histtype='stepfilled', color='red', alpha=0.5, label='Failed Tests', ax=axarr[1], density=True)
+    axarr[1].set_xlabel('Sources Within 10 Units')
+    axarr[1].set_ylabel('Frequency')
+    axarr[1].set_title('Number of Sources Within 10 arcsec of lens')
+    axarr[1].legend()
+
+    # Plot the radius from the true lens which contains 10 sources
+    fancy_hist(radius_10_sources[success], bins='freedman', histtype='stepfilled', color='blue', alpha=0.5, label='Successful Tests', ax=axarr[2], density=True)
+    fancy_hist(radius_10_sources[~success], bins='freedman', histtype='stepfilled', color='red', alpha=0.5, label='Failed Tests', ax=axarr[2], density=True)
+    axarr[2].set_xlabel('Minimum Radius Containing 10 Sources')
+    axarr[2].set_ylabel('Frequency')
+    axarr[2].set_title('Radius Containing 10 Sources')
+    axarr[2].legend()
+
+    plt.tight_layout()
+    plt.savefig('Output/NFW_tests/random_realization/source_dist_test.png')
+    plt.show()
+
+    
+    raise SystemExit
+    '''
+    Ntrial = 100
     Nlenses = [1, 2]
     Nsources = 100
     xmax = 50
@@ -518,26 +693,17 @@ if __name__ == '__main__':
     z_l = 0.194
     use_flags = [True, True, False]
 
+    results = np.load('Output/NFW_tests/random_realization/Ntrial_100_Nlens_1_mass_13.0.npy', allow_pickle=True).item()
+    true_results = {'x': np.array([0]), 'y': np.array([0]), 'mass': np.array([1e13])}
+    plot_random_realizations(results, true_results, 'Ntrial_100_Nlens_1_mass_13.0', xmax)
+
     for Nlens in Nlenses:
         for mass in lens_mass:
-            if Nlens == 1 and mass == 1e14:
+            if Nlens == 1 and mass == 1e13:
                 continue
             results, true_results = run_random_realizations(Ntrial, Nlens, Nsources, xmax, mass, z_l, use_flags=use_flags, random_seed=42)
             name = f'Ntrial_{Ntrial}_Nlens_{Nlens}_mass_{np.log10(mass)}'
+            # Save the results
+            np.save(f'Output/NFW_tests/random_realization/{name}.npy', results)
             plot_random_realizations(results, true_results, name, xmax)
-
-    '''
-    # Save the results
-    np.save('Output/NFW_tests/random_realization/medium_Nlens_1.npy', results)
-    # results = np.load('Output/NFW_tests/random_realization/Ntrial_1000_stn10.npy', allow_pickle=True).item()
-    plot_name = write_plot_name(1, lens_mass, 'noisy', use_flags, append='random_realization/medium_Nlens_1')
-
-    true_x = [0]
-    true_y = [0]
-    true_mass = [lens_mass]
-    true_results = {'x': true_x, 'y': true_y, 'mass': true_mass}
-    plot_random_realizations(results, true_results, 'Large Lens - StN 10', xmax)
     
-    end = time.time()
-    print(f'Script complete - Time taken: {end - start:.2f} seconds')
-    '''
