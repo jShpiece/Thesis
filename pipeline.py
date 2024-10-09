@@ -23,7 +23,7 @@ import utils  # Custom utility functions
 import minimizer  # Custom minimizer module
 import source_obj # Source object
 import halo_obj # Halo object
-import metric # Metric object
+import metric # Metric calculation functions
 
 def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
     """
@@ -266,6 +266,9 @@ def filter_lens_positions(sources, lenses, xmax, threshold_distance=0.5, lens_ty
     
     # Identify lenses that are too close to any source
     too_close = np.any(distances < threshold_distance, axis=1)
+    # Check if this identifies every lens as too close
+    if np.all(too_close):
+        print('All lenses are too close to at least one source.')
     # Identify lenses that are too far from the center
     too_far = np.sqrt(lenses.x ** 2 + lenses.y ** 2) > xmax
 
@@ -356,8 +359,8 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
 
 def forward_lens_selection(
     sources, candidate_lenses, use_flags, lens_type='NFW',
-    base_tolerance=0.01, mass_scale=1e13, exponent=-1
-):
+    base_tolerance=0.01
+    ):
     """
     Selects the best combination of lenses by iteratively adding lenses
     to minimize the reduced chi-squared value, using an adaptive tolerance
@@ -429,7 +432,7 @@ def forward_lens_selection(
                 )
 
             # Compute chi-squared and reduced chi-squared
-            chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type, use_weights=False)
+            chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type, use_weights=False, use_priors=False)
             dof = metric.calc_degrees_of_freedom(sources, test_lenses, use_flags)
             reduced_chi2 = chi2 / dof if dof > 0 else np.inf
             chi2_list.append(reduced_chi2)
@@ -440,17 +443,8 @@ def forward_lens_selection(
         min_index = chi2_list.index(min_chi2)
         idx_to_add = lens_indices[min_index]
 
-        # Calculate adaptive tolerance based on the mass of the candidate lens
-        if lens_type == 'NFW':
-            candidate_mass = candidate_lenses.mass[idx_to_add]
-        elif lens_type == 'SIS':
-            candidate_mass = candidate_lenses.te[idx_to_add]  # Adjust if necessary for SIS
-        # Ensure positive mass to avoid division by zero
-        candidate_mass = max(candidate_mass, 1e-10)
-        adaptive_tol = base_tolerance * (candidate_mass / mass_scale) ** exponent
-
         # Check if adding the lens improves the reduced chi-squared beyond adaptive tolerance
-        if min_chi2 < best_reduced_chi2 - adaptive_tol:
+        if min_chi2 < best_reduced_chi2 - base_tolerance:
             # Update the best lenses and reduced chi-squared
             best_reduced_chi2 = min_chi2
 
@@ -479,6 +473,11 @@ def forward_lens_selection(
         else:
             # No improvement beyond adaptive tolerance, stop the iteration
             break
+    
+    # Check to see if the number of lenses is zero
+    if len(selected_lenses.x) == 0:
+        print('No lenses selected.')
+        return None, np.inf
 
     return selected_lenses, best_reduced_chi2
 
@@ -518,6 +517,10 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
     elif lens_type == 'NFW':
         # Optimize mass for each lens individually - this is verified to be the better approach as of 9/26/2024
         for i in range(len(lenses.x)):
+            source_clone = sources.copy()
+            # Let's remove every source not within 20 units of the lens
+            distance = np.hypot(lenses.x[i] - source_clone.x, lenses.y[i] - source_clone.y)
+            source_clone.remove(np.where(distance > 20)[0])
             guess = [np.log10(lenses.mass[i])]
             params = [
                 'NFW', 'constrained',

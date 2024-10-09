@@ -241,11 +241,23 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
         print('Step 3: Finished filtering')
 
     # Step 4: Iterative lens elimination
+    # lenses.merge(true_lenses)
     lenses, _ = pipeline.forward_lens_selection(sources, lenses, use_flags, lens_type='NFW')
+
+    if lenses is None:
+        fig.suptitle('No Halos Recovered')
+        plot_name = write_plot_name(len(true_lenses.x), true_lenses.mass[0], noisy, use_flags, append=name)
+        fig.savefig(plot_name)
+        plt.close()
+        print(f'Plot saved as {plot_name}')
+        return lenses
+
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags)
     plot_results(lenses, true_lenses, 'Forward Lens Selection', reduced_chi2, xmax, ax=axarr[1, 0])
     if print_steps:
         print('Step 4: Finished forward selection')
+    
+
 
     # Step 5: Merge closely positioned lenses
     area = np.pi * xmax ** 2
@@ -295,6 +307,13 @@ def run_simple_tests():
             use_flags (list of bool, optional): Flags indicating which lensing signals to use. Default is [True, True, True].
         """
         true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise)
+        # Randomize the source positions
+        xs = np.random.uniform(-xmax, xmax, Nsource)
+        ys = np.random.uniform(-xmax, xmax, Nsource)
+        sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.full(Nsource, 0.1), np.full(Nsource, 0.01), np.full(Nsource, 0.02))
+        sources.apply_lensing(true_lenses, lens_type='NFW', z_source=0.8)
+        sources.apply_noise()
+        sources.filter_sources()
         pipeline.update_chi2_values(sources, true_lenses, use_flags)
         _ = pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, print_steps=True)
 
@@ -303,10 +322,9 @@ def run_simple_tests():
     area = np.pi * xmax ** 2
     Nsource = int(ns * area)  # Number of sources
     masses = [1e14, 1e13, 1e12]
-    lens_numbers = [1, 2]
-    noise_use = [True]
-    # use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
-    use_flags = [[True, True, True], [True, True, False]]
+    lens_numbers = [1, 2 ]
+    noise_use = [True, False]
+    use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
 
     for mass in masses:
         for Nlens in lens_numbers:
@@ -372,7 +390,7 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     popt, _ = curve_fit(gaussian, bin_centers, counts, p0=initial_guess)
 
     # Plot the fitted Gaussian curves
-# Plot the bimodal Gaussian fit with better formatting for results
+    # Plot the bimodal Gaussian fit with better formatting for results
     fit_label = (
         f'Gaussian Fit:\n'
         f'Mean: {popt[1]:.2f} ± {popt[2]:.2f}\n'
@@ -493,18 +511,25 @@ if __name__ == '__main__':
     # raise SystemExit
 
     Ntrial = 1000
-    Nlenses = 1
+    Nlenses = [1, 2]
     Nsources = 100
     xmax = 50
-    lens_mass = 1e14
+    lens_mass = [1e14, 1e13]
     z_l = 0.194
     use_flags = [True, True, False]
 
-    # results, true_results = run_random_realizations(Ntrial, Nlenses, Nsources, xmax, lens_mass, z_l, use_flags=use_flags, random_seed=42)
+    for Nlens in Nlenses:
+        for mass in lens_mass:
+            if Nlens == 1 and mass == 1e14:
+                continue
+            results, true_results = run_random_realizations(Ntrial, Nlens, Nsources, xmax, mass, z_l, use_flags=use_flags, random_seed=42)
+            name = f'Ntrial_{Ntrial}_Nlens_{Nlens}_mass_{np.log10(mass)}'
+            plot_random_realizations(results, true_results, name, xmax)
 
+    '''
     # Save the results
-    # np.save('Output/NFW_tests/random_realization/medium_Nlens_1.npy', results)
-    results = np.load('Output/NFW_tests/random_realization/Ntrial_1000_stn10.npy', allow_pickle=True).item()
+    np.save('Output/NFW_tests/random_realization/medium_Nlens_1.npy', results)
+    # results = np.load('Output/NFW_tests/random_realization/Ntrial_1000_stn10.npy', allow_pickle=True).item()
     plot_name = write_plot_name(1, lens_mass, 'noisy', use_flags, append='random_realization/medium_Nlens_1')
 
     true_x = [0]
@@ -515,3 +540,4 @@ if __name__ == '__main__':
     
     end = time.time()
     print(f'Script complete - Time taken: {end - start:.2f} seconds')
+    '''
