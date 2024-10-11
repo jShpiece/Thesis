@@ -592,7 +592,7 @@ if __name__ == '__main__':
     use_flags = [True, True, False]
     true_lenses = halo_obj.NFW_Lens(np.array([0]), np.array([0]), np.zeros(1), np.zeros(1), np.array([lens_mass]), 0.194, np.zeros(1))
     true_lenses.calculate_concentration()
-    '''   
+    '''
     min_lens_source_dist = []
     sources_within_10 = []
     radius_10_sources = []
@@ -643,7 +643,7 @@ if __name__ == '__main__':
 
     # Save the results
     np.save('Output/NFW_tests/random_realization/test_results.npy', {'min_dist': min_lens_source_dist, 'within_10': sources_within_10, 'radius_10': radius_10_sources, 'success': success})
-    
+    '''
     results = np.load('Output/NFW_tests/random_realization/test_results.npy', allow_pickle=True).item()
     # Unpack the results
     min_lens_source_dist = results['min_dist']
@@ -680,12 +680,10 @@ if __name__ == '__main__':
 
     plt.tight_layout()
     plt.savefig('Output/NFW_tests/random_realization/source_dist_test.png')
-    plt.show()
 
     
-    raise SystemExit
-    '''
-    Ntrial = 100
+    
+    Ntrial = 1000
     Nlenses = [1, 2]
     Nsources = 100
     xmax = 50
@@ -693,13 +691,9 @@ if __name__ == '__main__':
     z_l = 0.194
     use_flags = [True, True, False]
 
-    results = np.load('Output/NFW_tests/random_realization/Ntrial_100_Nlens_1_mass_13.0.npy', allow_pickle=True).item()
-    true_results = {'x': np.array([0]), 'y': np.array([0]), 'mass': np.array([1e13])}
-    plot_random_realizations(results, true_results, 'Ntrial_100_Nlens_1_mass_13.0', xmax)
-
     for Nlens in Nlenses:
         for mass in lens_mass:
-            if Nlens == 1 and mass == 1e13:
+            if Nlens == 1 and mass == 1e14:
                 continue
             results, true_results = run_random_realizations(Ntrial, Nlens, Nsources, xmax, mass, z_l, use_flags=use_flags, random_seed=42)
             name = f'Ntrial_{Ntrial}_Nlens_{Nlens}_mass_{np.log10(mass)}'

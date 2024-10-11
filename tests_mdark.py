@@ -402,7 +402,7 @@ def process_md_set(test_number):
     start = time.time()
     Ntrials = 1 # Number of trials to run for each cluster in the test set
 
-    test_dir = 'Output/MDARK_Test/Test{}'.format(test_number)
+    test_dir = 'Output/MDARK/Test{}'.format(test_number)
     halos_file = 'MDARK/Halos_{}.MDARK'.format(z_chosen)
     ID_file = test_dir + '/ID_file_{}.csv'.format(test_number)
     result_file = test_dir + '/results_{}.csv'.format(test_number)
