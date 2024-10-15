@@ -527,11 +527,20 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
                 lenses.x[i], lenses.y[i], lenses.redshift,
                 lenses.concentration[i], sources, use_flags
             ]
+            '''
             result, _ = minimizer.gradient_descent(
                 chi2wrapper, guess, learning_rates=learning_rates,
                 num_iterations=num_iterations, params=params
             )
-            lenses.mass[i] = 10 ** result[0]
+            '''
+            result = opt.minimize(
+                chi2wrapper, guess, args=params,
+                method='Powell',
+                tol=1e-8,
+                options={'maxiter': 1000}
+            )
+            # lenses.mass[i] = 10 ** result[0]
+            lenses.mass[i] = 10 ** result.x
             lenses.calculate_concentration()
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')

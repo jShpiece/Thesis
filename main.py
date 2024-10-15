@@ -70,7 +70,7 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
     # Step 4: Iteratively eliminate lenses to find the best reduced chi-squared value
     lenses, _ = pipeline.forward_lens_selection(sources, lenses, use_flags, lens_type=lens_type)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
-    print_step_info(flags, "After Iterative Elimination:", lenses, reduced_chi2)
+    print_step_info(flags, "After Forward Selection:", lenses, reduced_chi2)
 
     # Step 5: Merge lenses that are too close to each other
     # Calculate source density (ns) for merger threshold calculation

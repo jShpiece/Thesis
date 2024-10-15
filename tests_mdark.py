@@ -44,10 +44,10 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     # True mass is stored in the ID file
     ID_results = pd.read_csv(ID_file)
     true_mass = ID_results[' Mass'].values
-    mass = results[' Mass_all_signals'].values
-    mass_gamma_f = results[' Mass_gamma_F'].values
-    mass_f_g = results[' Mass_F_G'].values
-    mass_gamma_g = results[' Mass_gamma_G'].values
+    mass = results['Mass_all_signals'].values
+    mass_gamma_f = results['Mass_gamma_F'].values
+    mass_f_g = results['Mass_F_G'].values
+    mass_gamma_g = results['Mass_gamma_G'].values
 
     # Convert masses to floats (currently being read in as strings)
     true_mass = np.array([float(mass) for mass in true_mass])
@@ -252,14 +252,12 @@ def build_lensing_field(halos, z, Nsource = None):
     # Convert the halo coordinates to a 2D projection
     halos.project_to_2D()
     d = cosmo.angular_diameter_distance(z).to(u.meter).value
-    halos.x *= (3.086 * 10**22 / d) * 206265
+    halos.x *= (3.086 * 10**22 / d) * 206265 # Convert to arcseconds
     halos.y *= (3.086 * 10**22 / d) * 206265
 
     # Center the lenses at (0, 0)
-    # This is a necessary step for the pipeline
-    # Let the centroid be the location of the most massive halo
-    # This will be where we expect to see the most light, which
-    # means it will be where observations are centered
+    # This is done by finding the largest halo and setting its coordinates to (0, 0)
+    # This is allowed because observations will center on the region of highest light, which should be the center of mass
 
     largest_halo = np.argmax(halos.mass)
     centroid = [halos.x[largest_halo], halos.y[largest_halo]]
@@ -267,11 +265,10 @@ def build_lensing_field(halos, z, Nsource = None):
     halos.y -= centroid[1] 
 
     xmax = np.max((halos.x**2 + halos.y**2)**0.5)
-    
-    # Don't allow the field of view to be larger than 2 arcminutes - or smaller than 1 arcminute
-    xmax = np.min([xmax, 2*60])
-    xmax = np.max([xmax, 1*60])
 
+    # Set a maximum size for the field of view of 2 arcminutes
+    xmax = np.min([xmax, 120]) # arcseconds
+    
     # Generate a set of background galaxies
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
@@ -292,39 +289,23 @@ def build_lensing_field(halos, z, Nsource = None):
 # --------------------------------------------
 
 def run_single_test(args):
-    ID, z, signal_choices, halos, sources, xmax = args
+    ID, signal_choices, sources, xmax = args
     # Run the pipeline for a single cluster, with a given set of signal choices
     # N_test times. Save the results to a file
 
-    xs = sources.x
-    ys = sources.y
-
-    sig_s = np.ones(len(xs)) * 0.1
-    sig_f = np.ones(len(xs)) * 0.01
-    sig_g = np.ones(len(xs)) * 0.02
-
     masses = []
     candidate_number = []
-    chi_scores = []
-
-    np.random.seed()
-    noisy_sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
-    noisy_sources.apply_lensing(halos, lens_type='NFW', z_source=z_source)
-
-    # Apply noise
-    noisy_sources.apply_noise()
 
     for signal_choice in signal_choices:
-        candidate_lenses, candidate_chi2 = main.fit_lensing_field(noisy_sources, xmax, False, signal_choice, lens_type='NFW')
+        candidate_lenses, _ = main.fit_lensing_field(sources, xmax, False, signal_choice, lens_type='NFW')
 
         mass = np.sum(candidate_lenses.mass)
         candidate_num = len(candidate_lenses.x)
-        chi_scores.append(candidate_chi2)
         masses.append(mass)
         candidate_number.append(candidate_num)
 
     # Save the results to a file
-    results = [ID, masses[0], masses[1], masses[2], masses[3], chi_scores[0], chi_scores[1], chi_scores[2], chi_scores[3], candidate_number[0], candidate_number[1], candidate_number[2], candidate_number[3]]
+    results = [ID, masses[0], masses[1], masses[2], masses[3], candidate_number[0], candidate_number[1], candidate_number[2], candidate_number[3]]
     print('Finished test for cluster {}'.format(ID))
     return results
 
@@ -339,7 +320,6 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
             IDs.append(int(ID))
     
     IDs = np.array(IDs)
-    # IDs = IDs[:5] # For testing purposes, only use the first 5 clusters
 
     signal_choices = [
         [True, True, True], # All signals
@@ -356,8 +336,8 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
     for ID in IDs:
         # Build the lenses and sources
         halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
-
-        # Create a new source object, without noise
+        '''
+        # Create a new source object, without noise (Note from the future - why?)
         xs = sources.x
         ys = sources.y
         clean_source = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
@@ -373,11 +353,14 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
 
         source_catalogue[ID] = clean_source
         xmax_values.append(xmax)
+        '''
+        source_catalogue[ID] = sources
+        xmax_values.append(xmax)
 
     print('Halo and Source objects loaded...')
 
     # Prepare the arguments for each task
-    tasks = [(ID, z, signal_choices, halos[ID], source_catalogue[ID], xmax_values[i]) for i, ID in enumerate(IDs)]
+    tasks = [(ID, signal_choices, source_catalogue[ID], xmax_values[i]) for i, ID in enumerate(IDs)]
     # Repeat each task N_test times
     tasks = [task for task in tasks for _ in range(N_test)]
 
@@ -386,9 +369,9 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
         results = pool.map(run_single_test, tasks)
 
     # Save the results to a file
-    results = np.array(results).reshape(-1, 13)
+    results = np.array(results).reshape(-1, 9)
     with open(result_file, 'w') as f:
-        f.write('ID, Mass_all_signals, Mass_gamma_F, Mass_F_G, Mass_gamma_G, Chi2_all_signals, Chi2_gamma_F, Chi2_F_G, Chi2_gamma_G, Nfound_all_signals, Nfound_gamma_F, Nfound_F_G, Nfound_gamma_G\n')
+        f.write('ID,Mass_all_signals,Mass_gamma_F,Mass_F_G,Mass_gamma_G,Nfound_all_signals,Nfound_gamma_F,Nfound_F_G,Nfound_gamma_G\n')
         for i in range(len(results)):
             f.write('{}\n'.format(', '.join(results[i].astype(str))))
 
@@ -408,11 +391,43 @@ def process_md_set(test_number):
     result_file = test_dir + '/results_{}.csv'.format(test_number)
     plot_name = 'Output/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
 
-    run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
+    # run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     build_mass_correlation_plot(ID_file, result_file, plot_name)
 
 
 if __name__ == '__main__':
-    process_md_set(15)
+    # process_md_set(15)
+    # raise SystemExit
+    # Pick out a halo, run the pipeline, look at the results
+
+    ID_file = 'Output/MDARK/Test15/ID_file_15.csv'
+    IDs = []
+    with open(ID_file, 'r') as f:
+        lines = f.readlines()[1:]
+        for line in lines:
+            ID = line.split(',')[0]
+            IDs.append(int(ID))
+    
+    IDs = np.array(IDs)
+    z = 0.194
+    
+    for ID in IDs:
+        halos = find_halos([ID], z)
+        halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
+        candidate_lenses, _ = main.fit_lensing_field(sources, xmax, True, [True, True, False], lens_type='NFW')
+
+        plt.figure()
+        plt.scatter(sources.x, sources.y, s=10, color='black', alpha=0.5, label='Sources')
+        plt.scatter(halos[ID].x, halos[ID].y, s=100, color='red', label='Lenses', marker='x')
+        plt.scatter(candidate_lenses.x, candidate_lenses.y, s=100, color='blue', label='Candidates', marker='o')
+        # Label candidates with their masses
+        for i in range(len(candidate_lenses.x)):
+            plt.text(candidate_lenses.x[i], candidate_lenses.y[i], '{:.2e}'.format(candidate_lenses.mass[i]), fontsize=8)
+        plt.legend()
+        plt.xlabel('x [arcseconds]')
+        plt.ylabel('y [arcseconds]')
+        plt.title('Cluster ID: {} \n True Mass: {:.2e} $M_{{\odot}}$ \n Candidate Mass: {:.2e} $M_{{\odot}}$'.format(ID, np.sum(halos[ID].mass), np.sum(candidate_lenses.mass)))
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.savefig('Output/MDARK/pipeline_visualization/cluster_{}.png'.format(ID))
