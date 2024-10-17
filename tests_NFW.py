@@ -354,11 +354,9 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
         title (str): Title for the plot.
         xmax (float): Maximum x and y limits for the plot.
     """
-    fig, axarr = plt.subplots(1, 2, figsize=(20, 6))
+    fig, axarr = plt.subplots(1, 3, figsize=(20, 6))
+    fig.suptitle(title)
 
-    # print(recovered_params['x'])
-    # print(recovered_params['y'])
-    # Plot x and y positions
     hist = axarr[0].hist2d(recovered_params['x'], recovered_params['y'], bins=20, cmap='viridis', norm=plt.cm.colors.LogNorm())
 
     # Add a colorbar
@@ -368,7 +366,7 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     axarr[0].scatter(true_params['x'], true_params['y'], s=100, c='red', marker='*', label='True Lens', alpha=0.5)
     axarr[0].set_xlabel('X Position')
     axarr[0].set_ylabel('Y Position')
-    axarr[0].set_title(f'{title} - Position Distribution (Log Scale)')
+    axarr[0].set_title(f'Position Distribution (Log Scale)')
     axarr[0].set_xlim(-xmax, xmax)
     axarr[0].set_ylim(-xmax, xmax)
     axarr[0].set_aspect('equal')
@@ -376,8 +374,15 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     # Plot mass distribution
     # Assuming recovered_params['mass'] is defined and imported
     recovered_mass = np.log10(recovered_params['mass'])
-    # Remove any value lower than 1e9
+    # Remove any value lower than 1e9 (do this for all results)
+    small_mass = np.where(recovered_mass < 9)
+    xvals = np.delete(recovered_params['x'], small_mass)
+    yvals = np.delete(recovered_params['y'], small_mass)
     recovered_mass = recovered_mass[recovered_mass > 9]
+    # Now, remove any value that isn't a detection (where it is more than 5 units from the origin)
+    r = np.sqrt(xvals ** 2 + yvals ** 2)
+    detected = np.where(r < 5)
+    detected_mass = recovered_mass[detected]
     # Plot mass distribution
     bin_num = 40
     fancy_hist(recovered_mass, bins=bin_num, histtype='stepfilled', color='blue', alpha=0.5, label='Recovered Mass', ax=axarr[1], density=True)
@@ -438,15 +443,19 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     # Set axis labels and title
     axarr[1].set_xlabel('Recovered Mass (log $M_\\odot$)')
     axarr[1].set_ylabel('Frequency')
-    axarr[1].set_title(f'{title} - Mass Distribution')
-    # axarr[1].set_xlim(np.log10(1e11), np.log10(1e15))
+    axarr[1].set_title(f'Mass Distribution')
 
     # Display the legend with improved formatting
     axarr[1].legend(loc='best', fontsize='small', frameon=True)
 
-    # axarr[1].set_xlim(np.log10(1e11), np.log10(1e15))
-    # axarr[1].set_aspect('equal')
-    
+    fancy_hist(detected_mass, bins=bin_num, histtype='stepfilled', color='blue', alpha=0.5, label='Detected Mass', ax=axarr[2], density=True)
+    axarr[2].axvline(np.log10(true_params['mass']), color='red', linestyle='--', label='True Mass')
+    axarr[2].set_xlabel('Detected Mass (log $M_\\odot$) - False Positives Removed')
+    axarr[2].set_ylabel('Frequency')
+    axarr[2].set_title(f'Detected Mass Distribution')
+    axarr[2].legend(loc='best', fontsize='small', frameon=True)
+
+
     plt.tight_layout()
     plt.savefig(f'Output/NFW_tests/random_realization/{title}.png')
     # plt.show()
@@ -652,19 +661,19 @@ if __name__ == '__main__':
     Nlenses = [1]
     Nsources = 100
     xmax = 50
-    lens_mass = [1e13]
+    lens_mass = [1e14, 1e13]
     z_l = 0.194
     use_flags = [True, True, False]
 
     for Nlens in Nlenses:
         for mass in lens_mass:
-            results, true_results = run_random_realizations(Ntrial, Nlens, Nsources, xmax, mass, z_l, use_flags=use_flags, random_seed=42)
+            # results, true_results = run_random_realizations(Ntrial, Nlens, Nsources, xmax, mass, z_l, use_flags=use_flags, random_seed=42)
             name = f'Ntrial_{Ntrial}_Nlens_{Nlens}_mass_{np.log10(mass)}'
             # Save the results
-            np.save(f'Output/NFW_tests/random_realization/{name}.npy', results)
-            # results = np.load(f'Output/NFW_tests/random_realization/{name}.npy', allow_pickle=True).item()
-            # x_true = [0]
-            # y_true = [0]
-            # mass_true = [mass]
-            # true_results = {'x': x_true, 'y': y_true, 'mass': mass_true}
+            # np.save(f'Output/NFW_tests/random_realization/{name}.npy', results)
+            results = np.load(f'Output/NFW_tests/random_realization/{name}.npy', allow_pickle=True).item()
+            x_true = [0]
+            y_true = [0]
+            mass_true = [mass]
+            true_results = {'x': x_true, 'y': y_true, 'mass': mass_true}
             plot_random_realizations(results, true_results, name, xmax)

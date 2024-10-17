@@ -359,7 +359,7 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
 
 def forward_lens_selection(
     sources, candidate_lenses, use_flags, lens_type='NFW',
-    base_tolerance=0.01
+    base_tolerance=0.003
     ):
     """
     Selects the best combination of lenses by iteratively adding lenses

@@ -266,8 +266,8 @@ def build_lensing_field(halos, z, Nsource = None):
 
     xmax = np.max((halos.x**2 + halos.y**2)**0.5)
 
-    # Set a maximum size for the field of view of 2 arcminutes
-    xmax = np.min([xmax, 120]) # arcseconds
+    # Set a maximum size for the field of view of 5 arcminutes
+    xmax = np.min([xmax, 300]) # arcseconds
     
     # Generate a set of background galaxies
     ns = 0.01
@@ -391,14 +391,14 @@ def process_md_set(test_number):
     result_file = test_dir + '/results_{}.csv'.format(test_number)
     plot_name = 'Output/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
 
-    # run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
+    run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
     build_mass_correlation_plot(ID_file, result_file, plot_name)
 
 
 if __name__ == '__main__':
-    # process_md_set(15)
+    process_md_set(15)
     # raise SystemExit
     # Pick out a halo, run the pipeline, look at the results
 
