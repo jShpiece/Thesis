@@ -96,7 +96,7 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
 
     fig.tight_layout()
     fig.savefig(plot_name)
-    plt.show()
+    # plt.show()
 
 # --------------------------------------------
 # File Management Functions
@@ -398,7 +398,7 @@ def process_md_set(test_number):
 
 
 if __name__ == '__main__':
-    process_md_set(15)
+    # process_md_set(15)
     # raise SystemExit
     # Pick out a halo, run the pipeline, look at the results
 
@@ -412,16 +412,18 @@ if __name__ == '__main__':
     
     IDs = np.array(IDs)
     z = 0.194
-    
+    counter = 0
     for ID in IDs:
         halos = find_halos([ID], z)
         halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
         candidate_lenses, _ = main.fit_lensing_field(sources, xmax, True, [True, True, False], lens_type='NFW')
-
+        # Determine size of lenses in the plot based on their mass
+        true_sizes = (np.log10(halos[ID].mass) - 12) * 10
+        recon_sizes = (np.log10(candidate_lenses.mass) - 12) * 10
         plt.figure()
         plt.scatter(sources.x, sources.y, s=10, color='black', alpha=0.5, label='Sources')
-        plt.scatter(halos[ID].x, halos[ID].y, s=100, color='red', label='Lenses', marker='x')
-        plt.scatter(candidate_lenses.x, candidate_lenses.y, s=100, color='blue', label='Candidates', marker='o')
+        plt.scatter(halos[ID].x, halos[ID].y, s=true_sizes, color='red', label='Lenses', marker='x')
+        plt.scatter(candidate_lenses.x, candidate_lenses.y, s=recon_sizes, color='blue', label='Candidates', marker='o')
         # Label candidates with their masses
         for i in range(len(candidate_lenses.x)):
             plt.text(candidate_lenses.x[i], candidate_lenses.y[i], '{:.2e}'.format(candidate_lenses.mass[i]), fontsize=8)
@@ -430,4 +432,6 @@ if __name__ == '__main__':
         plt.ylabel('y [arcseconds]')
         plt.title('Cluster ID: {} \n True Mass: {:.2e} $M_{{\odot}}$ \n Candidate Mass: {:.2e} $M_{{\odot}}$'.format(ID, np.sum(halos[ID].mass), np.sum(candidate_lenses.mass)))
         plt.gca().set_aspect('equal', adjustable='box')
-        plt.savefig('Output/MDARK/pipeline_visualization/cluster_{}.png'.format(ID))
+        plt.savefig('Output/MDARK/pipeline_visualization/cluster_{}.png'.format(counter))
+        plt.close()
+        counter += 1

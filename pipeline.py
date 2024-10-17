@@ -517,10 +517,6 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
     elif lens_type == 'NFW':
         # Optimize mass for each lens individually - this is verified to be the better approach as of 9/26/2024
         for i in range(len(lenses.x)):
-            source_clone = sources.copy()
-            # Let's remove every source not within 20 units of the lens
-            distance = np.hypot(lenses.x[i] - source_clone.x, lenses.y[i] - source_clone.y)
-            source_clone.remove(np.where(distance > 20)[0])
             guess = [np.log10(lenses.mass[i])]
             params = [
                 'NFW', 'constrained',
@@ -535,7 +531,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
             '''
             result = opt.minimize(
                 chi2wrapper, guess, args=params,
-                method='Powell',
+                method='BFGS',
                 tol=1e-8,
                 options={'maxiter': 1000}
             )

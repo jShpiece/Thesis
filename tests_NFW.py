@@ -439,6 +439,8 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
 
     axarr[1].plot(bin_centers, func(bin_centers, *popt), 'k--', label=fit_label)
     axarr[1].axvline(np.log10(true_params['mass']), color='red', linestyle='--', label='True Mass')
+    axarr[1].axvline(np.mean(detected_mass), color='green', linestyle='--', label='Mean Detected Mass = {:.2f}'.format(np.mean(detected_mass)))
+    axarr[1].axvline(np.median(detected_mass), color='purple', linestyle='--', label='Median Detected Mass = {:.2f}'.format(np.median(detected_mass)))
 
     # Set axis labels and title
     axarr[1].set_xlabel('Recovered Mass (log $M_\\odot$)')
