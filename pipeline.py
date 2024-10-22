@@ -359,7 +359,7 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
 
 def forward_lens_selection(
     sources, candidate_lenses, use_flags, lens_type='NFW',
-    base_tolerance=0.003
+    base_tolerance=0.003, mass_scale=1e13, exponent=-0.5
     ):
     """
     Selects the best combination of lenses by iteratively adding lenses
@@ -371,7 +371,7 @@ def forward_lens_selection(
         candidate_lenses (Lens): Candidate lenses (NFW_Lens or SIS_Lens object).
         use_flags (list of bool): Flags indicating which lensing signals to use.
         lens_type (str): Type of lensing model ('NFW' or 'SIS'). Default is 'NFW'.
-        base_tolerance (float): Base tolerance for improvement. Default is 0.01.
+        base_tolerance (float): Base tolerance for improvement. Default is 0.003.
         mass_scale (float): Mass scale for adaptive tolerance (e.g., 1e13 solar masses).
         exponent (float): Exponent for mass dependence. Negative values increase tolerance for lower masses.
     
@@ -443,8 +443,12 @@ def forward_lens_selection(
         min_index = chi2_list.index(min_chi2)
         idx_to_add = lens_indices[min_index]
 
+        # Adaptive tolerance calculation based on the mass of the lens
+        lens_mass = candidate_lenses.mass[idx_to_add]
+        adaptive_tolerance = base_tolerance * (lens_mass / mass_scale) ** exponent
+
         # Check if adding the lens improves the reduced chi-squared beyond adaptive tolerance
-        if min_chi2 < best_reduced_chi2 - base_tolerance:
+        if min_chi2 < best_reduced_chi2 - adaptive_tolerance:
             # Update the best lenses and reduced chi-squared
             best_reduced_chi2 = min_chi2
 
@@ -478,8 +482,8 @@ def forward_lens_selection(
     if len(selected_lenses.x) == 0:
         print('No lenses selected.')
         return None, np.inf
-
-    return selected_lenses, best_reduced_chi2
+    else:
+        return selected_lenses, best_reduced_chi2
 
 
 def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iterations=10**5, learning_rates=1e-2):
@@ -533,7 +537,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
                 chi2wrapper, guess, args=params,
                 method='BFGS',
                 tol=1e-8,
-                options={'maxiter': 1000}
+                options={'maxiter': 100000}
             )
             # lenses.mass[i] = 10 ** result[0]
             lenses.mass[i] = 10 ** result.x

@@ -654,10 +654,8 @@ def test_source_sep():
 
 
 if __name__ == '__main__':
-    # start = time.time()
-    
-    # run_simple_tests()
-    # raise SystemExit
+    run_simple_tests()
+    raise SystemExit
     
     Ntrial = 1000
     Nlenses = [1]

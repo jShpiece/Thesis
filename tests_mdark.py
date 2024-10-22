@@ -1,5 +1,6 @@
 import numpy as np 
 import matplotlib.pyplot as plt
+from astropy.visualization import hist as fancyhist
 import pandas as pd
 import halo_obj
 import source_obj
@@ -264,10 +265,24 @@ def build_lensing_field(halos, z, Nsource = None):
     halos.x -= centroid[0] 
     halos.y -= centroid[1] 
 
+    # Let's preemptively remove any halo smaller than 10^13 M_solar, on the assumption that these are not massive enough to be observed
+    remove_halos = np.where(halos.mass < 10**13)[0]
+    if len(remove_halos) == len(halos.mass):
+        print('All halos are too small, removing all halos')
+        # If all halos are too small, lower the threshold to 10^12 M_solar
+        remove_halos = np.where(halos.mass < 10**12)[0]
+    halos.remove(remove_halos)
+    # Check if there are any halos left
+    if len(halos.mass) == 0:
+        print('No halos left, returning')
+        return halos, None, None
+
     xmax = np.max((halos.x**2 + halos.y**2)**0.5)
 
     # Set a maximum size for the field of view of 5 arcminutes
+    # And a minimum size of 1 arcminute
     xmax = np.min([xmax, 300]) # arcseconds
+    xmax = np.max([xmax, 60]) # arcseconds
     
     # Generate a set of background galaxies
     ns = 0.01
@@ -336,24 +351,6 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
     for ID in IDs:
         # Build the lenses and sources
         halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
-        '''
-        # Create a new source object, without noise (Note from the future - why?)
-        xs = sources.x
-        ys = sources.y
-        clean_source = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
-        if lensing_type == 'NFW':
-            clean_source.apply_lensing(halos[ID], lens_type='NFW', z_source=z_source)
-        elif lensing_type == 'SIS':
-            tE = halos[ID].calc_corresponding_einstein_radius(z_source)
-            print('Einstein radius: {}'.format(tE))
-            lens = halo_obj.SIS_Lens(halos[ID].x, halos[ID].y, tE, 0)
-            clean_source.apply_lensing(lens, lens_type='SIS')
-        else:
-            raise ValueError('Invalid lensing type specified')
-
-        source_catalogue[ID] = clean_source
-        xmax_values.append(xmax)
-        '''
         source_catalogue[ID] = sources
         xmax_values.append(xmax)
 
@@ -415,6 +412,16 @@ if __name__ == '__main__':
     counter = 0
     for ID in IDs:
         halos = find_halos([ID], z)
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        fancyhist(np.log10(halos[ID].mass), bins='freedman', ax=ax, color='blue')
+        ax.set_xlabel('log10(Mass)')
+        ax.set_ylabel('Frequency')
+        ax.set_title('Cluster ID: {}'.format(ID))
+        plt.savefig('Output/MDARK/pipeline_visualization/mass_histogram_{}.png'.format(counter))
+        counter += 1
+        plt.close()
+        
+        '''
         halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
         candidate_lenses, _ = main.fit_lensing_field(sources, xmax, True, [True, True, False], lens_type='NFW')
         # Determine size of lenses in the plot based on their mass
@@ -435,3 +442,4 @@ if __name__ == '__main__':
         plt.savefig('Output/MDARK/pipeline_visualization/cluster_{}.png'.format(counter))
         plt.close()
         counter += 1
+        '''
