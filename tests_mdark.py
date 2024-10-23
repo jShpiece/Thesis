@@ -198,7 +198,7 @@ def find_halos(ids, z):
     """
     file_path = f'{data_dir}Halos_{z}.MDARK'
     cols_to_use = ['MainHaloID', 'x', 'y', 'z', 'concentration_NFW', 'HaloMass', 'GalaxyType']
-    id_set = set(ids)
+    id_set = set(ids) # Convert to set for faster lookup
     data_accumulator = defaultdict(list)
 
     # Read the file in chunks
@@ -226,6 +226,15 @@ def find_halos(ids, z):
             zhalo = complete_data['z'].values
             chalo = complete_data['concentration_NFW'].values
             masshalo = complete_data['HaloMass'].values
+            galaxy_type = complete_data['GalaxyType'].values
+
+            # Filter out orphan halos
+            keep_indices = np.where(galaxy_type != 2)[0]
+            xhalo = xhalo[keep_indices]
+            yhalo = yhalo[keep_indices]
+            zhalo = zhalo[keep_indices]
+            chalo = chalo[keep_indices]
+            masshalo = masshalo[keep_indices]
 
             # Create and store the Halo object
             halos[id_] = halo_obj.NFW_Lens(
@@ -299,15 +308,10 @@ def build_lensing_field(halos, z, Nsource = None):
     return halos, sources, xmax
 
 
-
-def build_ID_file(test_number, Ncluster, redshift):
+def build_ID_list(test_number, Ncluster, redshift):
     # Define mass, halo number, and mass fraction ranges
     minimum_mass = 10**13
     maximum_mass = 10**15
-    minimum_halo_number = 1
-    maximum_halo_number = np.inf
-    minimum_mass_fraction = 0.0
-    maximum_mass_fraction = 0.1
 
     # Set up the file paths
     key_file = 'MDARK/fixed_key_{}.MDARK'.format(redshift)
@@ -316,11 +320,11 @@ def build_ID_file(test_number, Ncluster, redshift):
     # Space the clusters out evenly in mass
     mass_range = np.linspace(minimum_mass, maximum_mass, Ncluster + 1)
 
-    # Initialize an empty list to store the results
-    results = [None] * Ncluster  # Placeholder for clusters, one for each mass range
-
+    # Initialize the results array
+    results = []
     # Iterate over each mass range and try to find a cluster in each chunk
     for i in range(Ncluster):
+        IDs = []
         mass_min = mass_range[i]
         mass_max = mass_range[i + 1]
 
@@ -333,11 +337,7 @@ def build_ID_file(test_number, Ncluster, redshift):
 
             # Filter the chunk based on the criteria
             filtered_cluster = chunk[(chunk['Total Mass'] > mass_min) & 
-                                     (chunk['Total Mass'] < mass_max) & 
-                                     (chunk['Halo Number'] >= minimum_halo_number) &
-                                     (chunk['Halo Number'] <= maximum_halo_number) &
-                                     (chunk['Mass Fraction'] >= minimum_mass_fraction) &
-                                     (chunk['Mass Fraction'] <= maximum_mass_fraction)]
+                                    (chunk['Total Mass'] < mass_max)]
 
             if not filtered_cluster.empty:
                 # Randomly sample one cluster from the filtered chunk
@@ -345,25 +345,65 @@ def build_ID_file(test_number, Ncluster, redshift):
 
                 # Extract relevant values
                 ID = cluster['MainHaloID'].values[0]
-                mass = cluster['Total Mass'].values[0]
-                halo_number = cluster['Halo Number'].values[0]
-                mass_fraction = cluster['Mass Fraction'].values[0]
-
-                # Store the result and stop searching for this mass range
-                results[i] = [ID, mass, halo_number, mass_fraction]
-                break  # Move on to the next mass range since we found a cluster
-
-        if results[i] is None:
-            print(f"No clusters found for mass range {mass_min} to {mass_max}")
-        else:
-            print(f"Cluster found for mass range {mass_min} to {mass_max}")
-
-    # Write results to the file
+                IDs.append(ID)
+        results.append(IDs) # Maintain a list of lists
+    
+    # Write the results to a file without changing the structure (a list of lists)
     with open(output_file, 'w') as f:
-        f.write('ID, Mass, Halo Number, Mass Fraction\n')
-        for result in results:
-            if result is not None:
-                f.write(f'{result[0]}, {result[1]}, {result[2]}, {result[3]}\n')
+        f.write('MainHaloID\n')
+        for ID_set in results:
+            f.write('{}\n'.format(', '.join([str(ID) for ID in ID_set])))
+
+
+def build_ID_file(Ncluster, IDs_path, test_number, redshift):
+    # Read in the IDs
+    # Remember that the file is a list of lists
+    IDs = []
+    with open(IDs_path, 'r') as f:
+        lines = f.readlines()[1:]
+        for line in lines:
+            ID_set = line.split(',')
+            IDs.append([int(ID) for ID in ID_set])
+    
+    keep_IDs = []
+
+    for i in range(Ncluster):
+        # Read in the IDs in this slice of the array
+        ID_set = IDs[i]
+        # Now, we're going to look at the halos for each of these clusters, remove orphan halos, then check halo number and mass fraction. 
+        # As soon as we find one that meets our specifications, we choose that ID, save it, and move to the next slice
+        # Actually, we are able to look at every ID at once
+        min_fraction = 0.0
+        max_fraction = 0.1
+        min_halo_number = 1
+        max_halo_number = 100
+        halos = find_halos(ID_set, redshift)
+        for ID in ID_set:
+            halo = halos[ID]
+            mass_fraction = 1 - np.max(halo.mass) / np.sum(halo.mass)
+            halo_number = len(halo.mass)
+            if (mass_fraction > min_fraction) and (mass_fraction < max_fraction) and (halo_number > min_halo_number) and (halo_number < max_halo_number):
+                print('Found a cluster that meets the criteria: {}'.format(ID))
+                keep_IDs.append(ID)
+                break
+        # If we reach the end of the loop without finding a cluster, note that we couldn't find one and move on to the next slice
+        print('Could not find a cluster that meets the criteria in this slice: {}'.format(i)) 
+    
+    # Now, we have a list of IDs that meet our criteria. Lets get the additional information from the key file, then save it to a file
+    key_file = 'MDARK/fixed_key_{}.MDARK'.format(redshift)
+    output_file = 'Output/MDARK/Test{}/ID_file_{}.csv'.format(test_number, test_number)
+    # Read in the key file (in chunks, find the appropriate ID, and save that row to a file)
+    chunk_iter = pd.read_csv(key_file, chunksize=100000)
+    for chunk in chunk_iter:
+        # Clean the column names to remove any leading/trailing spaces
+        chunk.columns = chunk.columns.str.strip()
+
+        # Filter the chunk based on the criteria
+        filtered_cluster = chunk[chunk['MainHaloID'].isin(keep_IDs)]
+        if not filtered_cluster.empty:
+            # Save the filtered cluster to a file
+            filtered_cluster.to_csv(output_file, index=False)
+            break
 
 
 
@@ -464,7 +504,9 @@ def process_md_set(test_number):
 
 
 if __name__ == '__main__':
-    build_ID_file(16, 30, 0.194)
+    # build_ID_list(16, 30, 0.194)
+    build_ID_file(30, 'Output/MDARK/Test16/ID_file_16.csv', 16, 0.194)
+
     # process_md_set(16)
     raise SystemExit
     # Pick out a halo, run the pipeline, look at the results
