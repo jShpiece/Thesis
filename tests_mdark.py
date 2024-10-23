@@ -299,6 +299,75 @@ def build_lensing_field(halos, z, Nsource = None):
     return halos, sources, xmax
 
 
+
+def build_ID_file(test_number, Ncluster, redshift):
+    # Define mass, halo number, and mass fraction ranges
+    minimum_mass = 10**13
+    maximum_mass = 10**15
+    minimum_halo_number = 1
+    maximum_halo_number = np.inf
+    minimum_mass_fraction = 0.0
+    maximum_mass_fraction = 0.1
+
+    # Set up the file paths
+    key_file = 'MDARK/fixed_key_{}.MDARK'.format(redshift)
+    output_file = 'Output/MDARK/Test{}/ID_file_{}.csv'.format(test_number, test_number)
+
+    # Space the clusters out evenly in mass
+    mass_range = np.linspace(minimum_mass, maximum_mass, Ncluster + 1)
+
+    # Initialize an empty list to store the results
+    results = [None] * Ncluster  # Placeholder for clusters, one for each mass range
+
+    # Iterate over each mass range and try to find a cluster in each chunk
+    for i in range(Ncluster):
+        mass_min = mass_range[i]
+        mass_max = mass_range[i + 1]
+
+        # Process the key file in chunks
+        chunk_iter = pd.read_csv(key_file, chunksize=100000)
+
+        for chunk in chunk_iter:
+            # Clean the column names to remove any leading/trailing spaces
+            chunk.columns = chunk.columns.str.strip()
+
+            # Filter the chunk based on the criteria
+            filtered_cluster = chunk[(chunk['Total Mass'] > mass_min) & 
+                                     (chunk['Total Mass'] < mass_max) & 
+                                     (chunk['Halo Number'] >= minimum_halo_number) &
+                                     (chunk['Halo Number'] <= maximum_halo_number) &
+                                     (chunk['Mass Fraction'] >= minimum_mass_fraction) &
+                                     (chunk['Mass Fraction'] <= maximum_mass_fraction)]
+
+            if not filtered_cluster.empty:
+                # Randomly sample one cluster from the filtered chunk
+                cluster = filtered_cluster.sample(1)
+
+                # Extract relevant values
+                ID = cluster['MainHaloID'].values[0]
+                mass = cluster['Total Mass'].values[0]
+                halo_number = cluster['Halo Number'].values[0]
+                mass_fraction = cluster['Mass Fraction'].values[0]
+
+                # Store the result and stop searching for this mass range
+                results[i] = [ID, mass, halo_number, mass_fraction]
+                break  # Move on to the next mass range since we found a cluster
+
+        if results[i] is None:
+            print(f"No clusters found for mass range {mass_min} to {mass_max}")
+        else:
+            print(f"Cluster found for mass range {mass_min} to {mass_max}")
+
+    # Write results to the file
+    with open(output_file, 'w') as f:
+        f.write('ID, Mass, Halo Number, Mass Fraction\n')
+        for result in results:
+            if result is not None:
+                f.write(f'{result[0]}, {result[1]}, {result[2]}, {result[3]}\n')
+
+
+
+
 # --------------------------------------------
 # Test Functions
 # --------------------------------------------
@@ -395,8 +464,9 @@ def process_md_set(test_number):
 
 
 if __name__ == '__main__':
-    # process_md_set(15)
-    # raise SystemExit
+    build_ID_file(16, 30, 0.194)
+    # process_md_set(16)
+    raise SystemExit
     # Pick out a halo, run the pipeline, look at the results
 
     ID_file = 'Output/MDARK/Test15/ID_file_15.csv'
