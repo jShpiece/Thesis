@@ -44,7 +44,7 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     # Get the mass and true mass
     # True mass is stored in the ID file
     ID_results = pd.read_csv(ID_file)
-    true_mass = ID_results[' Mass'].values
+    true_mass = ID_results['Mass'].values
     mass = results['Mass_all_signals'].values
     mass_gamma_f = results['Mass_gamma_F'].values
     mass_f_g = results['Mass_F_G'].values
@@ -376,7 +376,7 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
         min_fraction = 0.0
         max_fraction = 0.1
         min_halo_number = 1
-        max_halo_number = 100
+        max_halo_number = 500
         halos = find_halos(ID_set, redshift)
         for ID in ID_set:
             halo = halos[ID]
@@ -386,26 +386,24 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
                 print('Found a cluster that meets the criteria: {}'.format(ID))
                 keep_IDs.append(ID)
                 break
-        # If we reach the end of the loop without finding a cluster, note that we couldn't find one and move on to the next slice
-        print('Could not find a cluster that meets the criteria in this slice: {}'.format(i)) 
     
     # Now, we have a list of IDs that meet our criteria. Lets get the additional information from the key file, then save it to a file
     key_file = 'MDARK/fixed_key_{}.MDARK'.format(redshift)
-    output_file = 'Output/MDARK/Test{}/ID_file_{}.csv'.format(test_number, test_number)
-    # Read in the key file (in chunks, find the appropriate ID, and save that row to a file)
-    chunk_iter = pd.read_csv(key_file, chunksize=100000)
-    for chunk in chunk_iter:
-        # Clean the column names to remove any leading/trailing spaces
-        chunk.columns = chunk.columns.str.strip()
+    output_file = f'Output/MDARK/Test{test_number}/ID_file_{test_number}.csv'
+    
+    # Open the output file in append mode
+    with open(output_file, 'w') as outfile:
+        # Iterate over the key file in chunks
+        chunk_iter = pd.read_csv(key_file, chunksize=100000)
+        for chunk in chunk_iter:
+            # Clean the column names to remove any leading/trailing spaces
+            chunk.columns = chunk.columns.str.strip()
 
-        # Filter the chunk based on the criteria
-        filtered_cluster = chunk[chunk['MainHaloID'].isin(keep_IDs)]
-        if not filtered_cluster.empty:
-            # Save the filtered cluster to a file
-            filtered_cluster.to_csv(output_file, index=False)
-            break
-
-
+            # Filter the chunk based on the keep_IDs list
+            filtered_cluster = chunk[chunk['MainHaloID'].isin(keep_IDs)]
+            if not filtered_cluster.empty:
+                # Append to the output file
+                filtered_cluster.to_csv(outfile, index=False, header=outfile.tell() == 0)
 
 
 # --------------------------------------------
@@ -505,10 +503,9 @@ def process_md_set(test_number):
 
 if __name__ == '__main__':
     # build_ID_list(16, 30, 0.194)
-    build_ID_file(30, 'Output/MDARK/Test16/ID_file_16.csv', 16, 0.194)
+    # build_ID_file(30, 'Output/MDARK/Test16/ID_options.csv', 16, 0.194)
 
     # process_md_set(16)
-    raise SystemExit
     # Pick out a halo, run the pipeline, look at the results
 
     ID_file = 'Output/MDARK/Test15/ID_file_15.csv'
@@ -530,10 +527,9 @@ if __name__ == '__main__':
         ax.set_ylabel('Frequency')
         ax.set_title('Cluster ID: {}'.format(ID))
         plt.savefig('Output/MDARK/pipeline_visualization/mass_histogram_{}.png'.format(counter))
-        counter += 1
         plt.close()
         
-        '''
+        
         halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
         candidate_lenses, _ = main.fit_lensing_field(sources, xmax, True, [True, True, False], lens_type='NFW')
         # Determine size of lenses in the plot based on their mass
@@ -554,4 +550,3 @@ if __name__ == '__main__':
         plt.savefig('Output/MDARK/pipeline_visualization/cluster_{}.png'.format(counter))
         plt.close()
         counter += 1
-        '''
