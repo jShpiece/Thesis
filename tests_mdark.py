@@ -296,10 +296,12 @@ def build_lensing_field(halos, z, Nsource = None):
     # Generate a set of background galaxies
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    rs = np.sqrt(np.random.random(Nsource)) * xmax
-    theta = np.random.random(Nsource) * 2 * np.pi
-    xs = rs * np.cos(theta)
-    ys = rs * np.sin(theta)
+    # rs = np.sqrt(np.random.random(Nsource)) * xmax
+    # theta = np.random.random(Nsource) * 2 * np.pi
+    # xs = rs * np.cos(theta)
+    # ys = rs * np.sin(theta)
+    xs = np.random.uniform(-xmax, xmax, Nsource)
+    ys = np.random.uniform(-xmax, xmax, Nsource)
     sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
     sources.apply_lensing(halos, lens_type='NFW', z_source=z_source)
     sources.apply_noise()
@@ -376,7 +378,7 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
         min_fraction = 0.0
         max_fraction = 0.1
         min_halo_number = 1
-        max_halo_number = 500
+        max_halo_number = 1000
         halos = find_halos(ID_set, redshift)
         for ID in ID_set:
             halo = halos[ID]
@@ -504,23 +506,43 @@ def process_md_set(test_number):
 if __name__ == '__main__':
     # build_ID_list(16, 30, 0.194)
     # build_ID_file(30, 'Output/MDARK/Test16/ID_options.csv', 16, 0.194)
-
     # process_md_set(16)
     # Pick out a halo, run the pipeline, look at the results
 
-    ID_file = 'Output/MDARK/Test15/ID_file_15.csv'
+    ID_file = 'Output/MDARK/Test16/ID_file_16.csv'
     IDs = []
+    masses = []
     with open(ID_file, 'r') as f:
         lines = f.readlines()[1:]
         for line in lines:
             ID = line.split(',')[0]
+            mass = line.split(',')[1]
             IDs.append(int(ID))
-    
+            masses.append(float(mass))
+    # sort the IDs by mass
     IDs = np.array(IDs)
+    masses = np.array(masses)
+    sort_indices = np.argsort(masses)
+    IDs = IDs[sort_indices]
+    masses = masses[sort_indices]
+    IDs = [IDs[0]] # Pick out the first cluster to study
+    
     z = 0.194
     counter = 0
     for ID in IDs:
         halos = find_halos([ID], z)
+        halos_copy = halos[ID].copy()
+        halos_copy.calculate_concentration()
+
+        # Compare the concentration of the MDARK halo to our linear fit
+        plt.figure()
+        plt.scatter(halos_copy.concentration, halos[ID].concentration, color='black')
+        plt.xlabel('Concentration (Linear Fit)')
+        plt.ylabel('Concentration (MDARK)')
+        plt.title('Cluster ID: {}'.format(ID))
+        plt.savefig('Output/MDARK/pipeline_visualization/concentration_comparison_{}.png'.format(counter))
+        plt.close()
+
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         fancyhist(np.log10(halos[ID].mass), bins='freedman', ax=ax, color='blue')
         ax.set_xlabel('log10(Mass)')
@@ -535,6 +557,7 @@ if __name__ == '__main__':
         # Determine size of lenses in the plot based on their mass
         true_sizes = (np.log10(halos[ID].mass) - 12) * 10
         recon_sizes = (np.log10(candidate_lenses.mass) - 12) * 10
+
         plt.figure()
         plt.scatter(sources.x, sources.y, s=10, color='black', alpha=0.5, label='Sources')
         plt.scatter(halos[ID].x, halos[ID].y, s=true_sizes, color='red', label='Lenses', marker='x')
@@ -549,4 +572,5 @@ if __name__ == '__main__':
         plt.gca().set_aspect('equal', adjustable='box')
         plt.savefig('Output/MDARK/pipeline_visualization/cluster_{}.png'.format(counter))
         plt.close()
+
         counter += 1

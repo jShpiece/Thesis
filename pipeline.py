@@ -535,9 +535,9 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
             '''
             result = opt.minimize(
                 chi2wrapper, guess, args=params,
-                method='BFGS',
-                tol=1e-8,
-                options={'maxiter': 100000}
+                method='L-BFGS-B',
+                bounds=[(9, 16)],
+                options={'maxiter': 1000, 'ftol': 1e-6}
             )
             # lenses.mass[i] = 10 ** result[0]
             lenses.mass[i] = 10 ** result.x
