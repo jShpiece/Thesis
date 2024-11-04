@@ -274,17 +274,10 @@ def build_lensing_field(halos, z, Nsource = None):
     halos.x -= centroid[0] 
     halos.y -= centroid[1] 
 
-    # Let's preemptively remove any halo smaller than 10^13 M_solar, on the assumption that these are not massive enough to be observed
-    remove_halos = np.where(halos.mass < 10**13)[0]
-    if len(remove_halos) == len(halos.mass):
-        print('All halos are too small, removing all halos')
-        # If all halos are too small, lower the threshold to 10^12 M_solar
-        remove_halos = np.where(halos.mass < 10**12)[0]
-    halos.remove(remove_halos)
-    # Check if there are any halos left
-    if len(halos.mass) == 0:
-        print('No halos left, returning')
-        return halos, None, None
+    # Reassign concentration values, instead of using MDARK values
+    # halos.calculate_concentration()
+    # Remove any halos with concentrations greater than 10
+    halos.remove(halos.concentration > 10)
 
     xmax = np.max((halos.x**2 + halos.y**2)**0.5)
 
@@ -296,12 +289,10 @@ def build_lensing_field(halos, z, Nsource = None):
     # Generate a set of background galaxies
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    # rs = np.sqrt(np.random.random(Nsource)) * xmax
-    # theta = np.random.random(Nsource) * 2 * np.pi
-    # xs = rs * np.cos(theta)
-    # ys = rs * np.sin(theta)
-    xs = np.random.uniform(-xmax, xmax, Nsource)
-    ys = np.random.uniform(-xmax, xmax, Nsource)
+    rs = np.sqrt(np.random.random(Nsource)) * xmax
+    theta = np.random.random(Nsource) * 2 * np.pi
+    xs = rs * np.cos(theta)
+    ys = rs * np.sin(theta)
     sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.ones(len(xs)) * 0.1, np.ones(len(xs)) * 0.01, np.ones(len(xs)) * 0.02)
     sources.apply_lensing(halos, lens_type='NFW', z_source=z_source)
     sources.apply_noise()
@@ -406,6 +397,15 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
             if not filtered_cluster.empty:
                 # Append to the output file
                 filtered_cluster.to_csv(outfile, index=False, header=outfile.tell() == 0)
+    
+    # Repair the output file - remove empty lines and change the header 
+    with open(output_file, 'r') as f:
+        lines = f.readlines()
+    with open(output_file, 'w') as f:
+        f.write('MainHaloID,Mass,Redshift,Halo Number,Mass Fraction,Characteristic Size\n')
+        for line in lines:
+            if line != '\n':
+                f.write(line)
 
 
 # --------------------------------------------
@@ -506,7 +506,7 @@ def process_md_set(test_number):
 if __name__ == '__main__':
     # build_ID_list(16, 30, 0.194)
     # build_ID_file(30, 'Output/MDARK/Test16/ID_options.csv', 16, 0.194)
-    # process_md_set(16)
+    process_md_set(16)
     # Pick out a halo, run the pipeline, look at the results
 
     ID_file = 'Output/MDARK/Test16/ID_file_16.csv'
@@ -525,7 +525,7 @@ if __name__ == '__main__':
     sort_indices = np.argsort(masses)
     IDs = IDs[sort_indices]
     masses = masses[sort_indices]
-    IDs = [IDs[0]] # Pick out the first cluster to study
+    # IDs = [IDs[0]] # Pick out the first cluster to study
     
     z = 0.194
     counter = 0
@@ -533,6 +533,7 @@ if __name__ == '__main__':
         halos = find_halos([ID], z)
         halos_copy = halos[ID].copy()
         halos_copy.calculate_concentration()
+        print(halos_copy.mass)
 
         # Compare the concentration of the MDARK halo to our linear fit
         plt.figure()
@@ -543,6 +544,7 @@ if __name__ == '__main__':
         plt.savefig('Output/MDARK/pipeline_visualization/concentration_comparison_{}.png'.format(counter))
         plt.close()
 
+        '''
         fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         fancyhist(np.log10(halos[ID].mass), bins='freedman', ax=ax, color='blue')
         ax.set_xlabel('log10(Mass)')
@@ -550,8 +552,8 @@ if __name__ == '__main__':
         ax.set_title('Cluster ID: {}'.format(ID))
         plt.savefig('Output/MDARK/pipeline_visualization/mass_histogram_{}.png'.format(counter))
         plt.close()
-        
-        
+        '''
+
         halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
         candidate_lenses, _ = main.fit_lensing_field(sources, xmax, True, [True, True, False], lens_type='NFW')
         # Determine size of lenses in the plot based on their mass

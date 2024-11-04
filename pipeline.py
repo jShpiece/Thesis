@@ -520,6 +520,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
 
     elif lens_type == 'NFW':
         # Optimize mass for each lens individually - this is verified to be the better approach as of 9/26/2024
+        
         for i in range(len(lenses.x)):
             guess = [np.log10(lenses.mass[i])]
             params = [
@@ -527,21 +528,23 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
                 lenses.x[i], lenses.y[i], lenses.redshift,
                 lenses.concentration[i], sources, use_flags
             ]
-            '''
-            result, _ = minimizer.gradient_descent(
-                chi2wrapper, guess, learning_rates=learning_rates,
-                num_iterations=num_iterations, params=params
-            )
-            '''
+
             result = opt.minimize(
                 chi2wrapper, guess, args=params,
                 method='L-BFGS-B',
                 bounds=[(9, 16)],
                 options={'maxiter': 1000, 'ftol': 1e-6}
             )
-            # lenses.mass[i] = 10 ** result[0]
             lenses.mass[i] = 10 ** result.x
             lenses.calculate_concentration()
+        '''
+        for i in range(len(lenses.x)):
+            guess = [np.log10(lenses.mass[i]), lenses.concentration[i]]
+            params = ['NFW', 'dual', lenses.x[i], lenses.y[i], lenses.redshift, sources, use_flags]
+            result, _ = minimizer.gradient_descent(chi2wrapper, guess, learning_rates, num_iterations, params)
+            lenses.mass[i] = 10 ** result[0]
+            lenses.concentration[i] = result[1]
+        '''
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
@@ -630,6 +633,7 @@ def chi2wrapper(guess, params):
             )
             lenses.calculate_concentration()
             return metric.calculate_chi_squared(params[0], lenses, params[1], lens_type='NFW', use_weights=False)
+
         elif constraint_type == 'constrained':
             lenses = halo_obj.NFW_Lens(
                 params[0], params[1], np.zeros_like(params[0]),
@@ -637,5 +641,16 @@ def chi2wrapper(guess, params):
             )
             lenses.calculate_concentration()
             return metric.calculate_chi_squared(params[4], lenses, params[5], lens_type='NFW', use_weights=False)
-        else:
-            raise ValueError(f"Invalid lensing model: {model_type}")
+        
+        elif constraint_type == 'dual':
+            # Fit both mass and concentration
+            lenses = halo_obj.NFW_Lens(
+                params[0], params[1], np.zeros_like(params[0]),
+                guess[1], 10 ** guess[0], params[2], np.empty_like(params[0])
+            )
+            return metric.calculate_chi_squared(params[3], lenses, params[4], lens_type='NFW', use_weights=False)
+
+
+    else:
+        raise ValueError(f"Invalid lensing model: {model_type}")
+        
