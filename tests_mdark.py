@@ -132,15 +132,27 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     IDs = ID_results['MainHaloID'].values
     signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
     halos = find_halos(IDs, 0.194)
+    # Need to send halos through 'build lensing field' function in order to get the halo coordinates in arcseconds and centered at (0, 0)
+    for ID in IDs:
+        halos[ID], _, _ = build_lensing_field(halos[ID], 0.194)
+    
     true_primary_coords = []
     true_secondary_coords = []
     true_primary_masses = []
     true_secondary_masses = []
-    for halo in halos:
-        true_primary_coords.append([halos[halo].x[np.argmax(halos[halo].mass)], halos[halo].y[np.argmax(halos[halo].mass)]])
-        true_secondary_coords.append([halos[halo].x[np.argsort(halos[halo].mass)[-2]], halos[halo].y[np.argsort(halos[halo].mass)[-2]]])
-        true_primary_masses.append(halos[halo].mass[np.argmax(halos[halo].mass)])
-        true_secondary_masses.append(halos[halo].mass[np.argsort(halos[halo].mass)[-2]])
+    for ID in IDs:
+        halo = halos[ID]
+        primary_loc = np.argmax(halo.mass)
+        true_primary_coords.append([halo.x[primary_loc], halo.y[primary_loc]])
+        true_primary_masses.append(halo.mass[primary_loc])
+        if len(halo.mass) >= 2:
+            sorted_indices = np.argsort(halo.mass)
+            secondary_loc = sorted_indices[-2]
+            true_secondary_coords.append([halo.x[secondary_loc], halo.y[secondary_loc]])
+            true_secondary_masses.append(halo.mass[secondary_loc])
+        else:
+            true_secondary_coords.append([np.nan, np.nan])
+            true_secondary_masses.append(np.nan)
     
     
     # Now plot the results for the primary and secondary halos - do this as a histogram, plotting the distance from the true location, and the distance from the true mass
@@ -149,24 +161,25 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     for i in range(4):
         primary_coords_temp = primary_coords[:, i]
         secondary_coords_temp = secondary_coords[:, i]
-        primary_masses_temp = primary_masses[:, i]
-        secondary_masses_temp = secondary_masses[:, i]
+
         true_primary_coords_temp = np.array(true_primary_coords)
         true_secondary_coords_temp = np.array(true_secondary_coords)
-        true_primary_masses_temp = np.array(true_primary_masses)
-        true_secondary_masses_temp = np.array(true_secondary_masses)
 
         # Calculate the distance from the true location
         primary_distance = np.zeros(len(primary_coords_temp))
+        secondary_distance = np.zeros(len(primary_coords_temp))
         for n in range(len(primary_coords_temp)):
-            primary_distance[n] = np.sqrt((primary_coords_temp[n][0] - true_primary_coords_temp[n][0])**2 + (primary_coords_temp[n][1] - true_primary_coords_temp[n][1])**2)
-            # secondary_distance = np.sqrt((secondary_coords_temp[n][0] - true_secondary_coords_temp[n][0])**2 + (secondary_coords_temp[n][1] - true_secondary_coords_temp[n][1])**2)
-        # secondary_distance = np.sqrt((secondary_coords_temp[:, 0] - true_secondary_coords_temp[:, 0])**2 + (secondary_coords_temp[:, 1] - true_secondary_coords_temp[:, 1])**2)
+            primary_distance[n] = np.sqrt((primary_coords_temp[n][0])**2 + (primary_coords_temp[n][1])**2)
+            secondary_distance[n] = np.sqrt((secondary_coords_temp[n][0] - true_secondary_coords_temp[n][0])**2 + (secondary_coords_temp[n][1] - true_secondary_coords_temp[n][1])**2)
+        # Clean up any nan values
+        primary_distance = primary_distance[~np.isnan(primary_distance)]
+        secondary_distance = secondary_distance[~np.isnan(secondary_distance)]
+        print(secondary_distance)
         # Calculate the distance from the true mass
         # secondary_mass_distance = np.abs(secondary_masses_temp - true_secondary_masses_temp)
 
-        ax[i].hist(primary_distance, bins=20, color='blue', alpha=0.5, label='Primary Halo')
-        # ax[i].hist(secondary_distance, bins=20, color='red', alpha=0.5, label='Secondary Halo')
+        fancyhist(primary_distance, bins='freedman', ax=ax[i], color='blue', alpha=0.5, label='Primary Halo')
+        # fancyhist(secondary_distance, bins='freedman', ax=ax[i], color='red', alpha=0.5, label='Secondary Halo')
         ax[i].set_xlabel('Distance from True Location [arcseconds]')
         ax[i].set_ylabel('Frequency')
         ax[i].set_title('Signal Combination: {}'.format(signals[i]))
@@ -179,25 +192,26 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
     ax = ax.flatten()
     for i in range(4):
-        primary_coords_temp = primary_coords[:, i]
-        secondary_coords_temp = secondary_coords[:, i]
         primary_masses_temp = primary_masses[:, i]
         secondary_masses_temp = secondary_masses[:, i]
-        true_primary_coords_temp = np.array(true_primary_coords)
-        true_secondary_coords_temp = np.array(true_secondary_coords)
+
         true_primary_masses_temp = np.array(true_primary_masses)
         true_secondary_masses_temp = np.array(true_secondary_masses)
 
-        # Calculate the distance from the true location
-        primary_distance = np.sqrt((primary_coords_temp[:, 0] - true_primary_coords_temp[:, 0])**2 + (primary_coords_temp[:, 1] - true_primary_coords_temp[:, 1])**2)
-        secondary_distance = np.sqrt((secondary_coords_temp[:, 0] - true_secondary_coords_temp[:, 0])**2 + (secondary_coords_temp[:, 1] - true_secondary_coords_temp[:, 1])**2)
         # Calculate the distance from the true mass
-        primary_mass_distance = np.abs(primary_masses_temp - true_primary_masses_temp)
-        secondary_mass_distance = np.abs(secondary_masses_temp - true_secondary_masses_temp)
+        # Need to do this as a fraction of the true mass
+        primary_mass_distance = (primary_masses_temp - true_primary_masses_temp) / true_primary_masses_temp
+        secondary_mass_distance = (secondary_masses_temp - true_secondary_masses_temp) / true_secondary_masses_temp
+        # handle nan values
+        primary_mass_distance = primary_mass_distance[~np.isnan(primary_mass_distance)]
+        secondary_mass_distance = secondary_mass_distance[~np.isnan(secondary_mass_distance)]
 
-        ax[i].hist(primary_mass_distance, bins=20, color='blue', alpha=0.5, label='Primary Halo')
-        ax[i].hist(secondary_mass_distance, bins=20, color='red', alpha=0.5, label='Secondary Halo')
-        ax[i].set_xlabel('Distance from True Mass [$M_{\odot}$]')
+        fancyhist(primary_mass_distance, bins='freedman', ax=ax[i], color='blue', alpha=0.5, label='Primary Halo')
+        try: 
+            fancyhist(secondary_mass_distance, bins='freedman', ax=ax[i], color='red', alpha=0.5, label='Secondary Halo')
+        except:
+            print('RuntimeWarning: Skipping secondary mass distance plot')
+        ax[i].set_xlabel('Fractional Mass Difference')
         ax[i].set_ylabel('Frequency')
         ax[i].set_title('Signal Combination: {}'.format(signals[i]))
         ax[i].legend()
