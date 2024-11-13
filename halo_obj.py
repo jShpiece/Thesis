@@ -278,7 +278,7 @@ class NFW_Lens:
     def calculate_concentration(self):
         """
         Calculates the concentration parameter for each halo based on mass and redshift.
-
+        Uses result from Duffy et al. (2008) for the mass-concentration relation.
         Updates:
             self.concentration (np.ndarray): Updated concentration parameters.
         """

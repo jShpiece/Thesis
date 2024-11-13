@@ -72,28 +72,20 @@ def get_img_data(fits_file_path) -> np.ndarray:
     return img_data, header
 
 
-def get_file_paths(cluster='a2744', instrument='HST', field='cluster'):
+def get_file_paths(cluster='a2744', field='cluster'):
     if cluster == 'a2744':
-        if instrument == 'HST':
-            if field == 'cluster':
-                fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-                csv_file_path = 'Data/HST/a2744_clu_lenser.csv'
-                vmax = 1 # Set the maximum value for the image normalization
-                dx = 115
-                dy = 55
-            elif field == 'parallel':
-                fits_file_path = 'Data/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
-                csv_file_path = 'Data/HST/a2744_par_lenser.csv'
-                vmax = 0.1 # Set the maximum value for the image normalization
-                dx = 865
-                dy = 400
-        elif instrument == 'JWST':
-            if field == 'cluster':
-                fits_file_path = Path('Data/JWST/Cluster Field/Image Data/') / 'jw02756-o003_t001_nircam_clear-f115w_i2d.fits'
-                csv_file_path = Path('Data/JWST/Cluster Field/Catalogs/') / 'F115W_flexion.pkl'
-                vmax = 100
-                dx = 0
-                dy = 0
+        if field == 'cluster':
+            fits_file_path = 'JWST_Data/HST/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+            csv_file_path = 'JWST_Data/HST/a2744_clu_lenser.csv'
+            vmax = 1 # Set the maximum value for the image normalization
+            dx = 115
+            dy = 55
+        elif field == 'parallel':
+            fits_file_path = 'JWST_Data/HST/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
+            csv_file_path = 'JWST_Data/HST/a2744_par_lenser.csv'
+            vmax = 0.1 # Set the maximum value for the image normalization
+            dx = 865
+            dy = 400
     
     return fits_file_path, csv_file_path, vmax, dx, dy
 
@@ -195,7 +187,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
             # If we're randomizing, I don't need to save the data
             pass
         else:
-            dir = 'Data//'
+            dir = 'Output//'
             file_name = 'a2744' 
             file_name += '_par' if field == 'parallel' else '_clu' 
             if lens_type == 'SIS':
@@ -205,7 +197,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
             np.save(dir + file_name + '_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
     else:
         # If we're not doing a full reconstruction, we need to load in the data
-        dir = 'Data//'
+        dir = 'Output//'
         file_name = 'a2744' 
         file_name += '_par' if field == 'parallel' else '_clu' 
         lenses = halo_obj.SIS_Lens(*np.load(dir + file_name + '_lenses.npy')) if lens_type == 'SIS' else halo_obj.NFW_Lens(*np.load(dir + file_name + '_lenses.npy'))
@@ -224,7 +216,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         mass = np.sum(lenses.mass) # Calculate the mass of the NFW lenses
 
     # Create labels for the plot
-    dir = 'Images//abel//'
+    dir = 'Output//abel//'
     file_name = 'A2744_kappa_'
     file_name += 'par' if field == 'parallel' else 'clu'
     file_name += '_rand' if randomize else ''
@@ -239,8 +231,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     title = 'Abell 2744 Convergence Map - '
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
     title += ' - Randomized' if randomize else ''
-    if field == 'cluster':
-        title += '\n M = ' + f'{mass:.3e}' + r' $h^{-1} M_\odot$'
+    title += '\n M = ' + f'{mass:.3e}' + r' $h^{-1} M_\odot$'
     if use_flags != [True, True, True]:
         title += '\n Signals Used: '
         title += r'$\gamma$' if use_flags[0] else ''    
@@ -269,13 +260,13 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
 
 
 def plot_er_dist(merge_radius=1):
-    lenses = halo_obj.SIS_lens(*np.load('Data//a2744_clu_lenses.npy'))
+    lenses = halo_obj.SIS_lens(*np.load('Output//abel//a2744_clu_lenses.npy'))
     # Remove lenses with negative Einstein radii
     lenses = halo_obj.Lens(lenses.x[lenses.te > 0], lenses.y[lenses.te > 0], lenses.te[lenses.te > 0], lenses.chi2[lenses.te > 0])
     lenses.merge_close_lenses(merge_radius)
     # Create a plot of the lensing field 
     
-    fits_file_path = 'Data/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
+    fits_file_path = 'JWST_Data/HST/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
     img_data = get_img_data(fits_file_path)[0]
     img_data = [img_data[0], img_data[1]] # Stack the two epochs
     arcsec_per_pixel = 0.03 # From the intrumentation documentation
@@ -293,14 +284,14 @@ def plot_er_dist(merge_radius=1):
     ax.set_ylabel('y (arcsec)')
     ax.set_title('Abell 2744 - Recovered Lenses \n Merge Radius = {} arcsec'.format(merge_radius))
     ax.set_aspect('equal')
-    plt.savefig('Images//abel//mergers//field_{}.png'.format(merge_radius))
+    plt.savefig('Output//abel//mergers//field_{}.png'.format(merge_radius))
 
     fig, ax = plt.subplots()
     fancy_hist(lenses.te, bins='freedman', histtype='step', ax=ax)
     ax.set_xlabel(r'$\theta_E$ (arcsec)')
     ax.set_ylabel('Count')
     ax.set_title('Abell 2744 - Einstein Radii Distribution \n Merge Radius = {} arcsec'.format(merge_radius))
-    plt.savefig('Images//abel//mergers//hist_{}.png'.format(merge_radius))
+    plt.savefig('Output//abel//mergers//hist_{}.png'.format(merge_radius))
 
 
 if __name__ == '__main__':
