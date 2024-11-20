@@ -10,8 +10,12 @@ import halo_obj
 import utils
 from astropy.visualization import hist as fancy_hist
 from matplotlib.path import Path
+import matplotlib.patches as patches
+import pandas as pd
+from matplotlib import gridspec
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
+h = 0.7 # Hubble constant
 
 
 def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, legend=True):
@@ -62,6 +66,41 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
 
     if legend:
         ax.legend()
+
+
+def compare_mass_estimates(halos):
+    # Compare the mass estimates I get from the reconstruction to other data
+    # I have mass estimates from literature for the cluster - but at different radii
+    # so
+    r = np.linspace(0.1, 500, 1000) # Radius in kpc - spans from 0 to 1 Mpc
+    # Now, we create a dictionary of mass estimates, which has a key (the source of the estimate) and two values (the mass and the radius)
+    mass_estimates = {
+        'MARS': (1.73e14, 200), 
+        'Bird': (1.93e14, 200), 
+        'GRALE': (2.25e14, 250),
+        'Merten et al.': (2.24e14, 250)
+        }
+    # Now get the mass estimates I have from the reconstruction
+    # For now, just do the primary
+    # ie, remove all the other halos
+    halos_len = len(halos.x)
+    halos.remove(np.arange(1, halos_len))
+    # Now, calculate the mass within the radius
+    mass = utils.nfw_projected_mass(halos, r)
+    # Now, plot the mass estimates
+    fig, ax = plt.subplots()
+    fig.suptitle('Mass Estimates for Abell 2744')
+    ax.plot(r, mass, label='Reconstruction')
+    # Vary the marker style for each estimate
+    markers = ['o', 's', 'D', '^']
+    for i, (key, value) in enumerate(mass_estimates.items()):
+        ax.scatter(value[1], value[0], label=key, marker=markers[i])
+    ax.set_xlabel('Radius (kpc)')
+    ax.set_ylabel('Mass ($M_\\odot)$')
+    ax.set_yscale('log')
+    ax.legend()
+    plt.savefig('Output/abel/mass_estimates.png')
+    plt.show()
 
 
 def get_img_data(fits_file_path) -> np.ndarray:
@@ -166,10 +205,9 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     # Define some constants
     z_cluster = 0.308 # Redshift of the cluster
     z_source = 0.52 # Mean redshift of the sources
-    arcsec_per_pixel = 0.03 # From the intrumentation documentation
+    arcsec_per_pixel = 0.03 # From the instrumentation documentation
 
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
-
 
     fits_file_path, csv_file_path, vmax, dx, dy = get_file_paths(field=field)
 
@@ -181,6 +219,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
 
     if full_reconstruction:
         lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, randomize=randomize, use_flags=use_flags, lens_type=lens_type)
+        lenses.mass /= h # Convert the mass to h^-1 solar masses
 
         # Save the class objects so that we can replot without having to rerun the code
         if randomize:
@@ -216,34 +255,94 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         mass = np.sum(lenses.mass) # Calculate the mass of the NFW lenses
 
     # Create labels for the plot
-    dir = 'Output//abel//'
+    dir = 'Output/abel/'
+
+    # Build the file name
     file_name = 'A2744_kappa_'
     file_name += 'par' if field == 'parallel' else 'clu'
-    file_name += '_rand' if randomize else ''
+
+    if randomize:
+        file_name += '_rand'
+
     file_name += '_SIS' if lens_type == 'SIS' else '_NFW'
+
     if use_flags == [True, True, True]:
         file_name += '_all'
     else:
-        file_name += '_gamma' if use_flags[0] else ''
-        file_name += '_F' if use_flags[1] else ''
-        file_name += '_G' if use_flags[2] else ''
+        signals = []
+        if use_flags[0]:
+            signals.append('_gamma')
+        if use_flags[1]:
+            signals.append('_F')
+        if use_flags[2]:
+            signals.append('_G')
+        file_name += ''.join(signals)
 
+    # Build the title
     title = 'Abell 2744 Convergence Map - '
     title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
-    title += ' - Randomized' if randomize else ''
-    title += '\n M = ' + f'{mass:.3e}' + r' $h^{-1} M_\odot$'
+
+    if randomize:
+        title += ' - Randomized'
+
+    title += f'\n M = {mass:.3e} $h^{{-1}} M_\\odot$'
+
     if use_flags != [True, True, True]:
         title += '\n Signals Used: '
-        title += r'$\gamma$' if use_flags[0] else ''    
-        title += ' F' if use_flags[1] else ''
-        title += ' G' if use_flags[2] else ''
+        signals = []
+        if use_flags[0]:
+            signals.append(r'$\gamma$')
+        if use_flags[1]:
+            signals.append('F')
+        if use_flags[2]:
+            signals.append('G')
+        title += ' '.join(signals)
     else:
         title += '\n All Signals Used'
+    
+    # Create the figure and gridspec
+    fig = plt.figure(figsize=(8, 10))
+    gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
 
-    # Plot the convergence map
-    fig, ax = plt.subplots()
+    # Create the main plot axis
+    ax = fig.add_subplot(gs[0])
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
     ax.set_title(title)
+
+    # Plot the halos
+    halos_x = lenses.x
+    halos_y = lenses.y
+    if lens_type == 'SIS':
+        halos_mass = lenses.te  # Or convert to mass if necessary
+    else:
+        halos_mass = lenses.mass
+
+    labels = [f'Halo {i+1}' for i in range(len(halos_x))]
+
+    '''
+    for i, (x, y, label) in enumerate(zip(halos_x, halos_y, labels)):
+        ax.scatter(x, y, s=50, marker='x', color='red')
+        ax.text(x, y, label, color='white', fontsize=8)
+
+    # Create the table axis
+    ax_table = fig.add_subplot(gs[1])
+    ax_table.axis('off')
+
+    # Create table data
+    data = {
+        'Label': labels, 
+        'Mass': [f'{m:.2e}' for m in halos_mass]
+        }
+    df = pd.DataFrame(data)
+
+    # Add the table
+    table = ax_table.table(cellText=df.values, colLabels=df.columns, loc='center')
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.5)  # Adjust as needed
+    '''
+
+    # Save the figure
     if randomize:
         # If there's already a randomized plot, I don't want to overwrite it
         # Can we add a number to the end of the file name?
@@ -258,40 +357,9 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     plt.savefig(dir + file_name + '.png')
     plt.close()
 
-
-def plot_er_dist(merge_radius=1):
-    lenses = halo_obj.SIS_lens(*np.load('Output//abel//a2744_clu_lenses.npy'))
-    # Remove lenses with negative Einstein radii
-    lenses = halo_obj.Lens(lenses.x[lenses.te > 0], lenses.y[lenses.te > 0], lenses.te[lenses.te > 0], lenses.chi2[lenses.te > 0])
-    lenses.merge_close_lenses(merge_radius)
-    # Create a plot of the lensing field 
-    
-    fits_file_path = 'JWST_Data/HST/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-    img_data = get_img_data(fits_file_path)[0]
-    img_data = [img_data[0], img_data[1]] # Stack the two epochs
-    arcsec_per_pixel = 0.03 # From the intrumentation documentation
-    extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
-
-    fig, ax = plt.subplots()
-    for img in img_data:
-        # Allow for multiple images to be overlayed - allows for band or epoch stacking
-        norm = ImageNormalize(img, vmin=0, vmax=1, stretch=LogStretch())
-        ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=norm)
-    cmap = ax.scatter(lenses.x, lenses.y, c = lenses.te, cmap='plasma', s = lenses.te * 100, alpha=0.5)
-    color_bar = plt.colorbar(cmap, ax=ax)
-    color_bar.set_label(r'$\theta_E$', rotation=270, labelpad=10)
-    ax.set_xlabel('x (arcsec)')
-    ax.set_ylabel('y (arcsec)')
-    ax.set_title('Abell 2744 - Recovered Lenses \n Merge Radius = {} arcsec'.format(merge_radius))
-    ax.set_aspect('equal')
-    plt.savefig('Output//abel//mergers//field_{}.png'.format(merge_radius))
-
-    fig, ax = plt.subplots()
-    fancy_hist(lenses.te, bins='freedman', histtype='step', ax=ax)
-    ax.set_xlabel(r'$\theta_E$ (arcsec)')
-    ax.set_ylabel('Count')
-    ax.set_title('Abell 2744 - Einstein Radii Distribution \n Merge Radius = {} arcsec'.format(merge_radius))
-    plt.savefig('Output//abel//mergers//hist_{}.png'.format(merge_radius))
+    # Now compare the mass estimates - for now, only do this for all signals
+    if use_flags == [True, True, True]:
+        compare_mass_estimates(lenses)
 
 
 if __name__ == '__main__':
@@ -301,6 +369,6 @@ if __name__ == '__main__':
     global_signals = [True, False, True] # Use shear and g-flexion (global signals)
     signal_choices = [use_all_signals, shear_flex, all_flex, global_signals]
         
-    for field in ['cluster', 'parallel']:
+    for field in ['cluster']:
         for use_flags in signal_choices:
             reconstruct_a2744(field=field, randomize=False, full_reconstruction=True, use_flags=use_flags, lens_type='NFW')

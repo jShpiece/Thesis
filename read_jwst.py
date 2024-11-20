@@ -44,8 +44,13 @@ class JWSTPipeline:
         self.IDs = None
         self.q = None
         self.phi = None
+        self.psi11 = None
+        self.psi12 = None
+        self.psi22 = None
         self.F1_fit = None
         self.F2_fit = None
+        self.G1_fit = None
+        self.G2_fit = None
         self.a = None
         self.chi2 = None
         self.xc = None
@@ -75,6 +80,7 @@ class JWSTPipeline:
         self.x_centroids = np.array(table['xcentroid'])
         self.y_centroids = np.array(table['ycentroid'])
         self.labels = np.array(table['label'])
+        print(f"Read {len(self.labels)} sources from catalog.")
 
     def read_flexion_catalog(self):
         """
@@ -87,10 +93,14 @@ class JWSTPipeline:
         self.phi = np.deg2rad(self.phi)  # Convert phi to radians if necessary
         self.F1_fit = df['F1_fit'].to_numpy() / self.CDELT  # Convert flexion to arcsec^-1
         self.F2_fit = df['F2_fit'].to_numpy() / self.CDELT  
+        self.G1_fit = df['G1_fit'].to_numpy() / self.CDELT  # Convert flexion to arcsec^-1  
+        self.G2_fit = df['G2_fit'].to_numpy() / self.CDELT
         self.a = df['a'].to_numpy() * self.CDELT # Convert scale to arcsec
         self.chi2 = df['rchi2'].to_numpy()
+        print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
         # Check for NaN values
+        
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
         if np.any(nan_indices):
             warnings.warn(f"Found NaN values in flexion catalog. Removing {np.sum(nan_indices)} entries.")
@@ -99,9 +109,11 @@ class JWSTPipeline:
             self.phi = self.phi[~nan_indices]
             self.F1_fit = self.F1_fit[~nan_indices]
             self.F2_fit = self.F2_fit[~nan_indices]
+            self.G1_fit = self.G1_fit[~nan_indices]
+            self.G2_fit = self.G2_fit[~nan_indices]
             self.a = self.a[~nan_indices]
             self.chi2 = self.chi2[~nan_indices]
-
+        
     def initialize_sources(self):
         """
         Prepares the Source object with calculated lensing signals and uncertainties.
@@ -126,6 +138,8 @@ class JWSTPipeline:
         sigaf = np.mean([np.std(self.a * self.F1_fit), np.std(self.a * self.F2_fit)])
         epsilon = 1e-8 # Small value to avoid division by zero
         sigf = sigaf / (self.a + epsilon)
+        sigag = np.mean([np.std(self.a * self.G1_fit), np.std(self.a * self.G2_fit)])
+        sigg = sigag / (self.a + epsilon)
 
         # Create Source object
         self.sources = source_obj.Source(
@@ -135,14 +149,14 @@ class JWSTPipeline:
             e2=e2,
             f1=self.F1_fit,
             f2=self.F2_fit,
-            g1=self.F1_fit,  
-            g2=self.F2_fit,  
+            g1=self.G1_fit,  
+            g2=self.G2_fit,  
             sigs=sigs,
             sigf=sigf,
-            sigg=sigf  # Adjust if necessary
+            sigg=sigg  # Adjust if necessary
         )
 
-        self.sources.filter_sources()
+        # self.sources.filter_sources()
 
     def match_sources(self):
         """
@@ -170,6 +184,7 @@ class JWSTPipeline:
 
         # Remove entries with no matching source
         valid = ~np.isnan(self.xc) & ~np.isnan(self.yc)
+        print(f"Removing {np.sum(~valid)} entries with no matching source.")
         self.IDs = self.IDs[valid]
         self.q = self.q[valid]
         self.phi = self.phi[valid]
@@ -179,14 +194,17 @@ class JWSTPipeline:
         self.chi2 = self.chi2[valid]
         self.xc = self.xc[valid]
         self.yc = self.yc[valid]
+        print(f"Remaining sources: {len(self.IDs)}.")
 
     def run_lens_fitting(self):
         """
         Runs the lens fitting pipeline.
         """
         xmax = np.max(np.hypot(self.sources.x, self.sources.y))
+        print(f"Running lens fitting with {len(self.sources.x)} sources.")
+        print(f"Maximum source distance: {xmax:.2f} arcsec.")
         self.lenses, _ = main.fit_lensing_field(
-            self.sources, xmax, flags=True, use_flags=[True, True, False], lens_type='NFW'
+            self.sources, xmax, flags=True, use_flags=[True, True, True], lens_type='NFW'
         )
         # Adjust lens positions back to original coordinates
         self.lenses.x += self.centroid_x
@@ -239,11 +257,13 @@ class JWSTPipeline:
         contours = ax.contour(
             X, Y, kappa, levels=contour_levels, cmap='plasma', linewidths=1.5
         )
+        # And the convergence map itself
+        cmap = ax.imshow(kappa, cmap='plasma', origin='lower', extent=img_extent, alpha=0.5)
 
-        # Add colorbar for convergence
-        cbar = plt.colorbar(contours, ax=ax)
-        cbar.set_label(r'Convergence $\kappa$', rotation=270, labelpad=15)
-        
+        # Add colorbar for convergence 
+        cbar = plt.colorbar(cmap, ax=ax)
+        cbar.set_label('Convergence')
+
         # Plot lens positions
         ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
 
@@ -253,7 +273,7 @@ class JWSTPipeline:
         # Labels and title
         ax.set_xlabel('RA Offset (arcsec)')
         ax.set_ylabel('Dec Offset (arcsec)')
-        ax.set_title('Convergence Map Overlaid on JWST Image')
+        ax.set_title('Convergence Map Overlaid on JWST Image \n Mass = {}'.format(np.sum(self.lenses.mass)))
 
         # Save and display
         plt.legend()
@@ -273,7 +293,7 @@ class JWSTPipeline:
 if __name__ == '__main__':
     # Configuration dictionary
     config = {
-        'flexion_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/F115W_flexion.pkl',
+        'flexion_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/multiband_flexion.pkl',
         'source_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/stacked_cat.ecsv',
         'image_path': 'JWST_Data/JWST/Cluster_Field/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
         'output_dir': 'Output/JWST',

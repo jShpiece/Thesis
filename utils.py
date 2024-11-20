@@ -29,6 +29,7 @@ from astropy.constants import c, G
 from astropy import units as u
 import scipy.ndimage
 from itertools import combinations
+from scipy.integrate import quad
 
 
 # ------------------------
@@ -98,6 +99,70 @@ def critical_surface_density(z1, z2):
     dl, ds, dls = angular_diameter_distances(z1, z2)
     sigma_crit = (c.value**2 / (4 * np.pi * G.value)) * (ds / (dl * dls))
     return sigma_crit
+
+
+
+def nfw_projected_mass(halos, r_p):
+    """
+    Compute the projected mass within a projected radius r_p for an NFW halo.
+
+    Parameters:
+    - halos: NFW_Lens object containing halo properties.
+    - r_p: float
+        Projected radius within which to compute the mass (in kpc)
+
+    Returns:
+    - M_proj: float
+        Projected mass within radius r_p (in solar masses)
+    """
+
+    # Constants
+    G = 4.302e-6  # Gravitational constant in kpc (km/s)^2 M_sun^-1
+
+    # Halo properties
+    M200 = halos.mass
+    R200 = halos.calc_R200()[0] # in m
+    R200 = R200 * 3.24078e-20 # in kpc
+    print(R200)
+    c = halos.concentration
+
+    # Scale radius
+    r_s = R200 / c  # in kpc
+
+    # Dimensionless mass within R200
+    def m(x):
+        return np.log(1 + x) - x / (1 + x)
+
+    m_c = m(c)
+
+    # Scale density
+    rho_s = M200 / (4 * np.pi * r_s**3 * m_c)  # in M_sun kpc^-3
+
+    # Projected surface density Sigma(R)
+    def Sigma(R):
+        x = R / r_s
+        if x < 1:
+            factor = 1 / (x**2 - 1)
+            term1 = 1
+            term2 = 2 / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
+            sigma = 2 * rho_s * r_s * factor * (term1 - term2)
+        elif x == 1:
+            sigma = (2 / 3) * rho_s * r_s
+        else:
+            factor = 1 / (x**2 - 1)
+            term1 = 1
+            term2 = 2 / np.sqrt(x**2 - 1) * np.arctan(np.sqrt((x - 1) / (1 + x)))
+            sigma = 2 * rho_s * r_s * factor * (term1 - term2)
+        return sigma  # in M_sun kpc^-2
+
+    # Integrate to find the projected mass within r_p
+    integrand = lambda R: 2 * np.pi * Sigma(R) * R  # M_sun kpc^-1
+
+    M_proj = np.zeros_like(r_p)
+    for i, r in enumerate(r_p): 
+        M_proj[i], error = quad(integrand, 0.01, r, limit=1000)
+
+    return M_proj  # in M_sun
 
 
 # ------------------------
