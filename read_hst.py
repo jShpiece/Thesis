@@ -68,7 +68,7 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
         ax.legend()
 
 
-def compare_mass_estimates(halos):
+def compare_mass_estimates(halos, plot_name):
     # Compare the mass estimates I get from the reconstruction to other data
     # I have mass estimates from literature for the cluster - but at different radii
     # so
@@ -99,8 +99,7 @@ def compare_mass_estimates(halos):
     ax.set_ylabel('Mass ($M_\\odot)$')
     ax.set_yscale('log')
     ax.legend()
-    plt.savefig('Output/abel/mass_estimates.png')
-    plt.show()
+    plt.savefig(plot_name)
 
 
 def get_img_data(fits_file_path) -> np.ndarray:
@@ -319,29 +318,6 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
 
     labels = [f'Halo {i+1}' for i in range(len(halos_x))]
 
-    '''
-    for i, (x, y, label) in enumerate(zip(halos_x, halos_y, labels)):
-        ax.scatter(x, y, s=50, marker='x', color='red')
-        ax.text(x, y, label, color='white', fontsize=8)
-
-    # Create the table axis
-    ax_table = fig.add_subplot(gs[1])
-    ax_table.axis('off')
-
-    # Create table data
-    data = {
-        'Label': labels, 
-        'Mass': [f'{m:.2e}' for m in halos_mass]
-        }
-    df = pd.DataFrame(data)
-
-    # Add the table
-    table = ax_table.table(cellText=df.values, colLabels=df.columns, loc='center')
-    table.auto_set_font_size(False)
-    table.set_fontsize(10)
-    table.scale(1, 1.5)  # Adjust as needed
-    '''
-
     # Save the figure
     if randomize:
         # If there's already a randomized plot, I don't want to overwrite it
@@ -355,11 +331,12 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
                 break
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
-    plt.close()
 
     # Now compare the mass estimates - for now, only do this for all signals
-    if use_flags == [True, True, True]:
-        compare_mass_estimates(lenses)
+    plot_name = dir + file_name + '_mass.png'
+    compare_mass_estimates(lenses, plot_name)
+    plt.close()
+
 
 
 if __name__ == '__main__':
