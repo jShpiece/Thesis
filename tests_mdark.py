@@ -11,7 +11,7 @@ import time
 import main
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-import ast
+import json
 
 # Physical constants
 c = 3e8  # Speed of light in m/s
@@ -37,187 +37,92 @@ column_names = [
 # Use the scientific presentation style sheet for all plots
 plt.style.use('scientific_presentation.mplstyle')
 
-
+# --------------------------------------------
 
 def build_mass_correlation_plot(ID_file, file_name, plot_name):
-    # Open the results file and read in the data
+    # Load the results (inferred properties) from the CSV file
     results = pd.read_csv(file_name)
-    # Get the mass and true mass
-    # True mass is stored in the ID file
+    # Load the true mass data
     ID_results = pd.read_csv(ID_file)
-    '''
-    true_mass = ID_results['Mass'].values 
-    mass = results['Mass_all_signals'].values 
-    mass_gamma_f = results['Mass_gamma_F'].values 
-    mass_f_g = results['Mass_F_G'].values 
-    mass_gamma_g = results['Mass_gamma_G'].values 
 
-    # Convert masses to floats (currently being read in as strings)
-    true_mass = np.array([float(mass) for mass in true_mass])
-    mass = np.array([float(mass) for mass in mass])
-    mass_gamma_f = np.array([float(mass) for mass in mass_gamma_f])
-    mass_f_g = np.array([float(mass) for mass in mass_f_g])
-    mass_gamma_g = np.array([float(mass) for mass in mass_gamma_g])
+    # Extract true mass
+    true_mass = ID_results['Mass'].astype(float).values
 
-    # NOW replace any Nan values with 0
+    # Extract inferred masses
+    # Adjust as needed for the columns available in the CSV produced by run_test_parallel
+    mass = results['Mass_all_signals'].astype(float).values
+    mass_gamma_f = results['Mass_gamma_F'].astype(float).values
+    mass_f_g = results['Mass_F_G'].astype(float).values
+    mass_gamma_g = results['Mass_gamma_G'].astype(float).values
+
+    # Replace NaNs with zeros if needed
     mass = np.nan_to_num(mass)
     mass_gamma_f = np.nan_to_num(mass_gamma_f)
     mass_f_g = np.nan_to_num(mass_f_g)
     mass_gamma_g = np.nan_to_num(mass_gamma_g)
 
     masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
-    mass_gamma_f = mass_gamma_f 
-    mass_f_g = mass_f_g 
-    mass_gamma_g = mass_gamma_g 
-    masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
     signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
 
-    # Plot the results for each signal combination
+    # Plot the correlation between true and inferred masses
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
     ax = ax.flatten()
     for i in range(4):
-        true_mass_temp = true_mass
-        masses[i] = np.abs(masses[i])
-        if masses[i].min() == 0:
-            true_mass_temp = true_mass_temp[masses[i] > 0]
-            masses[i] = masses[i][masses[i] > 0]
+        # Filter out zero or invalid values if needed
+        valid_indices = (masses[i] > 0) & (true_mass > 0)
+        true_mass_temp = true_mass[valid_indices]
+        inferred_mass_temp = masses[i][valid_indices]
 
-        ax[i].scatter(true_mass_temp, masses[i], s=10, color='black')
+        ax[i].scatter(true_mass_temp, inferred_mass_temp, s=10, color='black')
         ax[i].set_xscale('log')
         ax[i].set_yscale('log')
+
         # Add a line of best fit
         x = np.linspace(1e13, 1e15, 100)
-        try:
-            m, b = np.polyfit(np.log10(true_mass_temp), np.log10(masses[i]), 1)
-            ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label='Best Fit: m = {:.2f}'.format(m))
-        except:
-            print('RuntimeWarning: Skipping line of best fit')
-            continue
-        # Plot the line of best fit and an agreement line
-        ax[i].plot(x, x, color='blue', label='Agreement Line', linestyle='--') # Agreement line - use a different linestyle because the paper won't be in color
+        if len(true_mass_temp) > 1 and len(inferred_mass_temp) > 1:
+            try:
+                m, b = np.polyfit(np.log10(true_mass_temp), np.log10(inferred_mass_temp), 1)
+                ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label=f'Best Fit: m = {m:.2f}')
+            except:
+                print('Skipping line of best fit')
+        # Add an agreement line
+        ax[i].plot(x, x, color='blue', linestyle='--', label='Agreement Line')
         ax[i].legend()
         ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
         ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-        ax[i].set_title('Signal Combination: {} \n Correlation Coefficient: {:.2f}'.format(signals[i], np.corrcoef(true_mass_temp, masses[i])[0, 1]))
+        if len(true_mass_temp) > 1:
+            corr = np.corrcoef(true_mass_temp, inferred_mass_temp)[0, 1]
+        else:
+            corr = np.nan
+        ax[i].set_title(f'Signal Combination: {signals[i]} \n Correlation Coefficient: {corr:.2f}')
 
     fig.tight_layout()
     fig.savefig(plot_name)
-    '''
-    # Now read in the location and masses of the primary and secondary halos, and compare to the true locations
-    primary_coords = results[['Primary_Coord_all_signals', 'Primary_Coord_gamma_F', 'Primary_Coord_F_G', 'Primary_Coord_gamma_G']].values
-    secondary_coords = results[['Secondary_Coord_all_signals', 'Secondary_Coord_gamma_F', 'Secondary_Coord_F_G', 'Secondary_Coord_gamma_G']].values
-    primary_masses = results[['Primary_Mass_all_signals', 'Primary_Mass_gamma_F', 'Primary_Mass_F_G', 'Primary_Mass_gamma_G']].values
-    secondary_masses = results[['Secondary_Mass_all_signals', 'Secondary_Mass_gamma_F', 'Secondary_Mass_F_G', 'Secondary_Mass_gamma_G']].values
 
-    for i in range(4): # Iterate over each signal combination
-        for j in range(len(primary_coords)): # Iterate over each cluster
-            entry = primary_coords[:, i][j]
-            if entry == 'nan':
-                continue
-            entry = entry.strip('[]').split()
-            primary_coords[:, i][j] = [float(entry[0]), float(entry[1])]
-
-            entry = secondary_coords[:, i][j]
-
-            try:
-                entry = entry.strip('[]').split()
-                secondary_coords[:, i][j] = [float(entry[0]), float(entry[1])]
-            except:
-                secondary_coords[:, i][j] = [np.nan, np.nan]
-
-
-    # raise ValueError('Stop here')
-    # Get the true locations of the primary and secondary halos
-    # This will require us to use the find_halos function, since we only have the IDs
-    IDs = ID_results['MainHaloID'].values
-    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
-    halos = find_halos(IDs, 0.194)
-    # Need to send halos through 'build lensing field' function in order to get the halo coordinates in arcseconds and centered at (0, 0)
-    for ID in IDs:
-        halos[ID], _, _ = build_lensing_field(halos[ID], 0.194)
-    
-    true_primary_coords = []
-    true_secondary_coords = []
-    true_primary_masses = []
-    true_secondary_masses = []
-    for ID in IDs:
-        halo = halos[ID]
-        primary_loc = np.argmax(halo.mass)
-        true_primary_coords.append([halo.x[primary_loc], halo.y[primary_loc]])
-        true_primary_masses.append(halo.mass[primary_loc])
-        if len(halo.mass) >= 2:
-            sorted_indices = np.argsort(halo.mass)
-            secondary_loc = sorted_indices[-2]
-            true_secondary_coords.append([halo.x[secondary_loc], halo.y[secondary_loc]])
-            true_secondary_masses.append(halo.mass[secondary_loc])
-        else:
-            true_secondary_coords.append([np.nan, np.nan])
-            true_secondary_masses.append(np.nan)
-    
-    
-    # Now plot the results for the primary and secondary halos - do this as a histogram, plotting the distance from the true location, and the distance from the true mass
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    ax = ax.flatten()
-    for i in range(4):
-        primary_coords_temp = primary_coords[:, i]
-        secondary_coords_temp = secondary_coords[:, i]
-
-        true_primary_coords_temp = np.array(true_primary_coords)
-        true_secondary_coords_temp = np.array(true_secondary_coords)
-
-        # Calculate the distance from the true location
-        primary_distance = np.zeros(len(primary_coords_temp))
-        secondary_distance = np.zeros(len(primary_coords_temp))
-        for n in range(len(primary_coords_temp)):
-            primary_distance[n] = np.sqrt((primary_coords_temp[n][0])**2 + (primary_coords_temp[n][1])**2)
-            secondary_distance[n] = np.sqrt((secondary_coords_temp[n][0] - true_secondary_coords_temp[n][0])**2 + (secondary_coords_temp[n][1] - true_secondary_coords_temp[n][1])**2)
-        # Clean up any nan values
-        primary_distance = primary_distance[~np.isnan(primary_distance)]
-        secondary_distance = secondary_distance[~np.isnan(secondary_distance)]
-        print(secondary_distance)
-        # Calculate the distance from the true mass
-        # secondary_mass_distance = np.abs(secondary_masses_temp - true_secondary_masses_temp)
-
-        fancyhist(primary_distance, bins='freedman', ax=ax[i], color='blue', alpha=0.5, label='Primary Halo')
-        # fancyhist(secondary_distance, bins='freedman', ax=ax[i], color='red', alpha=0.5, label='Secondary Halo')
-        ax[i].set_xlabel('Distance from True Location [arcseconds]')
-        ax[i].set_ylabel('Frequency')
-        ax[i].set_title('Signal Combination: {}'.format(signals[i]))
-        ax[i].legend()
-    
-    fig.tight_layout()
-    fig.savefig('Output/MDARK/mass_correlations/primary_secondary_distance_{}.png'.format(ID_file.split('_')[-1].split('.')[0]))
-    
-    # Now do the same for mass
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    ax = ax.flatten()
-    for i in range(4):
-        primary_masses_temp = primary_masses[:, i]
-        secondary_masses_temp = secondary_masses[:, i]
-
-        true_primary_masses_temp = np.array(true_primary_masses)
-        true_secondary_masses_temp = np.array(true_secondary_masses)
-
-        # Calculate the distance from the true mass
-        # Need to do this as a fraction of the true mass
-        primary_mass_distance = (primary_masses_temp - true_primary_masses_temp) / true_primary_masses_temp
-        secondary_mass_distance = (secondary_masses_temp - true_secondary_masses_temp) / true_secondary_masses_temp
-        # handle nan values
-        primary_mass_distance = primary_mass_distance[~np.isnan(primary_mass_distance)]
-        secondary_mass_distance = secondary_mass_distance[~np.isnan(secondary_mass_distance)]
-
-        fancyhist(primary_mass_distance, bins='freedman', ax=ax[i], color='blue', alpha=0.5, label='Primary Halo')
-        try: 
-            fancyhist(secondary_mass_distance, bins='freedman', ax=ax[i], color='red', alpha=0.5, label='Secondary Halo')
-        except:
-            print('RuntimeWarning: Skipping secondary mass distance plot')
-        ax[i].set_xlabel('Fractional Mass Difference')
-        ax[i].set_ylabel('Frequency')
-        ax[i].set_title('Signal Combination: {}'.format(signals[i]))
-        ax[i].legend()
-    
-    fig.tight_layout()
-    fig.savefig('Output/MDARK/mass_correlations/primary_secondary_mass_distance_{}.png'.format(ID_file.split('_')[-1].split('.')[0]))
+    # If you need to parse and plot primary/secondary coordinates and masses,
+    # you can parse them here similarly. For example:
+    # For primary coordinates:
+    primary_coord_cols = [
+        'Primary_Coord_all_signals', 'Primary_Coord_gamma_F',
+        'Primary_Coord_F_G', 'Primary_Coord_gamma_G'
+    ]
+    # Parsing coordinate strings like "[x y]"
+    primary_coords = []
+    for col in primary_coord_cols:
+        coord_strs = results[col].values
+        parsed = []
+        for cs in coord_strs:
+            if isinstance(cs, str) and cs.strip().startswith('[') and cs.strip().endswith(']'):
+                vals = cs.strip('[]').split()
+                if len(vals) == 2:
+                    x, y = vals
+                    x, y = float(x), float(y)
+                    parsed.append([x, y])
+                else:
+                    parsed.append([np.nan, np.nan])
+            else:
+                parsed.append([np.nan, np.nan])
+        primary_coords.append(np.array(parsed))
 
 # --------------------------------------------
 # File Management Functions
@@ -423,7 +328,7 @@ def build_lensing_field(halos, z, Nsource = None):
 
 def build_ID_list(test_number, Ncluster, redshift):
     # Define mass, halo number, and mass fraction ranges
-    minimum_mass = 10**13
+    minimum_mass = 10**14
     maximum_mass = 10**15
 
     # Set up the file paths
@@ -472,7 +377,7 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
     # Read in the IDs
     # Remember that the file is a list of lists
     IDs = []
-    '''
+    
     with open(IDs_path, 'r') as f:
         lines = f.readlines()[1:]
         for line in lines:
@@ -529,40 +434,7 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
                     found_cluster = True
                     break
     
-    '''
-    # Use IDs found in previous run
-    keep_IDs = [
-        11364694586,
-        11364617712,
-        11364769410,
-        11365743903,
-        11364731572,
-        11367394754,
-        11364879575,
-        11364948500,
-        11394951535,
-        11428660863,
-        11365089045,
-        11364946026,
-        11364767375,
-        11365235173,
-        11365019088,
-        11364729865,
-        11364766172,
-        11364653016,
-        11365594609,
-        11365888282,
-        11370096473,
-        11398214747,
-        11370019351,
-        11370834252,
-        11373404570,
-        11389713568,
-        11370518133,
-        11400494318,
-        11380127241,
-        11410267432
-    ]
+    
 
     # Now, we have a list of IDs that meet our criteria. Lets get the additional information from the key file, then save it to a file
     key_file = 'MDARK/fixed_key_{}.MDARK'.format(redshift)
@@ -599,9 +471,7 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
 # --------------------------------------------
 
 def run_single_test(args):
-    ID, signal_choices, sources, xmax, N_test = args
-    # Run the pipeline for a single cluster, repeating N_test times.
-
+    ID, signal_choices, signal_map, sources, xmax, N_test = args
     # Initialize arrays to store results
     masses = np.zeros((N_test, len(signal_choices)))
     candidate_numbers = np.zeros((N_test, len(signal_choices)), dtype=int)
@@ -612,9 +482,7 @@ def run_single_test(args):
 
     for test_idx in range(N_test):
         for idx, signal_choice in enumerate(signal_choices):
-            candidate_lenses, _ = main.fit_lensing_field(
-                sources, xmax, False, signal_choice, lens_type='NFW'
-            )
+            candidate_lenses, _ = main.fit_lensing_field(sources, xmax, False, signal_choice, lens_type='NFW')
 
             candidate_masses = candidate_lenses.mass
             candidate_x = candidate_lenses.x
@@ -623,6 +491,7 @@ def run_single_test(args):
             masses[test_idx, idx] = np.sum(candidate_masses)
             candidate_numbers[test_idx, idx] = len(candidate_x)
 
+            # Primary lens
             if len(candidate_masses) > 0:
                 primary_loc = np.argmax(candidate_masses)
                 primary_coords[test_idx, idx] = [candidate_x[primary_loc], candidate_y[primary_loc]]
@@ -631,6 +500,7 @@ def run_single_test(args):
                 primary_coords[test_idx, idx] = [np.nan, np.nan]
                 primary_masses[test_idx, idx] = np.nan
 
+            # Secondary lens
             if len(candidate_masses) >= 2:
                 sorted_indices = np.argsort(candidate_masses)
                 secondary_loc = sorted_indices[-2]
@@ -640,8 +510,7 @@ def run_single_test(args):
                 secondary_coords[test_idx, idx] = [np.nan, np.nan]
                 secondary_masses[test_idx, idx] = np.nan
 
-    # You can compute averages or other statistics here
-    # For example, compute the mean over N_test repetitions
+    # Compute averages
     mean_masses = np.mean(masses, axis=0)
     mean_candidate_numbers = np.mean(candidate_numbers, axis=0)
     mean_primary_coords = np.mean(primary_coords, axis=0)
@@ -649,76 +518,110 @@ def run_single_test(args):
     mean_primary_masses = np.mean(primary_masses, axis=0)
     mean_secondary_masses = np.mean(secondary_masses, axis=0)
 
-    # Prepare the results
-    results = [ID]
-    results.extend(mean_masses.tolist())
-    results.extend(mean_candidate_numbers.tolist())
-    results.extend(mean_primary_coords.tolist())
-    results.extend(mean_primary_masses.tolist())
-    results.extend(mean_secondary_coords.tolist())
-    results.extend(mean_secondary_masses.tolist())
+    # Store results in a structured dictionary for easy reading
+    results_dict = {'ID': ID, 'results': {}}
 
-    print('Finished test for cluster {}'.format(ID))
-    return results
+    for i, sc in enumerate(signal_choices):
+        sc_key = signal_map[sc]
+        results_dict['results'][sc_key] = {
+            'mean_mass': mean_masses[i],
+            'mean_candidate_number': mean_candidate_numbers[i],
+            'mean_primary_coord': mean_primary_coords[i].tolist(),
+            'mean_primary_mass': mean_primary_masses[i],
+            'mean_secondary_coord': mean_secondary_coords[i].tolist(),
+            'mean_secondary_mass': mean_secondary_masses[i]
+        }
+
+    print(f'Finished test for cluster {ID}')
+    return results_dict
 
 
 def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
     IDs = []
-
     with open(ID_file, 'r') as f:
         lines = f.readlines()[1:]
         for line in lines:
             ID = line.split(',')[0]
             IDs.append(int(ID))
-    
     IDs = np.array(IDs)
 
     signal_choices = [
-        [True, True, True],    # All signals
-        [True, True, False],   # Shear and Flexion
-        [False, True, True],   # Flexion and G-Flexion
-        [True, False, True]    # Shear and G-Flexion
+        (True, True, True),    # All signals
+        (True, True, False),   # Shear and Flexion
+        (False, True, True),   # Flexion and G-Flexion
+        (True, False, True)    # Shear and G-Flexion
     ]
 
-    # Build halos
-    halos = find_halos(IDs, z)  # halos is a dictionary of Halo objects, keyed by ID
-    source_catalogue = {}       # Dictionary to hold the source catalogues
-    xmax_values = []            # List to hold the maximum extent of each field
+    signal_map = {
+        (True, True, True): 'All Signals',
+        (True, True, False): 'Shear and Flexion',
+        (False, True, True): 'Flexion and G-Flexion',
+        (True, False, True): 'Shear and G-Flexion'
+    }
+
+    halos = find_halos(IDs, z)
+    source_catalogue = {}
+    xmax_values = []
 
     for ID in IDs:
-        # Build the lenses and sources
         halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
         source_catalogue[ID] = sources
         xmax_values.append(xmax)
 
     print('Halo and Source objects loaded...')
 
-    # Prepare the arguments for each task
-    tasks = [
-        (ID, signal_choices, source_catalogue[ID], xmax_values[i], N_test)
-        for i, ID in enumerate(IDs)
-    ]
+    # Do not convert signal_choices tuples into lists
+    tasks = [(ID, signal_choices, signal_map, source_catalogue[ID], xmax_values[i], N_test)
+            for i, ID in enumerate(IDs)]
 
-    # Process pool
     with Pool() as pool:
         results = pool.map(run_single_test, tasks)
 
-    # Save the results to a file
-    with open(result_file, 'w') as f:
-        headers = [
-            'ID',
-            'Mass_all_signals', 'Mass_gamma_F', 'Mass_F_G', 'Mass_gamma_G',
-            'Nfound_all_signals', 'Nfound_gamma_F', 'Nfound_F_G', 'Nfound_gamma_G',
-            'Primary_Coord_all_signals', 'Primary_Coord_gamma_F', 'Primary_Coord_F_G', 'Primary_Coord_gamma_G',
-            'Primary_Mass_all_signals', 'Primary_Mass_gamma_F', 'Primary_Mass_F_G', 'Primary_Mass_gamma_G',
-            'Secondary_Coord_all_signals', 'Secondary_Coord_gamma_F', 'Secondary_Coord_F_G', 'Secondary_Coord_gamma_G',
-            'Secondary_Mass_all_signals', 'Secondary_Mass_gamma_F', 'Secondary_Mass_F_G', 'Secondary_Mass_gamma_G'
-        ]
-        f.write(','.join(headers) + '\n')
-        for result in results:
-            f.write(','.join(map(str, result)) + '\n')
+    headers = [
+        'ID',
+        'Mass_all_signals', 'Mass_gamma_F', 'Mass_F_G', 'Mass_gamma_G',
+        'Nfound_all_signals', 'Nfound_gamma_F', 'Nfound_F_G', 'Nfound_gamma_G',
+        'Primary_Coord_all_signals', 'Primary_Coord_gamma_F', 'Primary_Coord_F_G', 'Primary_Coord_gamma_G',
+        'Primary_Mass_all_signals', 'Primary_Mass_gamma_F', 'Primary_Mass_F_G', 'Primary_Mass_gamma_G',
+        'Secondary_Coord_all_signals', 'Secondary_Coord_gamma_F', 'Secondary_Coord_F_G', 'Secondary_Coord_gamma_G',
+        'Secondary_Mass_all_signals', 'Secondary_Mass_gamma_F', 'Secondary_Mass_F_G', 'Secondary_Mass_gamma_G'
+    ]
 
-    return
+    with open(result_file, 'w') as f:
+        f.write(','.join(headers) + '\n')
+
+        for res_dict in results:
+            ID = res_dict['ID']
+            row = [ID]
+
+            for sc in signal_choices:
+                sc_key = signal_map[sc]
+                data = res_dict['results'][sc_key]
+                row.append(data['mean_mass'])
+            for sc in signal_choices:
+                sc_key = signal_map[sc]
+                data = res_dict['results'][sc_key]
+                row.append(data['mean_candidate_number'])
+            for sc in signal_choices:
+                sc_key = signal_map[sc]
+                data = res_dict['results'][sc_key]
+                x, y = data['mean_primary_coord']
+                row.append(f"[{x} {y}]")
+            for sc in signal_choices:
+                sc_key = signal_map[sc]
+                data = res_dict['results'][sc_key]
+                row.append(data['mean_primary_mass'])
+            for sc in signal_choices:
+                sc_key = signal_map[sc]
+                data = res_dict['results'][sc_key]
+                x, y = data['mean_secondary_coord']
+                row.append(f"[{x} {y}]")
+            for sc in signal_choices:
+                sc_key = signal_map[sc]
+                data = res_dict['results'][sc_key]
+                row.append(data['mean_secondary_mass'])
+
+            f.write(','.join(map(str, row)) + '\n')
 
 
 def process_md_set(test_number):
@@ -741,10 +644,10 @@ def process_md_set(test_number):
 
 
 if __name__ == '__main__':
-    # build_ID_list(17, 30, 0.194)
-    # build_ID_file(30, 'Output/MDARK/Test17/ID_options.csv', 17, 0.194)
-    # process_md_set(17)
-    build_mass_correlation_plot('Output/MDARK/Test17/ID_file_17.csv', 'Output/MDARK/Test17/results_17.csv', 'Output/MDARK/mass_correlations/mass_correlation_17.png')
+    # build_ID_list(18, 30, 0.194)
+    build_ID_file(30, 'Output/MDARK/Test19/ID_options.csv', 19, 0.194)
+    process_md_set(19)
+    # build_mass_correlation_plot('Output/MDARK/Test18/ID_file_18.csv', 'Output/MDARK/Test18/results_18.csv', 'Output/MDARK/mass_correlations/mass_correlation')
     # Pick out a halo, run the pipeline, look at the results
 
     raise ValueError('Stop here')
