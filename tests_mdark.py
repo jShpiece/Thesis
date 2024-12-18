@@ -78,7 +78,7 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
         ax[i].set_yscale('log')
 
         # Add a line of best fit
-        x = np.linspace(1e13, 1e15, 100)
+        x = np.linspace(1e14, 1e15, 100)
         if len(true_mass_temp) > 1 and len(inferred_mass_temp) > 1:
             try:
                 m, b = np.polyfit(np.log10(true_mass_temp), np.log10(inferred_mass_temp), 1)
@@ -645,9 +645,9 @@ def process_md_set(test_number):
 
 if __name__ == '__main__':
     # build_ID_list(18, 30, 0.194)
-    build_ID_file(30, 'Output/MDARK/Test19/ID_options.csv', 19, 0.194)
-    process_md_set(19)
-    # build_mass_correlation_plot('Output/MDARK/Test18/ID_file_18.csv', 'Output/MDARK/Test18/results_18.csv', 'Output/MDARK/mass_correlations/mass_correlation')
+    # build_ID_file(30, 'Output/MDARK/Test19/ID_options.csv', 19, 0.194)
+    # process_md_set(19)
+    build_mass_correlation_plot('Output/MDARK/Test19/ID_file_19.csv', 'Output/MDARK/Test19/results_19.csv', 'Output/MDARK/mass_correlations/mass_correlation_19')
     # Pick out a halo, run the pipeline, look at the results
 
     raise ValueError('Stop here')
