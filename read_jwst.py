@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.table import Table
 from astropy.visualization import ImageNormalize, LogStretch
+from astropy.visualization import hist as fancyhist
 from pathlib import Path
 import warnings
 
@@ -91,13 +92,30 @@ class JWSTPipeline:
         self.q = df['q'].to_numpy()
         self.phi = df['phi'].to_numpy()
         self.phi = np.deg2rad(self.phi)  # Convert phi to radians if necessary
-        self.F1_fit = df['F1_fit'].to_numpy() / self.CDELT  # Convert flexion to arcsec^-1
-        self.F2_fit = df['F2_fit'].to_numpy() / self.CDELT  
-        self.G1_fit = df['G1_fit'].to_numpy() / self.CDELT  # Convert flexion to arcsec^-1  
-        self.G2_fit = df['G2_fit'].to_numpy() / self.CDELT
-        self.a = df['a'].to_numpy() * self.CDELT # Convert scale to arcsec
+        self.F1_fit = df['F1_fit'].to_numpy() #/ self.CDELT  # Convert flexion to arcsec^-1
+        self.F2_fit = df['F2_fit'].to_numpy() #/ self.CDELT  
+        self.G1_fit = df['G1_fit'].to_numpy() #/ self.CDELT  # Convert flexion to arcsec^-1  
+        self.G2_fit = df['G2_fit'].to_numpy() #/ self.CDELT
+        self.a = df['a'].to_numpy() #* self.CDELT # Convert scale to arcsec
         self.chi2 = df['rchi2'].to_numpy()
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
+
+        # Eliminate all entries with chi2 > 10
+        # Add any indice where a < 0.1 - this is too small to get a good reading 
+        bad_chi2 = self.chi2 > 10
+        bad_a = (self.a < 0.1) | (self.a > 10)
+
+        bad_indices = (bad_chi2) | (bad_a)
+        print(f"Removing {np.sum(bad_indices)} entries with chi2 > 10.")
+        self.IDs = self.IDs[~bad_indices]
+        self.q = self.q[~bad_indices]
+        self.phi = self.phi[~bad_indices]
+        self.F1_fit = self.F1_fit[~bad_indices]
+        self.F2_fit = self.F2_fit[~bad_indices]
+        self.G1_fit = self.G1_fit[~bad_indices]
+        self.G2_fit = self.G2_fit[~bad_indices]
+        self.a = self.a[~bad_indices]
+        self.chi2 = self.chi2[~bad_indices]
 
         # Check for NaN values
         
@@ -113,6 +131,19 @@ class JWSTPipeline:
             self.G2_fit = self.G2_fit[~nan_indices]
             self.a = self.a[~nan_indices]
             self.chi2 = self.chi2[~nan_indices]
+        
+        # Plot some of these guys, then terminate
+        # Do histograms of q, phi, f1, f2, a, and chi2
+
+        signals = [self.q, self.phi, self.F1_fit, self.F2_fit, self.a, self.chi2]
+        signal_names = ['q', 'phi', 'F1', 'F2', 'a', 'chi2']
+        for signal, name in zip(signals, signal_names):
+            fig, ax = plt.subplots()
+            fancyhist(signal, bins='scott', ax=ax, histtype='stepfilled', density=True, label = 'Range: {} - {}'.format(np.min(signal), np.max(signal)))
+            ax.set_xlabel(name)
+            ax.set_ylabel('Count')
+            ax.legend()
+            plt.savefig(self.output_dir / f'{name}_distribution.png', dpi=300)
         
     def initialize_sources(self):
         """
@@ -138,8 +169,10 @@ class JWSTPipeline:
         sigaf = np.mean([np.std(self.a * self.F1_fit), np.std(self.a * self.F2_fit)])
         epsilon = 1e-8 # Small value to avoid division by zero
         sigf = sigaf / (self.a + epsilon)
+        print(sigf)
         sigag = np.mean([np.std(self.a * self.G1_fit), np.std(self.a * self.G2_fit)])
         sigg = sigag / (self.a + epsilon)
+        print(sigg)
 
         # Create Source object
         self.sources = source_obj.Source(
@@ -156,7 +189,7 @@ class JWSTPipeline:
             sigg=sigg  # Adjust if necessary
         )
 
-        # self.sources.filter_sources()
+        self.sources.filter_sources()
 
     def match_sources(self):
         """
