@@ -44,9 +44,36 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     results = pd.read_csv(file_name)
     # Load the true mass data
     ID_results = pd.read_csv(ID_file)
+    # Extract true masses
+    true_mass = ID_results['Mass'].values
 
-    # Extract true mass
-    true_mass = ID_results['Mass'].astype(float).values
+    # No other choice - need to load the original halos to get the true primary / secondary masses and coordinates
+    # Load the halos
+    halos = find_halos(ID_results['MainHaloID'].values, 0.194)
+    true_primary_masses = []
+    true_secondary_masses = []
+    true_primary_coords = []
+    true_secondary_coords = []
+
+
+    for ID in ID_results['MainHaloID'].values:
+        halo = halos[ID]
+        # Remember to transform the coordinates by the centroid
+        main_halo = np.argmax(halo.mass)
+        halo.x -= halo.x[main_halo]
+        halo.y -= halo.y[main_halo]
+
+        true_primary_masses.append(halo.mass[main_halo])
+        true_primary_coords.append([halo.x[main_halo], halo.y[main_halo]])
+
+        if len(halo.mass) >= 2:
+            sorted_indices = np.argsort(halo.mass)
+            secondary_loc = sorted_indices[-2]
+            true_secondary_masses.append(halo.mass[secondary_loc])
+            true_secondary_coords.append([halo.x[secondary_loc], halo.y[secondary_loc]])
+        else:
+            true_secondary_masses.append(np.nan)
+            true_secondary_coords.append([np.nan, np.nan])
 
     # Extract inferred masses
     # Adjust as needed for the columns available in the CSV produced by run_test_parallel
@@ -123,6 +150,148 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
             else:
                 parsed.append([np.nan, np.nan])
         primary_coords.append(np.array(parsed))
+    # Now get the primary masses
+    primary_mass_cols = [
+        'Primary_Mass_all_signals', 'Primary_Mass_gamma_F',
+        'Primary_Mass_F_G', 'Primary_Mass_gamma_G'
+    ]
+    primary_masses = []
+    for col in primary_mass_cols:
+        primary_masses.append(results[col].values.astype(float))
+
+    # Similarly, you can parse secondary coordinates and masses
+    secondary_coord_cols = [
+        'Secondary_Coord_all_signals', 'Secondary_Coord_gamma_F',
+        'Secondary_Coord_F_G', 'Secondary_Coord_gamma_G'
+    ]
+    secondary_coords = []
+
+    for col in secondary_coord_cols:
+        coord_strs = results[col].values
+        parsed = []
+        for cs in coord_strs:
+            if isinstance(cs, str) and cs.strip().startswith('[') and cs.strip().endswith(']'):
+                vals = cs.strip('[]').split()
+                if len(vals) == 2:
+                    x, y = vals
+                    x, y = float(x), float(y)
+                    parsed.append([x, y])
+                else:
+                    parsed.append([np.nan, np.nan])
+            else:
+                parsed.append([np.nan, np.nan])
+        secondary_coords.append(np.array(parsed))
+    
+    # Now get the secondary masses
+    secondary_mass_cols = [
+        'Secondary_Mass_all_signals', 'Secondary_Mass_gamma_F',
+        'Secondary_Mass_F_G', 'Secondary_Mass_gamma_G'
+    ]
+    secondary_masses = []
+    for col in secondary_mass_cols:
+        secondary_masses.append(results[col].values.astype(float))
+
+    # Now you can plot the primary and secondary masses and coordinates
+    # For example, you can plot the primary masses against the true masses
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+    for i in range(4):
+        valid_indices = (primary_masses[i] > 0) & (true_primary_masses[i] > 0)
+        true_mass_temp = true_primary_masses[valid_indices]
+        primary_mass_temp = primary_masses[i][valid_indices]
+
+        ax[i].scatter(true_mass_temp, primary_mass_temp, s=10, color='black')
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+
+        # Add a line of best fit
+        x = np.linspace(1e14, 1e15, 100)
+        if len(true_mass_temp) > 1 and len(primary_mass_temp) > 1:
+            try:
+                m, b = np.polyfit(np.log10(true_mass_temp), np.log10(primary_mass_temp), 1)
+                ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label=f'Best Fit: m = {m:.2f}')
+            except:
+                print('Skipping line of best fit')
+        # Add an agreement line
+        ax[i].plot(x, x, color='blue', linestyle='--', label='Agreement Line')
+        ax[i].legend()
+        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
+        ax[i].set_ylabel(r'$M_{\rm primary}$ [$M_{\odot}$]')
+        if len(true_mass_temp) > 1:
+            corr = np.corrcoef(true_mass_temp, primary_mass_temp)[0, 1]
+        else:
+            corr = np.nan
+        ax[i].set_title(f'Signal Combination: {signals[i]} \n Correlation Coefficient: {corr:.2f}')
+    
+    fig.tight_layout()
+    fig.savefig(plot_name + '_primary_masses.png')
+
+    # Similarly, you can plot the secondary masses against the true masses
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+    for i in range(4):
+        valid_indices = (secondary_masses[i] > 0) & (true_secondary_masses[i] > 0)
+        true_mass_temp = true_secondary_masses[valid_indices]
+        secondary_mass_temp = secondary_masses[i][valid_indices]
+
+        ax[i].scatter(true_mass_temp, secondary_mass_temp, s=10, color='black')
+        ax[i].set_xscale('log')
+        ax[i].set_yscale('log')
+
+        # Add a line of best fit
+        x = np.linspace(1e14, 1e15, 100)
+        if len(true_mass_temp) > 1 and len(secondary_mass_temp) > 1:
+            try:
+                m, b = np.polyfit(np.log10(true_mass_temp), np.log10(secondary_mass_temp), 1)
+                ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label=f'Best Fit: m = {m:.2f}')
+            except:
+                print('Skipping line of best fit')
+        # Add an agreement line
+        ax[i].plot(x, x, color='blue', linestyle='--', label='Agreement Line')
+        ax[i].legend()
+        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
+        ax[i].set_ylabel(r'$M_{\rm secondary}$ [$M_{\odot}$]')
+        if len(true_mass_temp) > 1:
+            corr = np.corrcoef(true_mass_temp, secondary_mass_temp)[0, 1]
+        else:
+            corr = np.nan
+        ax[i].set_title(f'Signal Combination: {signals[i]} \n Correlation Coefficient: {corr:.2f}')
+
+    fig.tight_layout()
+    fig.savefig(plot_name + '_secondary_masses.png')
+
+    # Now you can plot the primary and secondary coordinates as histograms
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+    for i in range(4):
+        valid_indices = ~np.isnan(primary_coords[i][:, 0]) & ~np.isnan(primary_coords[i][:, 1])
+        x = primary_coords[i][valid_indices, 0]
+        y = primary_coords[i][valid_indices, 1]
+
+        ax[i].hist2d(x, y, bins=50, cmap='viridis')
+        ax[i].set_xlabel('x [arcseconds]')
+        ax[i].set_ylabel('y [arcseconds]')
+        ax[i].set_title(f'Signal Combination: {signals[i]} \n Primary Lens Coordinates')
+
+    fig.tight_layout()
+    fig.savefig(plot_name + '_primary_coords.png')
+
+    # Similarly, you can plot the secondary coordinates as histograms
+    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    ax = ax.flatten()
+    for i in range(4):
+        valid_indices = ~np.isnan(secondary_coords[i][:, 0]) & ~np.isnan(secondary_coords[i][:, 1])
+        x = secondary_coords[i][valid_indices, 0]
+        y = secondary_coords[i][valid_indices, 1]
+
+        ax[i].hist2d(x, y, bins=50, cmap='viridis')
+        ax[i].set_xlabel('x [arcseconds]')
+        ax[i].set_ylabel('y [arcseconds]')
+        ax[i].set_title(f'Signal Combination: {signals[i]} \n Secondary Lens Coordinates')
+
+    fig.tight_layout()
+    fig.savefig(plot_name + '_secondary_coords.png')
+
 
 # --------------------------------------------
 # File Management Functions
