@@ -124,6 +124,7 @@ class Source:
         
         # Remove the bad indices using the class's remove method
         self.remove(bad_indices)
+        return bad_indices
 
     def apply_noise(self):
         """

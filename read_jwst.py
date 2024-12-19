@@ -92,11 +92,11 @@ class JWSTPipeline:
         self.q = df['q'].to_numpy()
         self.phi = df['phi'].to_numpy()
         self.phi = np.deg2rad(self.phi)  # Convert phi to radians if necessary
-        self.F1_fit = df['F1_fit'].to_numpy() #/ self.CDELT  # Convert flexion to arcsec^-1
-        self.F2_fit = df['F2_fit'].to_numpy() #/ self.CDELT  
-        self.G1_fit = df['G1_fit'].to_numpy() #/ self.CDELT  # Convert flexion to arcsec^-1  
-        self.G2_fit = df['G2_fit'].to_numpy() #/ self.CDELT
-        self.a = df['a'].to_numpy() #* self.CDELT # Convert scale to arcsec
+        self.F1_fit = df['F1_fit'].to_numpy()
+        self.F2_fit = df['F2_fit'].to_numpy() 
+        self.G1_fit = df['G1_fit'].to_numpy() 
+        self.G2_fit = df['G2_fit'].to_numpy()
+        self.a = df['a'].to_numpy()
         self.chi2 = df['rchi2'].to_numpy()
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
@@ -132,19 +132,6 @@ class JWSTPipeline:
             self.a = self.a[~nan_indices]
             self.chi2 = self.chi2[~nan_indices]
         
-        # Plot some of these guys, then terminate
-        # Do histograms of q, phi, f1, f2, a, and chi2
-
-        signals = [self.q, self.phi, self.F1_fit, self.F2_fit, self.a, self.chi2]
-        signal_names = ['q', 'phi', 'F1', 'F2', 'a', 'chi2']
-        for signal, name in zip(signals, signal_names):
-            fig, ax = plt.subplots()
-            fancyhist(signal, bins='scott', ax=ax, histtype='stepfilled', density=True, label = 'Range: {} - {}'.format(np.min(signal), np.max(signal)))
-            ax.set_xlabel(name)
-            ax.set_ylabel('Count')
-            ax.legend()
-            plt.savefig(self.output_dir / f'{name}_distribution.png', dpi=300)
-        
     def initialize_sources(self):
         """
         Prepares the Source object with calculated lensing signals and uncertainties.
@@ -164,15 +151,10 @@ class JWSTPipeline:
         self.xc_centered = self.xc_arcsec - self.centroid_x
         self.yc_centered = self.yc_arcsec - self.centroid_y
 
-        # Estimate noise
-        sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
-        sigaf = np.mean([np.std(self.a * self.F1_fit), np.std(self.a * self.F2_fit)])
-        epsilon = 1e-8 # Small value to avoid division by zero
-        sigf = sigaf / (self.a + epsilon)
-        print(sigf)
-        sigag = np.mean([np.std(self.a * self.G1_fit), np.std(self.a * self.G2_fit)])
-        sigg = sigag / (self.a + epsilon)
-        print(sigg)
+        # Use dummy values for uncertainties
+        sigs = np.ones_like(e1) * 0.1
+        sigf = np.ones_like(e1) * 0.01
+        sigg = np.ones_like(e1) * 0.02
 
         # Create Source object
         self.sources = source_obj.Source(
@@ -189,7 +171,35 @@ class JWSTPipeline:
             sigg=sigg  # Adjust if necessary
         )
 
-        self.sources.filter_sources()
+        bad_indices = self.sources.filter_sources()
+        print(f"Removing {len(bad_indices)} sources with flexion > 0.1.")
+
+        # Calculate the noise levels for each signal
+        a = self.a
+        # We also need to remove the bad indices from the a array
+        a = np.delete(a, bad_indices)
+        sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
+        sigaf = np.mean([np.std(a * self.sources.f1), np.std(a * self.sources.f2)])
+        epsilon = 1e-8 # Small value to avoid division by zero
+        sigf = sigaf / (a + epsilon)
+        print(sigf)
+        sigag = np.mean([np.std(a * self.sources.g1), np.std(a * self.sources.g1)])
+        sigg = sigag / (a + epsilon)
+        print(sigg)
+
+        # Plot some of these guys, then terminate
+        # Do histograms of q, phi, f1, f2, a, and chi2
+
+        signals = [self.sources.e1, self.sources.e2, self.sources.f1, self.sources.f2]
+        signal_names = ['q', 'phi', 'F1', 'F2', 'a', 'chi2']
+        for signal, name in zip(signals, signal_names):
+            fig, ax = plt.subplots()
+            fancyhist(signal, bins='scott', ax=ax, histtype='stepfilled', density=True, label = 'Range: {} - {}'.format(np.min(signal), np.max(signal)))
+            ax.set_xlabel(name)
+            ax.set_ylabel('Count')
+            ax.legend()
+            plt.savefig(self.output_dir / f'{name}_distribution.png', dpi=300)
+        plt.close('all')
 
     def match_sources(self):
         """
@@ -217,7 +227,6 @@ class JWSTPipeline:
 
         # Remove entries with no matching source
         valid = ~np.isnan(self.xc) & ~np.isnan(self.yc)
-        print(f"Removing {np.sum(~valid)} entries with no matching source.")
         self.IDs = self.IDs[valid]
         self.q = self.q[valid]
         self.phi = self.phi[valid]
@@ -227,7 +236,6 @@ class JWSTPipeline:
         self.chi2 = self.chi2[valid]
         self.xc = self.xc[valid]
         self.yc = self.yc[valid]
-        print(f"Remaining sources: {len(self.IDs)}.")
 
     def run_lens_fitting(self):
         """
@@ -306,7 +314,7 @@ class JWSTPipeline:
         # Labels and title
         ax.set_xlabel('RA Offset (arcsec)')
         ax.set_ylabel('Dec Offset (arcsec)')
-        ax.set_title('Convergence Map Overlaid on JWST Image \n Mass = {}'.format(np.sum(self.lenses.mass)))
+        ax.set_title('Convergence Map Overlaid on JWST Image \n Mass = {:.2e}'.format(np.sum(self.lenses.mass)))
 
         # Save and display
         plt.legend()
