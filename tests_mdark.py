@@ -55,7 +55,6 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     true_primary_coords = []
     true_secondary_coords = []
 
-
     for ID in ID_results['MainHaloID'].values:
         halo = halos[ID]
         # Remember to transform the coordinates by the centroid
@@ -74,6 +73,11 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
         else:
             true_secondary_masses.append(np.nan)
             true_secondary_coords.append([np.nan, np.nan])
+    
+    true_primary_masses = np.array(true_primary_masses)
+    true_secondary_masses = np.array(true_secondary_masses)
+    true_primary_coords = np.array(true_primary_coords)
+    true_secondary_coords = np.array(true_secondary_coords)
 
     # Extract inferred masses
     # Adjust as needed for the columns available in the CSV produced by run_test_parallel
@@ -93,10 +97,11 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
 
     # Plot the correlation between true and inferred masses
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle('Reconstruction of Total Cluster Masses')
     ax = ax.flatten()
     for i in range(4):
         # Filter out zero or invalid values if needed
-        valid_indices = (masses[i] > 0) & (true_mass > 0)
+        valid_indices = (masses[i] > 0) 
         true_mass_temp = true_mass[valid_indices]
         inferred_mass_temp = masses[i][valid_indices]
 
@@ -124,7 +129,7 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
         ax[i].set_title(f'Signal Combination: {signals[i]} \n Correlation Coefficient: {corr:.2f}')
 
     fig.tight_layout()
-    fig.savefig(plot_name)
+    fig.savefig(plot_name + '_mass_correlation.png')
 
     # If you need to parse and plot primary/secondary coordinates and masses,
     # you can parse them here similarly. For example:
@@ -194,9 +199,12 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
     # Now you can plot the primary and secondary masses and coordinates
     # For example, you can plot the primary masses against the true masses
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle('Reconstruction of Primary Halo Masses')
     ax = ax.flatten()
     for i in range(4):
-        valid_indices = (primary_masses[i] > 0) & (true_primary_masses[i] > 0)
+        # Cycle through the signal combinations
+        # Filter out zero or invalid values if needed
+        valid_indices = (primary_masses[i] > 0) 
         true_mass_temp = true_primary_masses[valid_indices]
         primary_mass_temp = primary_masses[i][valid_indices]
 
@@ -228,9 +236,10 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
 
     # Similarly, you can plot the secondary masses against the true masses
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle('Reconstruction of Largest Subhalo Masses')
     ax = ax.flatten()
     for i in range(4):
-        valid_indices = (secondary_masses[i] > 0) & (true_secondary_masses[i] > 0)
+        valid_indices = (secondary_masses[i] > 0)
         true_mass_temp = true_secondary_masses[valid_indices]
         secondary_mass_temp = secondary_masses[i][valid_indices]
 
@@ -239,7 +248,7 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
         ax[i].set_yscale('log')
 
         # Add a line of best fit
-        x = np.linspace(1e14, 1e15, 100)
+        x = np.linspace(1e12, 1e14, 100)
         if len(true_mass_temp) > 1 and len(secondary_mass_temp) > 1:
             try:
                 m, b = np.polyfit(np.log10(true_mass_temp), np.log10(secondary_mass_temp), 1)
@@ -262,32 +271,46 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
 
     # Now you can plot the primary and secondary coordinates as histograms
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle('Distance from Located Primary Halo to True Primary Halo')
     ax = ax.flatten()
     for i in range(4):
         valid_indices = ~np.isnan(primary_coords[i][:, 0]) & ~np.isnan(primary_coords[i][:, 1])
         x = primary_coords[i][valid_indices, 0]
         y = primary_coords[i][valid_indices, 1]
+        # Bin the data and plot a 2D histogram
+        bins = np.linspace(-50, 50, 50)
 
-        ax[i].hist2d(x, y, bins=50, cmap='viridis')
+        ax[i].hist2d(x, y, bins=bins, cmap='viridis')
         ax[i].set_xlabel('x [arcseconds]')
         ax[i].set_ylabel('y [arcseconds]')
-        ax[i].set_title(f'Signal Combination: {signals[i]} \n Primary Lens Coordinates')
+        ax[i].set_title(f'Signal Combination: {signals[i]}')
+
+        # Add a colorbar
+        cbar = plt.colorbar(ax[i].collections[0], ax=ax[i])
+        cbar.set_label('Number of Halos')
+
 
     fig.tight_layout()
     fig.savefig(plot_name + '_primary_coords.png')
 
     # Similarly, you can plot the secondary coordinates as histograms
     fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle('Distance from Largest Located Subhalo to Largest True Subhalo')
     ax = ax.flatten()
     for i in range(4):
         valid_indices = ~np.isnan(secondary_coords[i][:, 0]) & ~np.isnan(secondary_coords[i][:, 1])
         x = secondary_coords[i][valid_indices, 0]
         y = secondary_coords[i][valid_indices, 1]
+        bins = np.linspace(-50, 50, 50)
 
-        ax[i].hist2d(x, y, bins=50, cmap='viridis')
+        ax[i].hist2d(x, y, bins=bins, cmap='viridis')
         ax[i].set_xlabel('x [arcseconds]')
         ax[i].set_ylabel('y [arcseconds]')
-        ax[i].set_title(f'Signal Combination: {signals[i]} \n Secondary Lens Coordinates')
+        ax[i].set_title(f'Signal Combination: {signals[i]}')
+
+        # Add a colorbar
+        cbar = plt.colorbar(ax[i].collections[0], ax=ax[i])
+        cbar.set_label('Number of Halos')
 
     fig.tight_layout()
     fig.savefig(plot_name + '_secondary_coords.png')
@@ -816,7 +839,7 @@ if __name__ == '__main__':
     # build_ID_list(18, 30, 0.194)
     # build_ID_file(30, 'Output/MDARK/Test19/ID_options.csv', 19, 0.194)
     # process_md_set(19)
-    build_mass_correlation_plot('Output/MDARK/Test19/ID_file_19.csv', 'Output/MDARK/Test19/results_19.csv', 'Output/MDARK/mass_correlations/mass_correlation_19')
+    build_mass_correlation_plot('Output/MDARK/Test19/ID_file_19.csv', 'Output/MDARK/Test19/results_19.csv', 'Output/MDARK/mass_correlations/test_19')
     # Pick out a halo, run the pipeline, look at the results
 
     raise ValueError('Stop here')
