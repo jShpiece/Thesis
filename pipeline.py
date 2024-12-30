@@ -482,6 +482,23 @@ def forward_lens_selection(
     if len(selected_lenses.x) == 0:
         print('No lenses selected.')
         return None, np.inf
+    elif len(selected_lenses.x) == 1:
+        # Perform a hack here - require at least two lenses
+        # Choose the best lens from the remaining indices
+        best_index = np.argmin(chi2_list)
+        added_lens = halo_obj.NFW_Lens(
+            x=np.array([candidate_lenses.x[best_index]]),
+            y=np.array([candidate_lenses.y[best_index]]),
+            z=np.array([candidate_lenses.z[best_index]]),
+            concentration=np.array([candidate_lenses.concentration[best_index]]),
+            mass=np.array([candidate_lenses.mass[best_index]]),
+            redshift=candidate_lenses.redshift,
+            chi2=np.array([candidate_lenses.chi2[best_index]])
+        )
+        selected_lenses.merge(added_lens)
+        best_reduced_chi2 = metric.calculate_chi_squared(sources, selected_lenses, use_flags, lens_type=lens_type, use_weights=False)
+        return selected_lenses, best_reduced_chi2
+
     else:
         return selected_lenses, best_reduced_chi2
 
@@ -537,14 +554,6 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
             )
             lenses.mass[i] = 10 ** result.x
             lenses.calculate_concentration()
-        '''
-        for i in range(len(lenses.x)):
-            guess = [np.log10(lenses.mass[i]), lenses.concentration[i]]
-            params = ['NFW', 'dual', lenses.x[i], lenses.y[i], lenses.redshift, sources, use_flags]
-            result, _ = minimizer.gradient_descent(chi2wrapper, guess, learning_rates, num_iterations, params)
-            lenses.mass[i] = 10 ** result[0]
-            lenses.concentration[i] = result[1]
-        '''
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
@@ -653,4 +662,3 @@ def chi2wrapper(guess, params):
 
     else:
         raise ValueError(f"Invalid lensing model: {model_type}")
-        
