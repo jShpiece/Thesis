@@ -824,21 +824,22 @@ def process_md_set(test_number):
     Ntrials = 1 # Number of trials to run for each cluster in the test set
 
     test_dir = 'Output/MDARK/Test{}'.format(test_number)
-    halos_file = 'MDARK/Halos_{}.MDARK'.format(z_chosen)
     ID_file = test_dir + '/ID_file_{}.csv'.format(test_number)
     result_file = test_dir + '/results_{}.csv'.format(test_number)
-    plot_name = 'Output/MDARK/mass_correlations/mass_correlation_{}.png'.format(test_number)
 
     run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
-    build_mass_correlation_plot(ID_file, result_file, plot_name)
 
 
 if __name__ == '__main__':
-    # build_ID_list(18, 30, 0.194)
-    # build_ID_file(30, 'Output/MDARK/Test19/ID_options.csv', 19, 0.194)
-    # process_md_set(19)
+    test_number = 20
+    ID_name = 'Output/MDARK/Test{}/ID_file_{}.csv'.format(test_number, test_number)
+    result_name = 'Output/MDARK/Test{}/results_{}.csv'.format(test_number, test_number)
+    plot_name = 'Output/MDARK/mass_correlations/test_{}'.format(test_number)
+    # build_ID_list(test_number, 30, 0.194)
+    # build_ID_file(30, 'Output/MDARK/Test19/ID_options.csv', test_number, 0.194)
+    process_md_set(test_number)
     build_mass_correlation_plot('Output/MDARK/Test19/ID_file_19.csv', 'Output/MDARK/Test19/results_19.csv', 'Output/MDARK/mass_correlations/test_19')
     # Pick out a halo, run the pipeline, look at the results
 
