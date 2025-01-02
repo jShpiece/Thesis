@@ -106,7 +106,7 @@ class JWSTPipeline:
         bad_a = (self.a < 0.1) | (self.a > 10)
 
         bad_indices = (bad_chi2) | (bad_a)
-        print(f"Removing {np.sum(bad_indices)} entries with chi2 > 10.")
+        print(f"Removing {np.sum(bad_indices)} entries with chi2 > 10 or a < 0.1.")
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
         self.phi = self.phi[~bad_indices]
@@ -151,10 +151,10 @@ class JWSTPipeline:
         self.xc_centered = self.xc_arcsec - self.centroid_x
         self.yc_centered = self.yc_arcsec - self.centroid_y
 
-        # Use dummy values for uncertainties
-        sigs = np.ones_like(e1) * 0.1
-        sigf = np.ones_like(e1) * 0.01
-        sigg = np.ones_like(e1) * 0.02
+        # Use dummy values for uncertainties to initialize Source object
+        sigs = np.ones_like(e1) 
+        sigf = np.ones_like(e1) 
+        sigg = np.ones_like(e1) 
 
         # Create Source object
         self.sources = source_obj.Source(
@@ -178,18 +178,23 @@ class JWSTPipeline:
         a = self.a
         # We also need to remove the bad indices from the a array
         a = np.delete(a, bad_indices)
-        sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
+        sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
         sigaf = np.mean([np.std(a * self.sources.f1), np.std(a * self.sources.f2)])
         epsilon = 1e-8 # Small value to avoid division by zero
         sigf = sigaf / (a + epsilon)
-        print(sigf)
-        sigag = np.mean([np.std(a * self.sources.g1), np.std(a * self.sources.g1)])
+        sigag = np.mean([np.std(a * self.sources.g1), np.std(a * self.sources.g2)])
         sigg = sigag / (a + epsilon)
-        print(sigg)
+
+        assert len(sigs) == len(sigf) == len(sigg) == len(self.sources.x), 'Lengths of sigs, sigf, and sigg do not match the number of sources: {} vs {} vs {} vs {}'.format(len(sigs), len(sigf), len(sigg), len(self.sources.x))
+        
+        # Update Source object with new uncertainties
+        self.sources.sigs = sigs
+        self.sources.sigf = sigf
+        self.sources.sigg = sigg
 
         # Plot some of these guys, then terminate
         # Do histograms of q, phi, f1, f2, a, and chi2
-
+        '''
         signals = [self.sources.e1, self.sources.e2, self.sources.f1, self.sources.f2]
         signal_names = ['q', 'phi', 'F1', 'F2', 'a', 'chi2']
         for signal, name in zip(signals, signal_names):
@@ -200,6 +205,7 @@ class JWSTPipeline:
             ax.legend()
             plt.savefig(self.output_dir / f'{name}_distribution.png', dpi=300)
         plt.close('all')
+        '''
 
     def match_sources(self):
         """
@@ -343,4 +349,3 @@ if __name__ == '__main__':
     # Initialize and run the pipeline
     pipeline = JWSTPipeline(config)
     pipeline.run()
-    # pipeline.plot_results()

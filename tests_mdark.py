@@ -11,7 +11,6 @@ import time
 import main
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-import json
 
 # Physical constants
 c = 3e8  # Speed of light in m/s
@@ -37,283 +36,204 @@ column_names = [
 # Use the scientific presentation style sheet for all plots
 plt.style.use('scientific_presentation.mplstyle')
 
-# --------------------------------------------
 
 def build_mass_correlation_plot(ID_file, file_name, plot_name):
-    # Load the results (inferred properties) from the CSV file
+    """
+    This function reads true and inferred halo information from CSV files,
+    plots mass correlations, and optionally plots subhalo (primary/secondary)
+    mass and coordinate correlations.
+    """
+    # ------------------------- Helper Functions -------------------------
+    def parse_coordinates(df, column_names):
+        coord_arrays = []
+        for col in column_names:
+            parsed = []
+            for cs in df[col].values:
+                if isinstance(cs, str) and cs.strip().startswith('[') and cs.strip().endswith(']'):
+                    vals = cs.strip('[]').split()
+                    parsed.append([float(vals[0]), float(vals[1])] if len(vals) == 2 else [np.nan, np.nan])
+                else:
+                    parsed.append([np.nan, np.nan])
+            coord_arrays.append(np.array(parsed))
+        return coord_arrays
+
+    def plot_correlation(ax, true_vals, inferred_vals, signals_label, 
+                        x_label, y_label, x_range, y_range=None):
+        valid_idx = inferred_vals > 0
+        x_data = true_vals[valid_idx]
+        y_data = inferred_vals[valid_idx]
+        ax.scatter(x_data, y_data, s=10, color='black')
+        ax.set_xscale('log')
+        ax.set_yscale('log')
+        
+        x_line = np.linspace(x_range[0], x_range[1], 100)
+        try:
+            if len(x_data) > 1 and len(y_data) > 1:
+                m, b = np.polyfit(np.log10(x_data), np.log10(y_data), 1)
+                ax.plot(x_line, 10**(m*np.log10(x_line) + b),
+                        color='red', label=f'Best Fit: m = {m:.2f}')
+        except:
+            pass
+
+        ax.plot(x_line, x_line, color='blue', linestyle='--', label='Agreement Line')
+        ax.legend()
+        corr = np.corrcoef(x_data, y_data)[0, 1] if len(x_data) > 1 else np.nan
+        ax.set_title(f'Signal: {signals_label}\nCorr Coef: {corr:.2f}')
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+
+    def plot_2d_hist(ax, coords, signals_label, bins, x_label='x [arcsec]', y_label='y [arcsec]'):
+        valid_idx = ~np.isnan(coords[:, 0]) & ~np.isnan(coords[:, 1]) # Filter out NaNs
+        x = coords[valid_idx, 0]
+        y = coords[valid_idx, 1]
+        ax.hist2d(x, y, bins=bins, cmap='viridis')
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.set_title(f'Signal: {signals_label}')
+        cbar = plt.colorbar(ax.collections[0], ax=ax)
+        cbar.set_label('Number of Halos')
+
+    # ------------------------- Load CSV Data -------------------------
     results = pd.read_csv(file_name)
-    # Load the true mass data
     ID_results = pd.read_csv(ID_file)
-    # Extract true masses
     true_mass = ID_results['Mass'].values
 
-    # No other choice - need to load the original halos to get the true primary / secondary masses and coordinates
-    # Load the halos
+    # ------------------------- Load Halos & True Masses -------------------------
+    # This block extracts true primary and secondary masses + coords for each halo.
     halos = find_halos(ID_results['MainHaloID'].values, 0.194)
-    true_primary_masses = []
-    true_secondary_masses = []
-    true_primary_coords = []
-    true_secondary_coords = []
+    true_primary_masses, true_secondary_masses = [], []
+    true_primary_coords, true_secondary_coords = [], []
 
     for ID in ID_results['MainHaloID'].values:
         halo = halos[ID]
-        # Remember to transform the coordinates by the centroid
-        main_halo = np.argmax(halo.mass)
-        halo.x -= halo.x[main_halo]
-        halo.y -= halo.y[main_halo]
-
-        true_primary_masses.append(halo.mass[main_halo])
-        true_primary_coords.append([halo.x[main_halo], halo.y[main_halo]])
+        main_halo_idx = np.argmax(halo.mass)
+        halo.x -= halo.x[main_halo_idx]
+        halo.y -= halo.y[main_halo_idx]
+        true_primary_masses.append(halo.mass[main_halo_idx])
+        true_primary_coords.append([halo.x[main_halo_idx], halo.y[main_halo_idx]])
 
         if len(halo.mass) >= 2:
-            sorted_indices = np.argsort(halo.mass)
-            secondary_loc = sorted_indices[-2]
-            true_secondary_masses.append(halo.mass[secondary_loc])
-            true_secondary_coords.append([halo.x[secondary_loc], halo.y[secondary_loc]])
+            sorted_idx = np.argsort(halo.mass)
+            sec_idx = sorted_idx[-2]
+            true_secondary_masses.append(halo.mass[sec_idx])
+            true_secondary_coords.append([halo.x[sec_idx], halo.y[sec_idx]])
         else:
             true_secondary_masses.append(np.nan)
             true_secondary_coords.append([np.nan, np.nan])
-    
-    true_primary_masses = np.array(true_primary_masses)
+
+    true_primary_masses  = np.array(true_primary_masses)
     true_secondary_masses = np.array(true_secondary_masses)
-    true_primary_coords = np.array(true_primary_coords)
+    true_primary_coords   = np.array(true_primary_coords)
     true_secondary_coords = np.array(true_secondary_coords)
 
-    # Extract inferred masses
-    # Adjust as needed for the columns available in the CSV produced by run_test_parallel
-    mass = results['Mass_all_signals'].astype(float).values
-    mass_gamma_f = results['Mass_gamma_F'].astype(float).values
-    mass_f_g = results['Mass_F_G'].astype(float).values
-    mass_gamma_g = results['Mass_gamma_G'].astype(float).values
+    # ------------------------- Extract Inferred Masses -------------------------
+    signals = ['All Signals', 'Shear+Flex', 'Flex+GFlex', 'Shear+GFlex']
+    mass_cols = [
+        'Mass_all_signals', 'Mass_gamma_F',
+        'Mass_F_G', 'Mass_gamma_G'
+    ]
+    all_masses = [np.nan_to_num(results[col].astype(float).values) for col in mass_cols]
 
-    # Replace NaNs with zeros if needed
-    mass = np.nan_to_num(mass)
-    mass_gamma_f = np.nan_to_num(mass_gamma_f)
-    mass_f_g = np.nan_to_num(mass_f_g)
-    mass_gamma_g = np.nan_to_num(mass_gamma_g)
-
-    masses = [mass, mass_gamma_f, mass_f_g, mass_gamma_g]
-    signals = ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']
-
-    # Plot the correlation between true and inferred masses
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    # ------------------------- Plot: Total Cluster Masses -------------------------
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
     fig.suptitle('Reconstruction of Total Cluster Masses')
-    ax = ax.flatten()
+    axes = axes.flatten()
     for i in range(4):
-        # Filter out zero or invalid values if needed
-        valid_indices = (masses[i] > 0) 
-        true_mass_temp = true_mass[valid_indices]
-        inferred_mass_temp = masses[i][valid_indices]
-
-        ax[i].scatter(true_mass_temp, inferred_mass_temp, s=10, color='black')
-        ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
-
-        # Add a line of best fit
-        x = np.linspace(1e14, 1e15, 100)
-        if len(true_mass_temp) > 1 and len(inferred_mass_temp) > 1:
-            try:
-                m, b = np.polyfit(np.log10(true_mass_temp), np.log10(inferred_mass_temp), 1)
-                ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label=f'Best Fit: m = {m:.2f}')
-            except:
-                print('Skipping line of best fit')
-        # Add an agreement line
-        ax[i].plot(x, x, color='blue', linestyle='--', label='Agreement Line')
-        ax[i].legend()
-        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
-        ax[i].set_ylabel(r'$M_{\rm inferred}$ [$M_{\odot}$]')
-        if len(true_mass_temp) > 1:
-            corr = np.corrcoef(true_mass_temp, inferred_mass_temp)[0, 1]
-        else:
-            corr = np.nan
-        ax[i].set_title(f'Signal Combination: {signals[i]} \n Correlation Coefficient: {corr:.2f}')
-
+        plot_correlation(
+            axes[i],
+            true_mass,
+            all_masses[i],
+            signals_label=signals[i],
+            x_label=r'$M_{\rm true}\,[M_{\odot}]$',
+            y_label=r'$M_{\rm inferred}\,[M_{\odot}]$',
+            x_range=(1e14, 1e15)
+        )
     fig.tight_layout()
-    fig.savefig(plot_name + '_mass_correlation.png')
+    fig.savefig(f'{plot_name}mass_correlation.png')
 
-    # If you need to parse and plot primary/secondary coordinates and masses,
-    # you can parse them here similarly. For example:
-    # For primary coordinates:
+    # ------------------------- Parse & Plot: Primary Coordinates/Masses -------------------------
     primary_coord_cols = [
         'Primary_Coord_all_signals', 'Primary_Coord_gamma_F',
         'Primary_Coord_F_G', 'Primary_Coord_gamma_G'
     ]
-    # Parsing coordinate strings like "[x y]"
-    primary_coords = []
-    for col in primary_coord_cols:
-        coord_strs = results[col].values
-        parsed = []
-        for cs in coord_strs:
-            if isinstance(cs, str) and cs.strip().startswith('[') and cs.strip().endswith(']'):
-                vals = cs.strip('[]').split()
-                if len(vals) == 2:
-                    x, y = vals
-                    x, y = float(x), float(y)
-                    parsed.append([x, y])
-                else:
-                    parsed.append([np.nan, np.nan])
-            else:
-                parsed.append([np.nan, np.nan])
-        primary_coords.append(np.array(parsed))
-    # Now get the primary masses
     primary_mass_cols = [
         'Primary_Mass_all_signals', 'Primary_Mass_gamma_F',
         'Primary_Mass_F_G', 'Primary_Mass_gamma_G'
     ]
-    primary_masses = []
-    for col in primary_mass_cols:
-        primary_masses.append(results[col].values.astype(float))
+    parsed_primary_coords = parse_coordinates(results, primary_coord_cols)
+    parsed_primary_masses = [results[col].astype(float).values for col in primary_mass_cols]
 
-    # Similarly, you can parse secondary coordinates and masses
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle('Reconstruction of Primary Halo Masses')
+    axes = axes.flatten()
+    for i in range(4):
+        plot_correlation(
+            axes[i],
+            true_primary_masses,
+            parsed_primary_masses[i],
+            signals_label=signals[i],
+            x_label=r'$M_{\rm true}\,[M_{\odot}]$',
+            y_label=r'$M_{\rm primary}\,[M_{\odot}]$',
+            x_range=(1e14, 1e15)
+        )
+    fig.tight_layout()
+    fig.savefig(f'{plot_name}primary_masses.png')
+
+    # ------------------------- Parse & Plot: Secondary Coordinates/Masses -------------------------
     secondary_coord_cols = [
         'Secondary_Coord_all_signals', 'Secondary_Coord_gamma_F',
         'Secondary_Coord_F_G', 'Secondary_Coord_gamma_G'
     ]
-    secondary_coords = []
-
-    for col in secondary_coord_cols:
-        coord_strs = results[col].values
-        parsed = []
-        for cs in coord_strs:
-            if isinstance(cs, str) and cs.strip().startswith('[') and cs.strip().endswith(']'):
-                vals = cs.strip('[]').split()
-                if len(vals) == 2:
-                    x, y = vals
-                    x, y = float(x), float(y)
-                    parsed.append([x, y])
-                else:
-                    parsed.append([np.nan, np.nan])
-            else:
-                parsed.append([np.nan, np.nan])
-        secondary_coords.append(np.array(parsed))
-    
-    # Now get the secondary masses
     secondary_mass_cols = [
         'Secondary_Mass_all_signals', 'Secondary_Mass_gamma_F',
         'Secondary_Mass_F_G', 'Secondary_Mass_gamma_G'
     ]
-    secondary_masses = []
-    for col in secondary_mass_cols:
-        secondary_masses.append(results[col].values.astype(float))
+    parsed_secondary_coords = parse_coordinates(results, secondary_coord_cols)
+    parsed_secondary_masses = [results[col].astype(float).values for col in secondary_mass_cols]
 
-    # Now you can plot the primary and secondary masses and coordinates
-    # For example, you can plot the primary masses against the true masses
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    fig.suptitle('Reconstruction of Primary Halo Masses')
-    ax = ax.flatten()
-    for i in range(4):
-        # Cycle through the signal combinations
-        # Filter out zero or invalid values if needed
-        valid_indices = (primary_masses[i] > 0) 
-        true_mass_temp = true_primary_masses[valid_indices]
-        primary_mass_temp = primary_masses[i][valid_indices]
-
-        ax[i].scatter(true_mass_temp, primary_mass_temp, s=10, color='black')
-        ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
-
-        # Add a line of best fit
-        x = np.linspace(1e14, 1e15, 100)
-        if len(true_mass_temp) > 1 and len(primary_mass_temp) > 1:
-            try:
-                m, b = np.polyfit(np.log10(true_mass_temp), np.log10(primary_mass_temp), 1)
-                ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label=f'Best Fit: m = {m:.2f}')
-            except:
-                print('Skipping line of best fit')
-        # Add an agreement line
-        ax[i].plot(x, x, color='blue', linestyle='--', label='Agreement Line')
-        ax[i].legend()
-        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
-        ax[i].set_ylabel(r'$M_{\rm primary}$ [$M_{\odot}$]')
-        if len(true_mass_temp) > 1:
-            corr = np.corrcoef(true_mass_temp, primary_mass_temp)[0, 1]
-        else:
-            corr = np.nan
-        ax[i].set_title(f'Signal Combination: {signals[i]} \n Correlation Coefficient: {corr:.2f}')
-    
-    fig.tight_layout()
-    fig.savefig(plot_name + '_primary_masses.png')
-
-    # Similarly, you can plot the secondary masses against the true masses
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
     fig.suptitle('Reconstruction of Largest Subhalo Masses')
-    ax = ax.flatten()
+    axes = axes.flatten()
     for i in range(4):
-        valid_indices = (secondary_masses[i] > 0)
-        true_mass_temp = true_secondary_masses[valid_indices]
-        secondary_mass_temp = secondary_masses[i][valid_indices]
-
-        ax[i].scatter(true_mass_temp, secondary_mass_temp, s=10, color='black')
-        ax[i].set_xscale('log')
-        ax[i].set_yscale('log')
-
-        # Add a line of best fit
-        x = np.linspace(1e12, 1e14, 100)
-        if len(true_mass_temp) > 1 and len(secondary_mass_temp) > 1:
-            try:
-                m, b = np.polyfit(np.log10(true_mass_temp), np.log10(secondary_mass_temp), 1)
-                ax[i].plot(x, 10**(m*np.log10(x) + b), color='red', label=f'Best Fit: m = {m:.2f}')
-            except:
-                print('Skipping line of best fit')
-        # Add an agreement line
-        ax[i].plot(x, x, color='blue', linestyle='--', label='Agreement Line')
-        ax[i].legend()
-        ax[i].set_xlabel(r'$M_{\rm true}$ [$M_{\odot}$]')
-        ax[i].set_ylabel(r'$M_{\rm secondary}$ [$M_{\odot}$]')
-        if len(true_mass_temp) > 1:
-            corr = np.corrcoef(true_mass_temp, secondary_mass_temp)[0, 1]
-        else:
-            corr = np.nan
-        ax[i].set_title(f'Signal Combination: {signals[i]} \n Correlation Coefficient: {corr:.2f}')
-
+        plot_correlation(
+            axes[i],
+            true_secondary_masses,
+            parsed_secondary_masses[i],
+            signals_label=signals[i],
+            x_label=r'$M_{\rm true}\,[M_{\odot}]$',
+            y_label=r'$M_{\rm secondary}\,[M_{\odot}]$',
+            x_range=(1e12, 1e14)
+        )
     fig.tight_layout()
-    fig.savefig(plot_name + '_secondary_masses.png')
+    fig.savefig(f'{plot_name}secondary_masses.png')
 
-    # Now you can plot the primary and secondary coordinates as histograms
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
+    # ------------------------- Plot: Primary Coordinates as 2D Hist -------------------------
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
     fig.suptitle('Distance from Located Primary Halo to True Primary Halo')
-    ax = ax.flatten()
+    axes = axes.flatten()
     for i in range(4):
-        valid_indices = ~np.isnan(primary_coords[i][:, 0]) & ~np.isnan(primary_coords[i][:, 1])
-        x = primary_coords[i][valid_indices, 0]
-        y = primary_coords[i][valid_indices, 1]
-        # Bin the data and plot a 2D histogram
-        bins = np.linspace(-50, 50, 50)
-
-        ax[i].hist2d(x, y, bins=bins, cmap='viridis')
-        ax[i].set_xlabel('x [arcseconds]')
-        ax[i].set_ylabel('y [arcseconds]')
-        ax[i].set_title(f'Signal Combination: {signals[i]}')
-
-        # Add a colorbar
-        cbar = plt.colorbar(ax[i].collections[0], ax=ax[i])
-        cbar.set_label('Number of Halos')
-
-
+        plot_2d_hist(
+            axes[i],
+            parsed_primary_coords[i],
+            signals[i],
+            bins=np.linspace(-50, 50, 50)
+        )
     fig.tight_layout()
-    fig.savefig(plot_name + '_primary_coords.png')
+    fig.savefig(f'{plot_name}primary_coords.png')
 
-    # Similarly, you can plot the secondary coordinates as histograms
-    fig, ax = plt.subplots(2, 2, figsize=(10, 10))
-    fig.suptitle('Distance from Largest Located Subhalo to Largest True Subhalo')
-    ax = ax.flatten()
+    # ------------------------- Plot: Secondary Coordinates as 2D Hist -------------------------
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+    fig.suptitle('Distance from Located Largest Subhalo to Largest True Subhalo')
+    axes = axes.flatten()
     for i in range(4):
-        valid_indices = ~np.isnan(secondary_coords[i][:, 0]) & ~np.isnan(secondary_coords[i][:, 1])
-        x = secondary_coords[i][valid_indices, 0]
-        y = secondary_coords[i][valid_indices, 1]
-        bins = np.linspace(-50, 50, 50)
-
-        ax[i].hist2d(x, y, bins=bins, cmap='viridis')
-        ax[i].set_xlabel('x [arcseconds]')
-        ax[i].set_ylabel('y [arcseconds]')
-        ax[i].set_title(f'Signal Combination: {signals[i]}')
-
-        # Add a colorbar
-        cbar = plt.colorbar(ax[i].collections[0], ax=ax[i])
-        cbar.set_label('Number of Halos')
-
+        plot_2d_hist(
+            axes[i],
+            parsed_secondary_coords[i],
+            signals[i],
+            bins=np.linspace(-50, 50, 50)
+        )
     fig.tight_layout()
-    fig.savefig(plot_name + '_secondary_coords.png')
+    fig.savefig(f'{plot_name}secondary_coords.png')
 
 
 # --------------------------------------------
@@ -463,7 +383,7 @@ def find_halos(ids, z):
     return halos
 
 
-def build_lensing_field(halos, z, Nsource = None):
+def build_lensing_field(halos, z, N, Nsource = None):
     '''
     Given a set of halos, run the analysis
     This involves the following steps
@@ -476,6 +396,10 @@ def build_lensing_field(halos, z, Nsource = None):
     6. Return the lenses and sources
     '''
 
+    # Remove halos that are more than 1 Mpc away from the centroid - these are not actual members of the cluster
+    centroid = np.argmax(halos.mass)
+    halos.remove(((halos.x - halos.x[centroid])**2 + (halos.y - halos.y[centroid])**2 + (halos.z - halos.z[centroid])**2)**0.5 > 1)
+
     # Convert the halo coordinates to a 2D projection
     halos.project_to_2D()
     d = cosmo.angular_diameter_distance(z).to(u.meter).value
@@ -483,7 +407,6 @@ def build_lensing_field(halos, z, Nsource = None):
     halos.y *= (3.086 * 10**22 / d) * 206265
 
     # Center the lenses at (0, 0)
-    # This is done by finding the largest halo and setting its coordinates to (0, 0)
     # This is allowed because observations will center on the region of highest light, which should be the center of mass
 
     largest_halo = np.argmax(halos.mass)
@@ -491,22 +414,18 @@ def build_lensing_field(halos, z, Nsource = None):
     halos.x -= centroid[0] 
     halos.y -= centroid[1] 
 
-    # Reassign concentration values, instead of using MDARK values
-    # halos.calculate_concentration()
-    # Remove any halos with concentrations greater than 10
+    # Remove any halos with concentrations greater than 10 - these are not realistic
     halos.remove(halos.concentration > 10)
 
+    # Set the maximum extent of the field of view 
     xmax = np.max((halos.x**2 + halos.y**2)**0.5)
-
-    # Set a maximum size for the field of view of 5 arcminutes
-    # And a minimum size of 1 arcminute
-    xmax = np.min([xmax, 300]) # arcseconds
+    xmax = np.min([xmax, 180]) # arcseconds
     xmax = np.max([xmax, 60]) # arcseconds
-    
+
     # Generate a set of background galaxies
     ns = 0.01
     Nsource = int(ns * np.pi * (xmax)**2) # Number of sources
-    rs = np.sqrt(np.random.random(Nsource)) * xmax
+    rs = np.sqrt(np.random.random(Nsource)) * xmax # Place sources randomly but symmetrically within a circle
     theta = np.random.random(Nsource) * 2 * np.pi
     xs = rs * np.cos(theta)
     ys = rs * np.sin(theta)
@@ -514,6 +433,16 @@ def build_lensing_field(halos, z, Nsource = None):
     sources.apply_lensing(halos, lens_type='NFW', z_source=z_source)
     sources.apply_noise()
     sources.filter_sources(xmax)
+
+    # Plot the lenses and sources
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.scatter(halos.x, halos.y, color='blue', label='Lenses', marker='x')
+    ax.scatter(sources.x, sources.y, s=1, color='red', label='Sources')
+    ax.set_xlabel('x [arcseconds]')
+    ax.set_ylabel('y [arcseconds]')
+    ax.set_title('Lenses and Sources')
+    ax.legend()
+    plt.savefig('Output/MDARK/cluster_{}.png'.format(N))
 
     return halos, sources, xmax
 
@@ -756,7 +685,7 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
     xmax_values = []
 
     for ID in IDs:
-        halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
+        halos[ID], sources, xmax = build_lensing_field(halos[ID], z, ID)
         source_catalogue[ID] = sources
         xmax_values.append(xmax)
 
@@ -817,6 +746,9 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
 
 
 def process_md_set(test_number):
+    '''
+    Function to process a test set of MDARK clusters
+    '''
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
     z_chosen = zs[0]
@@ -836,62 +768,6 @@ if __name__ == '__main__':
     test_number = 20
     ID_name = 'Output/MDARK/Test{}/ID_file_{}.csv'.format(test_number, test_number)
     result_name = 'Output/MDARK/Test{}/results_{}.csv'.format(test_number, test_number)
-    plot_name = 'Output/MDARK/mass_correlations/test_{}'.format(test_number)
-    # build_ID_list(test_number, 30, 0.194)
-    # build_ID_file(30, 'Output/MDARK/Test19/ID_options.csv', test_number, 0.194)
-    process_md_set(test_number)
-    build_mass_correlation_plot('Output/MDARK/Test19/ID_file_19.csv', 'Output/MDARK/Test19/results_19.csv', 'Output/MDARK/mass_correlations/test_19')
-    # Pick out a halo, run the pipeline, look at the results
-
-    raise ValueError('Stop here')
-    # IDs = [IDs[0]] # Pick out the first cluster to study
-    
-    z = 0.194
-    counter = 0
-    for ID in IDs:
-        halos = find_halos([ID], z)
-        halos_copy = halos[ID].copy()
-        halos_copy.calculate_concentration()
-        print(halos_copy.mass)
-
-        # Compare the concentration of the MDARK halo to our linear fit
-        plt.figure()
-        plt.scatter(halos_copy.concentration, halos[ID].concentration, color='black')
-        plt.xlabel('Concentration (Linear Fit)')
-        plt.ylabel('Concentration (MDARK)')
-        plt.title('Cluster ID: {}'.format(ID))
-        plt.savefig('Output/MDARK/pipeline_visualization/concentration_comparison_{}.png'.format(counter))
-        plt.close()
-
-        '''
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        fancyhist(np.log10(halos[ID].mass), bins='freedman', ax=ax, color='blue')
-        ax.set_xlabel('log10(Mass)')
-        ax.set_ylabel('Frequency')
-        ax.set_title('Cluster ID: {}'.format(ID))
-        plt.savefig('Output/MDARK/pipeline_visualization/mass_histogram_{}.png'.format(counter))
-        plt.close()
-        '''
-
-        halos[ID], sources, xmax = build_lensing_field(halos[ID], z)
-        candidate_lenses, _ = main.fit_lensing_field(sources, xmax, True, [True, True, False], lens_type='NFW')
-        # Determine size of lenses in the plot based on their mass
-        true_sizes = (np.log10(halos[ID].mass) - 12) * 10
-        recon_sizes = (np.log10(candidate_lenses.mass) - 12) * 10
-
-        plt.figure()
-        plt.scatter(sources.x, sources.y, s=10, color='black', alpha=0.5, label='Sources')
-        plt.scatter(halos[ID].x, halos[ID].y, s=true_sizes, color='red', label='Lenses', marker='x')
-        plt.scatter(candidate_lenses.x, candidate_lenses.y, s=recon_sizes, color='blue', label='Candidates', marker='o')
-        # Label candidates with their masses
-        for i in range(len(candidate_lenses.x)):
-            plt.text(candidate_lenses.x[i], candidate_lenses.y[i], '{:.2e}'.format(candidate_lenses.mass[i]), fontsize=8)
-        plt.legend()
-        plt.xlabel('x [arcseconds]')
-        plt.ylabel('y [arcseconds]')
-        plt.title('Cluster ID: {} \n True Mass: {:.2e} $M_{{\odot}}$ \n Candidate Mass: {:.2e} $M_{{\odot}}$'.format(ID, np.sum(halos[ID].mass), np.sum(candidate_lenses.mass)))
-        plt.gca().set_aspect('equal', adjustable='box')
-        plt.savefig('Output/MDARK/pipeline_visualization/cluster_{}.png'.format(counter))
-        plt.close()
-
-        counter += 1
+    plot_name = 'Output/MDARK/Test{}/'.format(test_number)
+    # process_md_set(test_number)
+    build_mass_correlation_plot(ID_name, result_name, plot_name)
