@@ -37,7 +37,7 @@ column_names = [
 plt.style.use('scientific_presentation.mplstyle')
 
 
-def build_mass_correlation_plot(ID_file, file_name, plot_name):
+def build_mass_correlation_plot(test_dir, test_num):
     """
     This function reads true and inferred halo information from CSV files,
     plots mass correlations, and optionally plots subhalo (primary/secondary)
@@ -93,148 +93,92 @@ def build_mass_correlation_plot(ID_file, file_name, plot_name):
         cbar = plt.colorbar(ax.collections[0], ax=ax)
         cbar.set_label('Number of Halos')
 
+    def plot_clusters(ax, true_halos, found_halos, x_label='x [arcsec]', y_label='y [arcsec]'):
+        ax.scatter(true_halos.x, true_halos.y, color='blue', label='True Halos', marker='x')
+        ax.scatter(found_halos.x, found_halos.y, color='red', label='Found Halos', marker='o')
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        ax.legend()
+        ax.axis('equal')
+
+    # ------------------------- Define Path Names----------------------
+    results_file = f'{test_dir}/results_{test_num}.csv'
+    ID_file = f'{test_dir}/ID_file_{test_num}.csv'
+
+    # ------------------------- Name Mapping -------------------------
+    signal_map = {
+        'All Signals': (True, True, True),
+        'Shear and Flexion': (True, True, False),
+        'Flexion and G-Flexion': (False, True, True),
+        'Shear and G-Flexion': (True, False, True)
+    }
+
     # ------------------------- Load CSV Data -------------------------
-    results = pd.read_csv(file_name)
     ID_results = pd.read_csv(ID_file)
     true_mass = ID_results['Mass'].values
+    true_halos = find_halos(ID_results['MainHaloID'].values, 0.194)
+    for ID in true_halos:
+        true_halos[ID], _, _ = build_lensing_field(true_halos[ID], 0.194, 0)
 
-    # ------------------------- Load Halos & True Masses -------------------------
-    # This block extracts true primary and secondary masses + coords for each halo.
-    halos = find_halos(ID_results['MainHaloID'].values, 0.194)
-    true_primary_masses, true_secondary_masses = [], []
-    true_primary_coords, true_secondary_coords = [], []
+    # Load the reconstructed halos 
+    # The halos are stored across multiple csv files in the test_dir
+    # In the format candidate_lenses_{ID}_{test_idx}_{signal}.csv
+    # Read these all in and store them in a dictionary keyed by ID and signal type
+    # Open up the results file and read in the data
+    results_file = f'{test_dir}/results_{test_num}.csv'
+    x, y, z, concentration, mass, chi2, ID, signal = [], [], [], [], [], [], [], []
+    # Read in the data from the results file
+    with open(results_file, 'r') as f:
+        lines = f.readlines()[1:]
+        for line in lines:
+            vals = line.split(',')
+            x.append(float(vals[0]))
+            y.append(float(vals[1]))
+            z.append(float(vals[2]))
+            concentration.append(float(vals[3]))
+            mass.append(float(vals[4]))
+            chi2.append(float(vals[5]))
+            ID.append(int(vals[6]))
+            signal.append(vals[7].strip())
+    # Convert to numpy arrays
+    x = np.array(x)
+    y = np.array(y)
+    z = np.array(z)
+    concentration = np.array(concentration)
+    mass = np.array(mass)
+    chi2 = np.array(chi2)
+    ID = np.array(ID)
+    signal = np.array(signal)
 
+    found_halos = {}
+    for i in range(len(ID_results)):
+        IDs = ID_results['MainHaloID'].values[i]
+        # Initialize nested dictionary if it does not exist
+        if IDs not in found_halos:
+            found_halos[IDs] = {}
+
+        for signal_type in ['All Signals', 'Shear and Flexion', 'Flexion and G-Flexion', 'Shear and G-Flexion']:
+            idx = np.where((ID == IDs) & (signal == signal_type))[0]
+            found_halos[IDs][signal_type] = halo_obj.NFW_Lens(
+                x[idx],
+                y[idx],
+                z[idx],
+                concentration[idx],
+                mass[idx],
+                0.197,
+                chi2[idx]
+            )
+
+    # ------------------------- Plot clusters -------------------------
+    # Just plot every cluster with all signals
     for ID in ID_results['MainHaloID'].values:
-        halo = halos[ID]
-        main_halo_idx = np.argmax(halo.mass)
-        halo.x -= halo.x[main_halo_idx]
-        halo.y -= halo.y[main_halo_idx]
-        true_primary_masses.append(halo.mass[main_halo_idx])
-        true_primary_coords.append([halo.x[main_halo_idx], halo.y[main_halo_idx]])
-
-        if len(halo.mass) >= 2:
-            sorted_idx = np.argsort(halo.mass)
-            sec_idx = sorted_idx[-2]
-            true_secondary_masses.append(halo.mass[sec_idx])
-            true_secondary_coords.append([halo.x[sec_idx], halo.y[sec_idx]])
-        else:
-            true_secondary_masses.append(np.nan)
-            true_secondary_coords.append([np.nan, np.nan])
-
-    true_primary_masses  = np.array(true_primary_masses)
-    true_secondary_masses = np.array(true_secondary_masses)
-    true_primary_coords   = np.array(true_primary_coords)
-    true_secondary_coords = np.array(true_secondary_coords)
-
-    # ------------------------- Extract Inferred Masses -------------------------
-    signals = ['All Signals', 'Shear+Flex', 'Flex+GFlex', 'Shear+GFlex']
-    mass_cols = [
-        'Mass_all_signals', 'Mass_gamma_F',
-        'Mass_F_G', 'Mass_gamma_G'
-    ]
-    all_masses = [np.nan_to_num(results[col].astype(float).values) for col in mass_cols]
-
-    # ------------------------- Plot: Total Cluster Masses -------------------------
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    fig.suptitle('Reconstruction of Total Cluster Masses')
-    axes = axes.flatten()
-    for i in range(4):
-        plot_correlation(
-            axes[i],
-            true_mass,
-            all_masses[i],
-            signals_label=signals[i],
-            x_label=r'$M_{\rm true}\,[M_{\odot}]$',
-            y_label=r'$M_{\rm inferred}\,[M_{\odot}]$',
-            x_range=(1e14, 1e15)
-        )
-    fig.tight_layout()
-    fig.savefig(f'{plot_name}mass_correlation.png')
-
-    # ------------------------- Parse & Plot: Primary Coordinates/Masses -------------------------
-    primary_coord_cols = [
-        'Primary_Coord_all_signals', 'Primary_Coord_gamma_F',
-        'Primary_Coord_F_G', 'Primary_Coord_gamma_G'
-    ]
-    primary_mass_cols = [
-        'Primary_Mass_all_signals', 'Primary_Mass_gamma_F',
-        'Primary_Mass_F_G', 'Primary_Mass_gamma_G'
-    ]
-    parsed_primary_coords = parse_coordinates(results, primary_coord_cols)
-    parsed_primary_masses = [results[col].astype(float).values for col in primary_mass_cols]
-
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    fig.suptitle('Reconstruction of Primary Halo Masses')
-    axes = axes.flatten()
-    for i in range(4):
-        plot_correlation(
-            axes[i],
-            true_primary_masses,
-            parsed_primary_masses[i],
-            signals_label=signals[i],
-            x_label=r'$M_{\rm true}\,[M_{\odot}]$',
-            y_label=r'$M_{\rm primary}\,[M_{\odot}]$',
-            x_range=(1e14, 1e15)
-        )
-    fig.tight_layout()
-    fig.savefig(f'{plot_name}primary_masses.png')
-
-    # ------------------------- Parse & Plot: Secondary Coordinates/Masses -------------------------
-    secondary_coord_cols = [
-        'Secondary_Coord_all_signals', 'Secondary_Coord_gamma_F',
-        'Secondary_Coord_F_G', 'Secondary_Coord_gamma_G'
-    ]
-    secondary_mass_cols = [
-        'Secondary_Mass_all_signals', 'Secondary_Mass_gamma_F',
-        'Secondary_Mass_F_G', 'Secondary_Mass_gamma_G'
-    ]
-    parsed_secondary_coords = parse_coordinates(results, secondary_coord_cols)
-    parsed_secondary_masses = [results[col].astype(float).values for col in secondary_mass_cols]
-
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    fig.suptitle('Reconstruction of Largest Subhalo Masses')
-    axes = axes.flatten()
-    for i in range(4):
-        plot_correlation(
-            axes[i],
-            true_secondary_masses,
-            parsed_secondary_masses[i],
-            signals_label=signals[i],
-            x_label=r'$M_{\rm true}\,[M_{\odot}]$',
-            y_label=r'$M_{\rm secondary}\,[M_{\odot}]$',
-            x_range=(1e12, 1e14)
-        )
-    fig.tight_layout()
-    fig.savefig(f'{plot_name}secondary_masses.png')
-
-    # ------------------------- Plot: Primary Coordinates as 2D Hist -------------------------
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    fig.suptitle('Distance from Located Primary Halo to True Primary Halo')
-    axes = axes.flatten()
-    for i in range(4):
-        plot_2d_hist(
-            axes[i],
-            parsed_primary_coords[i],
-            signals[i],
-            bins=np.linspace(-50, 50, 50)
-        )
-    fig.tight_layout()
-    fig.savefig(f'{plot_name}primary_coords.png')
-
-    # ------------------------- Plot: Secondary Coordinates as 2D Hist -------------------------
-    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
-    fig.suptitle('Distance from Located Largest Subhalo to Largest True Subhalo')
-    axes = axes.flatten()
-    for i in range(4):
-        plot_2d_hist(
-            axes[i],
-            parsed_secondary_coords[i],
-            signals[i],
-            bins=np.linspace(-50, 50, 50)
-        )
-    fig.tight_layout()
-    fig.savefig(f'{plot_name}secondary_coords.png')
-
+        fig, ax = plt.subplots(figsize=(10, 10))
+        plot_clusters(ax, true_halos[ID], found_halos[ID]['All Signals'])
+        plt.savefig(f'{test_dir}/cluster_{ID}.png')
+        plt.close()
+    
+    # ------------------------- Plot Mass Correlations -------------------------
+    # Write this out later
 
 # --------------------------------------------
 # File Management Functions
@@ -383,7 +327,7 @@ def find_halos(ids, z):
     return halos
 
 
-def build_lensing_field(halos, z, N, Nsource = None):
+def build_lensing_field(halos, z, Nsource = None):
     '''
     Given a set of halos, run the analysis
     This involves the following steps
@@ -433,16 +377,6 @@ def build_lensing_field(halos, z, N, Nsource = None):
     sources.apply_lensing(halos, lens_type='NFW', z_source=z_source)
     sources.apply_noise()
     sources.filter_sources(xmax)
-
-    # Plot the lenses and sources
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.scatter(halos.x, halos.y, color='blue', label='Lenses', marker='x')
-    ax.scatter(sources.x, sources.y, s=1, color='red', label='Sources')
-    ax.set_xlabel('x [arcseconds]')
-    ax.set_ylabel('y [arcseconds]')
-    ax.set_title('Lenses and Sources')
-    ax.legend()
-    plt.savefig('Output/MDARK/cluster_{}.png'.format(N))
 
     return halos, sources, xmax
 
@@ -592,72 +526,20 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
 # --------------------------------------------
 
 def run_single_test(args):
-    ID, signal_choices, signal_map, sources, xmax, N_test = args
-    # Initialize arrays to store results
-    masses = np.zeros((N_test, len(signal_choices)))
-    candidate_numbers = np.zeros((N_test, len(signal_choices)), dtype=int)
-    primary_coords = np.zeros((N_test, len(signal_choices), 2))
-    secondary_coords = np.zeros((N_test, len(signal_choices), 2))
-    primary_masses = np.zeros((N_test, len(signal_choices)))
-    secondary_masses = np.zeros((N_test, len(signal_choices)))
+    test_number, ID, signal_choices, signal_map, sources, xmax, N_test = args
 
     for test_idx in range(N_test):
         for idx, signal_choice in enumerate(signal_choices):
             candidate_lenses, _ = main.fit_lensing_field(sources, xmax, False, signal_choice, lens_type='NFW')
-
-            candidate_masses = candidate_lenses.mass
-            candidate_x = candidate_lenses.x
-            candidate_y = candidate_lenses.y
-
-            masses[test_idx, idx] = np.sum(candidate_masses)
-            candidate_numbers[test_idx, idx] = len(candidate_x)
-
-            # Primary lens
-            if len(candidate_masses) > 0:
-                primary_loc = np.argmax(candidate_masses)
-                primary_coords[test_idx, idx] = [candidate_x[primary_loc], candidate_y[primary_loc]]
-                primary_masses[test_idx, idx] = candidate_masses[primary_loc]
-            else:
-                primary_coords[test_idx, idx] = [np.nan, np.nan]
-                primary_masses[test_idx, idx] = np.nan
-
-            # Secondary lens
-            if len(candidate_masses) >= 2:
-                sorted_indices = np.argsort(candidate_masses)
-                secondary_loc = sorted_indices[-2]
-                secondary_coords[test_idx, idx] = [candidate_x[secondary_loc], candidate_y[secondary_loc]]
-                secondary_masses[test_idx, idx] = candidate_masses[secondary_loc]
-            else:
-                secondary_coords[test_idx, idx] = [np.nan, np.nan]
-                secondary_masses[test_idx, idx] = np.nan
-
-    # Compute averages
-    mean_masses = np.mean(masses, axis=0)
-    mean_candidate_numbers = np.mean(candidate_numbers, axis=0)
-    mean_primary_coords = np.mean(primary_coords, axis=0)
-    mean_secondary_coords = np.mean(secondary_coords, axis=0)
-    mean_primary_masses = np.mean(primary_masses, axis=0)
-    mean_secondary_masses = np.mean(secondary_masses, axis=0)
-
-    # Store results in a structured dictionary for easy reading
-    results_dict = {'ID': ID, 'results': {}}
-
-    for i, sc in enumerate(signal_choices):
-        sc_key = signal_map[sc]
-        results_dict['results'][sc_key] = {
-            'mean_mass': mean_masses[i],
-            'mean_candidate_number': mean_candidate_numbers[i],
-            'mean_primary_coord': mean_primary_coords[i].tolist(),
-            'mean_primary_mass': mean_primary_masses[i],
-            'mean_secondary_coord': mean_secondary_coords[i].tolist(),
-            'mean_secondary_mass': mean_secondary_masses[i]
-        }
-
-    print(f'Finished test for cluster {ID}')
-    return results_dict
+            data = np.vstack((candidate_lenses.x, candidate_lenses.y, candidate_lenses.z, candidate_lenses.concentration, candidate_lenses.mass, candidate_lenses.chi2)).T
+            with open('Output/MDARK/Test{}/results_{}.csv'.format(test_number, test_number), 'a') as f:
+                for row in data:
+                    f.write('{},{},{},{},{},{},{},{}\n'.format(row[0], row[1], row[2], row[3], row[4], row[5], ID, signal_map[signal_choice]))
+    print('ID {} completed...'.format(ID))
+    return True
 
 
-def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
+def run_test_parallel(ID_file, z, N_test, test_number, lensing_type='NFW'):
     IDs = []
     with open(ID_file, 'r') as f:
         lines = f.readlines()[1:]
@@ -692,57 +574,21 @@ def run_test_parallel(ID_file, result_file, z, N_test, lensing_type='NFW'):
     print('Halo and Source objects loaded...')
 
     # Do not convert signal_choices tuples into lists
-    tasks = [(ID, signal_choices, signal_map, source_catalogue[ID], xmax_values[i], N_test)
+    tasks = [(test_number, ID, signal_choices, signal_map, source_catalogue[ID], xmax_values[i], N_test)
             for i, ID in enumerate(IDs)]
-
+    
+    # Create a results csv file to store the results
+    results_file = 'Output/MDARK/Test{}/results_{}.csv'.format(test_number, test_number)
+    with open(results_file, 'w') as f:
+        f.write("x,y,z,concentration,mass,chi2,ID,signal\n")
+    
     with Pool() as pool:
         results = pool.map(run_single_test, tasks)
 
-    headers = [
-        'ID',
-        'Mass_all_signals', 'Mass_gamma_F', 'Mass_F_G', 'Mass_gamma_G',
-        'Nfound_all_signals', 'Nfound_gamma_F', 'Nfound_F_G', 'Nfound_gamma_G',
-        'Primary_Coord_all_signals', 'Primary_Coord_gamma_F', 'Primary_Coord_F_G', 'Primary_Coord_gamma_G',
-        'Primary_Mass_all_signals', 'Primary_Mass_gamma_F', 'Primary_Mass_F_G', 'Primary_Mass_gamma_G',
-        'Secondary_Coord_all_signals', 'Secondary_Coord_gamma_F', 'Secondary_Coord_F_G', 'Secondary_Coord_gamma_G',
-        'Secondary_Mass_all_signals', 'Secondary_Mass_gamma_F', 'Secondary_Mass_F_G', 'Secondary_Mass_gamma_G'
-    ]
+    # Put the results in a file
+    
 
-    with open(result_file, 'w') as f:
-        f.write(','.join(headers) + '\n')
-
-        for res_dict in results:
-            ID = res_dict['ID']
-            row = [ID]
-
-            for sc in signal_choices:
-                sc_key = signal_map[sc]
-                data = res_dict['results'][sc_key]
-                row.append(data['mean_mass'])
-            for sc in signal_choices:
-                sc_key = signal_map[sc]
-                data = res_dict['results'][sc_key]
-                row.append(data['mean_candidate_number'])
-            for sc in signal_choices:
-                sc_key = signal_map[sc]
-                data = res_dict['results'][sc_key]
-                x, y = data['mean_primary_coord']
-                row.append(f"[{x} {y}]")
-            for sc in signal_choices:
-                sc_key = signal_map[sc]
-                data = res_dict['results'][sc_key]
-                row.append(data['mean_primary_mass'])
-            for sc in signal_choices:
-                sc_key = signal_map[sc]
-                data = res_dict['results'][sc_key]
-                x, y = data['mean_secondary_coord']
-                row.append(f"[{x} {y}]")
-            for sc in signal_choices:
-                sc_key = signal_map[sc]
-                data = res_dict['results'][sc_key]
-                row.append(data['mean_secondary_mass'])
-
-            f.write(','.join(map(str, row)) + '\n')
+    print('All tests completed...')
 
 
 def process_md_set(test_number):
@@ -757,17 +603,15 @@ def process_md_set(test_number):
 
     test_dir = 'Output/MDARK/Test{}'.format(test_number)
     ID_file = test_dir + '/ID_file_{}.csv'.format(test_number)
-    result_file = test_dir + '/results_{}.csv'.format(test_number)
 
-    run_test_parallel(ID_file, result_file, z_chosen, Ntrials, lensing_type='NFW')
+    run_test_parallel(ID_file, z_chosen, Ntrials, test_number, lensing_type='NFW')
     stop = time.time()
     print('Time taken: {}'.format(stop - start))
 
 
 if __name__ == '__main__':
     test_number = 20
-    ID_name = 'Output/MDARK/Test{}/ID_file_{}.csv'.format(test_number, test_number)
-    result_name = 'Output/MDARK/Test{}/results_{}.csv'.format(test_number, test_number)
-    plot_name = 'Output/MDARK/Test{}/'.format(test_number)
+    test_dir = 'Output/MDARK/Test{}/'.format(test_number)
+    ID_name = test_dir + 'ID_file_{}.csv'.format(test_number)
     # process_md_set(test_number)
-    build_mass_correlation_plot(ID_name, result_name, plot_name)
+    build_mass_correlation_plot(test_dir, test_number)
