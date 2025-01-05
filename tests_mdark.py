@@ -94,8 +94,22 @@ def build_mass_correlation_plot(test_dir, test_num):
         cbar.set_label('Number of Halos')
 
     def plot_clusters(ax, true_halos, found_halos, x_label='x [arcsec]', y_label='y [arcsec]'):
-        ax.scatter(true_halos.x, true_halos.y, color='blue', label='True Halos', marker='x')
-        ax.scatter(found_halos.x, found_halos.y, color='red', label='Found Halos', marker='o')
+        if len(true_halos.mass) == 1:
+            sizes = np.ones(len(true_halos.mass))
+            sizes[0] = 50
+        else:
+            sizes = np.ones(len(true_halos.mass))
+            sizes[np.argsort(true_halos.mass)[-1]] = 50
+            sizes[np.argsort(true_halos.mass)[-2]] = 25
+        ax.scatter(true_halos.x, true_halos.y, s=sizes, color='blue', label='True Halos', alpha = 0.5, marker='x')
+        if len(found_halos.mass) == 1:
+            sizes = np.ones(len(found_halos.mass))
+            sizes[0] = 50
+        else:
+            sizes = np.ones(len(found_halos.mass))
+            sizes[np.argsort(found_halos.mass)[-1]] = 50
+            sizes[np.argsort(found_halos.mass)[-2]] = 25
+        ax.scatter(found_halos.x, found_halos.y, s=sizes, color='red', label='Found Halos', alpha = 0.5, marker='o')
         ax.set_xlabel(x_label)
         ax.set_ylabel(y_label)
         ax.legend()
