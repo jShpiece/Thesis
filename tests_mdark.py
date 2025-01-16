@@ -374,6 +374,10 @@ def build_lensing_field(halos, z, Nsource = None):
 
     # Remove any halos with concentrations greater than 10 - these are not realistic
     halos.remove(halos.concentration > 10)
+    # TEST - Get rid of all but the three largest halos
+    halos.remove(np.argsort(halos.mass)[:-3])
+    # CHEATING TEST - Force the second largest halo to be 1/10th the mass of the largest halo
+    halos.mass[np.argsort(halos.mass)[-2]] = halos.mass[np.argsort(halos.mass)[-1]] / 10
 
     # Set the maximum extent of the field of view 
     xmax = np.max((halos.x**2 + halos.y**2)**0.5)
@@ -587,6 +591,17 @@ def run_test_parallel(ID_file, z, N_test, test_number, lensing_type='NFW'):
 
     print('Halo and Source objects loaded...')
 
+    '''
+    for ID in IDs:
+        mass_primary = np.max(halos[ID].mass)
+        mass_secondary = np.sort(halos[ID].mass)[-2]
+        print('Primary Mass: {:.2e} Solar Masses'.format(mass_primary))
+        print('Secondary Mass: {:.2e} Solar Masses'.format(mass_secondary))
+        print('Mass Ratio: {:.2f}'.format(mass_secondary / mass_primary))
+        print('-' * 50)
+    raise ValueError
+    '''
+
     # Do not convert signal_choices tuples into lists
     tasks = [(test_number, ID, signal_choices, signal_map, source_catalogue[ID], xmax_values[i], N_test)
             for i, ID in enumerate(IDs)]
@@ -627,5 +642,5 @@ if __name__ == '__main__':
     test_number = 20
     test_dir = 'Output/MDARK/Test{}/'.format(test_number)
     ID_name = test_dir + 'ID_file_{}.csv'.format(test_number)
-    # process_md_set(test_number)
+    process_md_set(test_number)
     build_mass_correlation_plot(test_dir, test_number)

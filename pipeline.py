@@ -25,6 +25,7 @@ import source_obj # Source object
 import halo_obj # Halo object
 import metric # Metric calculation functions
 
+
 def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
     """
     Generates initial guesses for lens positions based on source ellipticity and flexion.
@@ -148,6 +149,7 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
 def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
     """
     Optimizes lens positions via local minimization.
+    Currently only minimizes relative to sources within a certain distance of the lens.
 
     Parameters:
         sources (Source): Source object containing source positions and lensing signals.
@@ -160,7 +162,6 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
     """
     # Optimizer parameters
     num_iterations = 1e6
-
 
     if lens_type == 'SIS':
         learning_rates = [1e-2, 1e-2, 1e-2]  # Learning rates for position and strength
@@ -359,7 +360,7 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
 
 def forward_lens_selection(
     sources, candidate_lenses, use_flags, lens_type='NFW',
-    base_tolerance=0.003, mass_scale=1e13, exponent=-0.5
+    base_tolerance=0.001, mass_scale=1e13, exponent=-0.5
     ):
     """
     Selects the best combination of lenses by iteratively adding lenses
