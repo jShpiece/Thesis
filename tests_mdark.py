@@ -406,7 +406,7 @@ def build_ID_list(test_number, Ncluster, redshift):
     maximum_mass = 10**15
 
     # Set up the file paths
-    key_file = 'MDARK/fixed_key_{}.MDARK'.format(redshift)
+    key_file = 'MDARK/test_key_{}.MDARK'.format(redshift)
     output_file = 'Output/MDARK/Test{}/ID_options.csv'.format(test_number, test_number)
 
     # Space the clusters out evenly in mass (when spacing evenly, do it in log space stupid!)   
@@ -456,7 +456,7 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
         lines = f.readlines()[1:]
         for line in lines:
             ID_set = line.split(',')
-            IDs.append([int(ID) for ID in ID_set])
+            IDs.append([float(ID) for ID in ID_set])
     
     keep_IDs = []
 
@@ -637,7 +637,7 @@ def process_md_set(test_number):
     '''
     # Initialize file paths
     zs = [0.194, 0.221, 0.248, 0.276]
-    z_chosen = zs[0]
+    z_chosen = zs[1]
     start = time.time()
     Ntrials = 1 # Number of trials to run for each cluster in the test set
 
@@ -649,6 +649,151 @@ def process_md_set(test_number):
     print('Time taken: {}'.format(stop - start))
 
 
+def create_improved_key_optimized():
+    key_file = 'MDARK/fixed_key_0.221.MDARK'
+    halo_file = 'MDARK/Halos_0.221.MDARK'
+    output_file = 'MDARK/test_key_0.221.MDARK'
+
+    # Write the header to the output file
+    with open(output_file, 'w') as f:
+        f.write('MainHaloID,Total Mass,Redshift,Halo Number,Mass Fraction,Characteristic Size\n')
+
+    print("Step 1: Identifying relevant clusters from key file...")
+    
+    # --- 1) Identify relevant clusters from the key file ---
+    relevant_clusters = {}
+    key_chunks = read_csv_in_chunks(
+        key_file,
+        usecols=[
+            'MainHaloID',
+            ' Total Mass',
+            ' Redshift',
+            ' Halo Number',
+            ' Mass Fraction',
+            ' Characteristic Size'
+        ],
+        chunksize=10000
+    )
+
+    # Example chunk count for display (adjust if known or derive dynamically)
+    chunk_count_key = 11271  
+    chunk_index_key = 0
+
+    for key_chunk in key_chunks:
+        chunk_index_key += 1
+        print_progress_bar(chunk_index_key, chunk_count_key, prefix='Reading Key Chunks:', suffix='Complete', length=50)
+        
+        for _, row in key_chunk.iterrows():
+            mass = row[' Total Mass']
+            halo_num = row[' Halo Number']
+            if mass >= 1e12 and halo_num >= 2:
+                main_id = row['MainHaloID']
+                relevant_clusters[main_id] = {
+                    'mass': mass,
+                    'redshift': row[' Redshift'],
+                    'halo_num': halo_num,
+                    'mass_fraction': row[' Mass Fraction'],
+                    'char_size': row[' Characteristic Size']
+                }
+
+    print(f"\nFound {len(relevant_clusters)} relevant clusters.\n")
+
+    print("Step 2: Gathering halo data in one pass...")
+
+    # --- 2) Gather halos for the relevant clusters in one pass ---
+    cluster_halo_data = {cid: [] for cid in relevant_clusters.keys()}
+
+    halo_chunks = read_csv_in_chunks(
+        halo_file,
+        usecols=[
+            'MainHaloID',
+            'GalaxyType',
+            'HaloMass',
+            'concentration_NFW',
+            'x',
+            'y',
+            'z'
+        ],
+        chunksize=10000
+    )
+
+    # Example chunk count for halos (adjust if known or derive dynamically)
+    chunk_count_halo = 50000  
+    chunk_index_halo = 0
+
+    for halo_chunk in halo_chunks:
+        chunk_index_halo += 1
+        print_progress_bar(chunk_index_halo, chunk_count_halo, prefix='Reading Halo Chunks:', suffix='Complete', length=50)
+        
+        halo_chunk.columns = halo_chunk.columns.str.strip()
+        filtered_halos = halo_chunk[halo_chunk['MainHaloID'].isin(cluster_halo_data.keys())]
+        
+        if not filtered_halos.empty:
+            for cid, sub_df in filtered_halos.groupby('MainHaloID'):
+                cluster_halo_data[cid].append(sub_df)
+
+    print("\nFinished gathering halo data.\n")
+    print("Step 3: Processing each cluster...")
+
+    # --- 3) Process each relevant cluster ---
+    cluster_ids = list(cluster_halo_data.keys())
+    total_clusters = len(cluster_ids)
+    processed_clusters = 0
+
+    for cid in cluster_ids:
+        processed_clusters += 1
+        print_progress_bar(processed_clusters, total_clusters, prefix='Processing Clusters:', suffix='Complete', length=50)
+
+        # If we have no halo data for this cluster, skip
+        if not cluster_halo_data[cid]:
+            continue
+
+        cluster_df = pd.concat(cluster_halo_data[cid], ignore_index=True)
+        
+        # Find the largest halo by mass to define the centroid
+        centroid_idx = np.argmax(cluster_df['HaloMass'].values)
+        x_centroid = cluster_df.iloc[centroid_idx]['x']
+        y_centroid = cluster_df.iloc[centroid_idx]['y']
+        z_centroid = cluster_df.iloc[centroid_idx]['z']
+
+        # Filter out halos that are more than 1 Mpc from the largest halo
+        r = np.sqrt(
+            (cluster_df['x'] - x_centroid)**2 +
+            (cluster_df['y'] - y_centroid)**2 +
+            (cluster_df['z'] - z_centroid)**2
+        )
+        cluster_df = cluster_df[r < 1]
+
+        # Remove orphan halos (GalaxyType == 2)
+        cluster_df = cluster_df[cluster_df['GalaxyType'] != 2]
+        
+        if len(cluster_df) == 0:
+            continue
+        
+        # Compute properties
+        total_mass = cluster_df['HaloMass'].sum()
+        halo_number = len(cluster_df)
+        mass_fraction = 1 - np.max(cluster_df['HaloMass']) / total_mass
+        
+        # Use stored values from relevant_clusters, except redshift is forced to 0.221 as in your example
+        char_size = relevant_clusters[cid]['char_size']
+        redshift = 0.221
+
+        with open(output_file, 'a') as f:
+            f.write(
+                '{},{},{},{},{},{}\n'.format(
+                    cid,
+                    total_mass,
+                    redshift,
+                    halo_number,
+                    mass_fraction,
+                    char_size
+                )
+            )
+
+    print("\nAll processing complete.")
+
+
 if __name__ == '__main__':
     '''
     test_number = 20
@@ -658,83 +803,8 @@ if __name__ == '__main__':
     build_mass_correlation_plot(test_dir, test_number)
     '''
 
-    # We need to perform another fix to the key file
-    # This is because the key file is counting the masses of orphan halos and halos that were accidentally associated with the cluster
-    # So, we need to go through each cluster in the key file, access the halos, remove halos that should not be counted, and recompute the key properties
-
-    key_file = 'MDARK/fixed_key_0.221.MDARK'
-    halo_file = 'MDARK/Halos_0.221.MDARK'
-    output_file = 'MDARK/test_key_0.221.MDARK'
-
-    # Key has columns of 
-    # MainHaloID, Total Mass, Redshift, Halo Number, Mass Fraction, Characteristic Size
-    # Halos has columns of
-    # row_id, redshift, MainHaloID, HostHaloID, GalaxyType, HaloMass, concentration_NFW, x, y, z
-
-    # Write the header to the output file
-    with open(output_file, 'w') as f:
-        f.write('MainHaloID,Total Mass,Redshift,Halo Number,Mass Fraction,Characteristic Size\n')
-
-    # Read in the key file
-    # This ALSO needs to be read in chunks because the file is too large
-    key_chunks = read_csv_in_chunks(key_file, usecols=['MainHaloID', ' Total Mass', ' Redshift', ' Halo Number', ' Mass Fraction', ' Characteristic Size'], chunksize=10000)
-    # Determine how many chunks there are
-    chunk_count = 11271
-    key_length = 10000 * chunk_count
-    print_progress_bar(0, key_length, prefix='Processing Clusters:', suffix='Complete', length=50)
-
-    for key_chunk in key_chunks:
-        key_data = key_chunk
-        # print('Starting a new key chunk...')
-
-        for idx, row in key_data.iterrows():
-            # print('Processing cluster: {}'.format(row['MainHaloID']))
-            # Extract the MainHaloID
-            ID = row['MainHaloID']
-
-            # ...but we can be smart about this
-            # The only clusters I'm interested in for this testing are the ones with multiple halos, and that are larger than...lets say, 10^12 solar masses
-            # So lets just skip every cluster that doesn't fit that criteria. That should save us a lot of time
-            if row[' Total Mass'] < 10**12 or row[' Halo Number'] < 2:
-                continue
-
-
-            # Remember that we need to read in the halo data in chunks because the file is too large
-            halo_chunks = read_csv_in_chunks(halo_file, usecols=['MainHaloID', 'GalaxyType', 'HaloMass', 'concentration_NFW', 'x', 'y', 'z'], chunksize=10000)
-            for halo_chunk in halo_chunks:
-                # Clean the column names to remove any leading/trailing spaces
-                halo_chunk.columns = halo_chunk.columns.str.strip()
-
-                # Filter the halos for this cluster
-                cluster_halos = halo_chunk[halo_chunk['MainHaloID'] == ID]
-
-                # If the cluster is not found, continue to the next chunk
-                if cluster_halos.empty:
-                    continue
-
-                # Remove halos that are more than 1 Mpc away from the centroid - these are not actual members of the cluster
-                # Also remove halos where the galaxy type is 2 (orphan halos)
-                centroid = np.argmax(cluster_halos['HaloMass'].values)
-                cluster_halos = cluster_halos[((cluster_halos['x'] - cluster_halos['x'].values[centroid])**2 + (cluster_halos['y'] - cluster_halos['y'].values[centroid])**2 + (cluster_halos['z'] - cluster_halos['z'].values[centroid])**2)**0.5 < 1]
-                cluster_halos = cluster_halos[cluster_halos['GalaxyType'] != 2]
-
-                # Compute the total mass, halo number, mass fraction, and characteristic size
-                total_mass = np.sum(cluster_halos['HaloMass'].values)
-                halo_number = len(cluster_halos)
-                if halo_number == 0:
-                    continue
-                else:
-                    mass_fraction = 1 - np.max(cluster_halos['HaloMass'].values) / np.sum(cluster_halos['HaloMass'].values)
-                # Do not alter the characteristic size
-                characteristic_size = row[' Characteristic Size']
-                # Write the results to the output file
-                with open(output_file, 'a') as f:
-                    f.write('{},{},{},{},{},{}\n'.format(ID, total_mass, 0.221, halo_number, mass_fraction, characteristic_size))
-                
-                # Break out of the current loop now that the cluster has been processed - move to the next cluster
-                break
-
-        # Update the progress bar
-        print_progress_bar(idx + 1, key_length, prefix='Processing Clusters:', suffix='Complete', length=50)
-        
-    print('Processing complete...')
+    # create_improved_key_optimized()
+    # build_ID_list(21, 30, 0.221)
+    # build_ID_file(30, 'Output/MDARK/Test21/ID_options.csv', 21, 0.221)
+    process_md_set(21)
+    build_mass_correlation_plot('Output/MDARK/Test21', 21)
