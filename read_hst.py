@@ -72,7 +72,7 @@ def compare_mass_estimates(halos, plot_name):
     # Compare the mass estimates I get from the reconstruction to other data
     # I have mass estimates from literature for the cluster - but at different radii
     # so
-    r = np.linspace(0.1, 500, 1000) # Radius in kpc - spans from 0 to 1 Mpc
+    r = np.linspace(100, 300, 1000) # Radius in kpc - spans from 0 to 1 Mpc
     # Now, we create a dictionary of mass estimates, which has a key (the source of the estimate) and two values (the mass and the radius)
     mass_estimates = {
         'MARS': (1.73e14, 200), 
@@ -85,8 +85,10 @@ def compare_mass_estimates(halos, plot_name):
     # ie, remove all the other halos
     halos_len = len(halos.x)
     halos.remove(np.arange(1, halos_len))
+    print('Removed halos')
     # Now, calculate the mass within the radius
     mass = utils.nfw_projected_mass(halos, r)
+    print('Calculated mass')
     # Now, plot the mass estimates
     fig, ax = plt.subplots()
     fig.suptitle('Mass Estimates for Abell 2744')
@@ -219,13 +221,14 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     if full_reconstruction:
         lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, randomize=randomize, use_flags=use_flags, lens_type=lens_type)
         lenses.mass /= h # Convert the mass to h^-1 solar masses
+        print('Completed reconstruction')
 
         # Save the class objects so that we can replot without having to rerun the code
         if randomize:
             # If we're randomizing, I don't need to save the data
             pass
         else:
-            dir = 'Output//'
+            dir = 'Output//abel//'
             file_name = 'a2744' 
             file_name += '_par' if field == 'parallel' else '_clu' 
             if lens_type == 'SIS':
@@ -233,6 +236,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
             else:
                 np.save(dir + file_name + '_lenses', np.array([lenses.x, lenses.y, lenses.mass, lenses.chi2]))
             np.save(dir + file_name + '_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
+            print('Saved data')
     else:
         # If we're not doing a full reconstruction, we need to load in the data
         dir = 'Output//'
@@ -246,6 +250,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
 
     X, Y, kappa = utils.calculate_kappa(lenses, extent, smoothing_scale=1, lens_type=lens_type)
+    print('Calculated kappa')
     
     # kappa = mass_sheet_transformation(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
     if lens_type=='SIS':
@@ -300,6 +305,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         title += '\n All Signals Used'
     
     # Create the figure and gridspec
+    '''
     fig = plt.figure(figsize=(8, 10))
     gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
 
@@ -331,15 +337,20 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
                 break
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
+    '''
 
     # Now compare the mass estimates - for now, only do this for all signals
     plot_name = dir + file_name + '_mass.png'
     compare_mass_estimates(lenses, plot_name)
     plt.close()
+    print('Plotted and saved')
 
 
 
 if __name__ == '__main__':
+    # lenses = np.load('Output//a2744_clu_lenses.npy')
+    # compare_mass_estimates(lenses, 'Output//abel//a2744_clu_mass.png')
+
     use_all_signals = [True, True, True] # Use all signals
     shear_flex = [True, True, False] # Use shear and flexion
     all_flex = [False, True, True] # Use flexion and g-flexion
