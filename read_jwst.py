@@ -326,7 +326,83 @@ class JWSTPipeline:
         plt.legend()
         plt.tight_layout()
         plt.savefig(self.output_dir / 'convergence_map.png', dpi=300)
-        plt.show()
+        # plt.show()
+
+        # I also want to plot f1 and f2 maps
+        # Calculate f1 and f2 maps (this is easily done, f is the derivative of kappa)
+        # Just need to calculate the gradient of kappa (x for f1, y for f2)
+        # Then plot these maps
+        # Calculate the gradient of kappa
+        f1, f2 = np.gradient(kappa, self.CDELT)
+        # Plot settings
+        fig, ax = plt.subplots(figsize=(10, 10))
+        norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+
+        # Display image
+        ax.imshow(
+            img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
+        )
+
+        # Overlay f1 contours
+        contour_levels = np.linspace(np.min(f1), np.max(f1), 10)
+        contours = ax.contour(
+            X, Y, f1, levels=contour_levels, cmap='plasma', linewidths=1.5
+        )
+        # And the f1 map itself
+        cmap = ax.imshow(f1, cmap='plasma', origin='lower', extent=img_extent, alpha=0.5)
+
+        # Add colorbar for f1
+        cbar = plt.colorbar(cmap, ax=ax)
+        cbar.set_label('f1')
+
+        # Plot lens positions
+        ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
+
+        # Labels and title
+        ax.set_xlabel('RA Offset (arcsec)')
+        ax.set_ylabel('Dec Offset (arcsec)')
+        ax.set_title('f1 Map Overlaid on JWST Image')
+
+        # Save and display
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(self.output_dir / 'f1_map.png', dpi=300)
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+
+        # Display image
+        ax.imshow(
+            img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
+        )
+
+        # Overlay f2 contours
+        contour_levels = np.linspace(np.min(f2), np.max(f2), 10)
+        contours = ax.contour(
+            X, Y, f2, levels=contour_levels, cmap='plasma', linewidths=1.5
+        )
+        # And the f2 map itself
+        cmap = ax.imshow(f2, cmap='plasma', origin='lower', extent=img_extent, alpha=0.5)
+
+        # Add colorbar for f2
+        cbar = plt.colorbar(cmap, ax=ax)
+        cbar.set_label('f2')
+
+        # Plot lens positions
+        ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
+
+        # Labels and title
+        ax.set_xlabel('RA Offset (arcsec)')
+        ax.set_ylabel('Dec Offset (arcsec)')
+        ax.set_title('f2 Map Overlaid on JWST Image')
+
+        # Save and display
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(self.output_dir / 'f2_map.png', dpi=300)
+        
+
+
 
     def get_image_data(self):
         """
