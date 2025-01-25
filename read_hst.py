@@ -26,20 +26,11 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
     for img in img_data:
         # Allow for multiple images to be overlayed - allows for band or epoch stacking
         norm = ImageNormalize(img, vmin=0, vmax=vmax, stretch=LogStretch())
-        ax.imshow(img, cmap='gray_r', origin='lower', extent=extent, norm=norm)
+        ax.imshow(img, origin='lower', extent=extent, norm=norm)
 
     if conv is not None:
         # Adjusted contour levels for better feature representation.
         contour_levels = np.percentile(conv, np.linspace(60, 100, 5))
-
-        # Contour lines with enhanced visibility.
-        contours = ax.contour(
-            X, Y, conv, 
-            levels=contour_levels, 
-            cmap='plasma', 
-            linestyles='-', 
-            linewidths=1.5
-        )
 
         # Fine-tuned alpha value for better overlay visibility.
         color_map_overlay = ax.imshow(
@@ -55,7 +46,6 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
         # Customized color bar for clarity.
         color_bar = plt.colorbar(color_map_overlay, ax=ax)
         color_bar.set_label(r'$\kappa$', rotation=0, labelpad=10)
-
 
     if lenses is not None:
         ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
@@ -239,7 +229,7 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
             print('Saved data')
     else:
         # If we're not doing a full reconstruction, we need to load in the data
-        dir = 'Output//'
+        dir = 'Output//abel//'
         file_name = 'a2744' 
         file_name += '_par' if field == 'parallel' else '_clu' 
         lenses = halo_obj.SIS_Lens(*np.load(dir + file_name + '_lenses.npy')) if lens_type == 'SIS' else halo_obj.NFW_Lens(*np.load(dir + file_name + '_lenses.npy'))
@@ -305,24 +295,15 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         title += '\n All Signals Used'
     
     # Create the figure and gridspec
-    '''
+    
     fig = plt.figure(figsize=(8, 10))
-    gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
+    # gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
 
     # Create the main plot axis
-    ax = fig.add_subplot(gs[0])
+    # ax = fig.add_subplot(gs[0])
+    ax = fig.add_subplot(111)
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
     ax.set_title(title)
-
-    # Plot the halos
-    halos_x = lenses.x
-    halos_y = lenses.y
-    if lens_type == 'SIS':
-        halos_mass = lenses.te  # Or convert to mass if necessary
-    else:
-        halos_mass = lenses.mass
-
-    labels = [f'Halo {i+1}' for i in range(len(halos_x))]
 
     # Save the figure
     if randomize:
@@ -337,15 +318,12 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
                 break
         file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
-    '''
-
+    
     # Now compare the mass estimates - for now, only do this for all signals
     plot_name = dir + file_name + '_mass.png'
     compare_mass_estimates(lenses, plot_name)
     plt.close()
     print('Plotted and saved')
-
-
 
 if __name__ == '__main__':
     # lenses = np.load('Output//a2744_clu_lenses.npy')
