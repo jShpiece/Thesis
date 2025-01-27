@@ -101,68 +101,96 @@ def critical_surface_density(z1, z2):
     return sigma_crit
 
 
-
-def nfw_projected_mass(halos, r_p):
+def nfw_projected_mass(
+    halos,
+    r_p,
+    return_2d=False,
+    nx=100,
+    ny=100,
+    x_range=(-300, 300),
+    y_range=(-300, 300),
+    x_center=0.0,
+    y_center=0.0
+):
     """
-    Compute the projected mass within a projected radius r_p for an NFW halo.
+    Compute the projected mass for an NFW halo, with an option to return a 2D map.
 
     Parameters:
     - halos: NFW_Lens object containing halo properties.
-    - r_p: float
-        Projected radius within which to compute the mass (in kpc)
+    - r_p: float or array-like
+        Projected radius (kpc) or array of radii for 1D mass integration.
+    - return_2d: bool
+        If True, return a 2D grid of projected mass.
+    - nx, ny: int
+        Number of grid points along x and y axes if return_2d is True.
+    - x_range, y_range: tuple
+        Range of x and y (in kpc) for the 2D grid if return_2d is True.
+    - x_center, y_center: float
+        Coordinates (in kpc) of the halo center in the 2D grid.
 
     Returns:
-    - M_proj: float
-        Projected mass within radius r_p (in solar masses)
+    - If return_2d=False:
+        M_proj: float or ndarray
+            The integrated projected mass within radius r_p (in M_sun).
+    - If return_2d=True:
+        M_2D: 2D ndarray
+            A 2D map of the projected mass (in M_sun) over the specified grid.
     """
+    G = 4.302e-6  # kpc (km/s)^2 M_sun^-1
 
-    # Constants
-    G = 4.302e-6  # Gravitational constant in kpc (km/s)^2 M_sun^-1
-
-    # Halo properties
     M200 = halos.mass
-    R200 = halos.calc_R200()[0] # in m
-    R200 = R200 * 3.24078e-20 # in kpc
-    print(R200)
+    R200_m = halos.calc_R200()[0]  # in meters
+    R200_kpc = R200_m * 3.24078e-20  # in kpc
     c = halos.concentration
+    r_s = R200_kpc / c  # kpc
 
-    # Scale radius
-    r_s = R200 / c  # in kpc
-
-    # Dimensionless mass within R200
-    def m(x):
+    def m_func(x):
         return np.log(1 + x) - x / (1 + x)
 
-    m_c = m(c)
+    m_c = m_func(c)
+    rho_s = M200 / (4 * np.pi * r_s**3 * m_c)  # M_sun kpc^-3
 
-    # Scale density
-    rho_s = M200 / (4 * np.pi * r_s**3 * m_c)  # in M_sun kpc^-3
-
-    # Projected surface density Sigma(R)
     def Sigma(R):
         x = R / r_s
         if x < 1:
-            factor = 1 / (x**2 - 1)
-            term1 = 1
-            term2 = 2 / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
-            sigma = 2 * rho_s * r_s * factor * (term1 - term2)
-        elif x == 1:
-            sigma = (2 / 3) * rho_s * r_s
+            factor = 1.0 / (x**2 - 1)
+            term1 = 1.0
+            term2 = 2.0 / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
+            return 2.0 * rho_s * r_s * factor * (term1 - term2)
+        elif np.isclose(x, 1.0):
+            return (2.0 / 3.0) * rho_s * r_s
         else:
-            factor = 1 / (x**2 - 1)
-            term1 = 1
-            term2 = 2 / np.sqrt(x**2 - 1) * np.arctan(np.sqrt((x - 1) / (1 + x)))
-            sigma = 2 * rho_s * r_s * factor * (term1 - term2)
-        return sigma  # in M_sun kpc^-2
+            factor = 1.0 / (x**2 - 1)
+            term1 = 1.0
+            term2 = 2.0 / np.sqrt(x**2 - 1) * np.arctan(np.sqrt((x - 1) / (1 + x)))
+            return 2.0 * rho_s * r_s * factor * (term1 - term2)
 
-    # Integrate to find the projected mass within r_p
-    integrand = lambda R: 2 * np.pi * Sigma(R) * R  # M_sun kpc^-1
+    if not return_2d:
+        r_p = np.atleast_1d(r_p)
+        M_proj = np.zeros_like(r_p, dtype=float)
 
-    M_proj = np.zeros_like(r_p)
-    for i, r in enumerate(r_p): 
-        M_proj[i], error = quad(integrand, 0.01, r, limit=1000)
+        for i, r in enumerate(r_p):
+            integrand = lambda rr: 2 * np.pi * Sigma(rr) * rr
+            M_proj[i], _ = quad(integrand, 0.0, r, limit=1000)
 
-    return M_proj  # in M_sun
+        return M_proj if len(M_proj) > 1 else M_proj[0]
+
+    x_vals = np.linspace(x_range[0], x_range[1], nx)
+    y_vals = np.linspace(y_range[0], y_range[1], ny)
+    M_2D = np.zeros((ny, nx))
+
+    dx = (x_range[1] - x_range[0]) / (nx - 1)
+    dy = (y_range[1] - y_range[0]) / (ny - 1)
+    area_per_pixel = dx * dy
+
+    for i in range(ny):
+        for j in range(nx):
+            # Distance from halo center at (x_center, y_center)
+            R = np.sqrt((x_vals[j] - x_center)**2 + (y_vals[i] - y_center)**2)
+            M_2D[i, j] = Sigma(R) * area_per_pixel
+
+    return M_2D
+
 
 
 # ------------------------
