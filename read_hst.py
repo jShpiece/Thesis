@@ -34,6 +34,7 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
         contour_levels = np.percentile(conv, np.linspace(60, 100, 5))
 
         # Fine-tuned alpha value for better overlay visibility.
+        '''
         color_map_overlay = ax.imshow(
             conv, 
             cmap='viridis', 
@@ -47,9 +48,10 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
         # Customized color bar for clarity.
         color_bar = plt.colorbar(color_map_overlay, ax=ax)
         color_bar.set_label(r'$\kappa$', rotation=0, labelpad=10)
-
+        '''
+        # Only overlay the contours of the convergence map - the color map will be too busy
         # Overlay the contours of the convergence map.
-        ax.contour(X, Y, conv, levels=contour_levels, colors='white', linewidths=1.5)
+        ax.contour(X, Y, conv, levels=contour_levels, cmap='plasma', linewidths=1.5)
 
     if lenses is not None:
         ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
