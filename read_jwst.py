@@ -91,7 +91,7 @@ class JWSTPipeline:
         self.IDs = df['label'].to_numpy()
         self.q = df['q'].to_numpy()
         self.phi = df['phi'].to_numpy()
-        self.phi = np.deg2rad(self.phi)  # Convert phi to radians if necessary
+        #self.phi = np.deg2rad(self.phi)  # Convert phi to radians if necessary
         self.F1_fit = df['F1_fit'].to_numpy()
         self.F2_fit = df['F2_fit'].to_numpy() 
         self.G1_fit = df['G1_fit'].to_numpy() 
@@ -104,9 +104,11 @@ class JWSTPipeline:
         # Add any indice where a < 0.1 - this is too small to get a good reading 
         bad_chi2 = self.chi2 > 10
         bad_a = (self.a < 0.1) | (self.a > 10)
-
+        print('There are {} entries with a < 0.1 or a > 10'.format(np.sum(bad_a)))
+        print('There are {} entries with chi2 > 10'.format(np.sum(bad_chi2)))
         bad_indices = (bad_chi2) | (bad_a)
         print(f"Removing {np.sum(bad_indices)} entries with chi2 > 10 or a < 0.1.")
+        
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
         self.phi = self.phi[~bad_indices]
@@ -116,7 +118,7 @@ class JWSTPipeline:
         self.G2_fit = self.G2_fit[~bad_indices]
         self.a = self.a[~bad_indices]
         self.chi2 = self.chi2[~bad_indices]
-
+        
         # Check for NaN values
         
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
@@ -192,20 +194,22 @@ class JWSTPipeline:
         self.sources.sigf = sigf
         self.sources.sigg = sigg
 
-        # Plot some of these guys, then terminate
-        # Do histograms of q, phi, f1, f2, a, and chi2
         '''
-        signals = [self.sources.e1, self.sources.e2, self.sources.f1, self.sources.f2]
-        signal_names = ['q', 'phi', 'F1', 'F2', 'a', 'chi2']
+        # Do histograms of q, phi, f1, f2, a, and chi2
+        
+        signals = [self.sources.e1, self.sources.e2, self.sources.f1, self.sources.f2, a, self.chi2, self.phi]
+        signal_names = ['e1', 'e2', 'F1', 'F2', 'a', 'chi2', 'phi']
         for signal, name in zip(signals, signal_names):
             fig, ax = plt.subplots()
-            fancyhist(signal, bins='scott', ax=ax, histtype='stepfilled', density=True, label = 'Range: {} - {}'.format(np.min(signal), np.max(signal)))
+            fancyhist(signal, bins='scott', ax=ax, histtype='step', density=True, label = 'Range: {} - {}'.format(np.min(signal), np.max(signal)))
             ax.set_xlabel(name)
             ax.set_ylabel('Count')
             ax.legend()
-            plt.savefig(self.output_dir / f'{name}_distribution.png', dpi=300)
+            ax.set_title(f'{name} Distribution - With Cuts')
+            plt.savefig(self.output_dir / f'{name}_distribution_with_cuts.png', dpi=300)
         plt.close('all')
         '''
+        
 
     def match_sources(self):
         """

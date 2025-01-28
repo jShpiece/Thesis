@@ -68,7 +68,7 @@ def compare_mass_estimates(halos, plot_name):
     
     # Literature mass estimates: dictionary of form {label: (mass, radius)}
     mass_estimates = {
-        'MARS': (1.73e14, 200), 
+        'MARS': (1.73e14, 200, ), 
         'Bird': (1.93e14, 200), 
         'GRALE': (2.25e14, 250),
         'Merten et al.': (2.24e14, 250)
