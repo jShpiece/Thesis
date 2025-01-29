@@ -20,6 +20,10 @@ plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exis
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
+# Redshifts
+z_cluster = 0.308
+z_source = 0.5
+
 class JWSTPipeline:
     """
     A class to encapsulate the JWST lensing pipeline.
@@ -255,7 +259,7 @@ class JWSTPipeline:
         print(f"Running lens fitting with {len(self.sources.x)} sources.")
         print(f"Maximum source distance: {xmax:.2f} arcsec.")
         self.lenses, _ = main.fit_lensing_field(
-            self.sources, xmax, flags=True, use_flags=[True, True, True], lens_type='NFW'
+            self.sources, xmax, flags=True, use_flags=[True, True, True], lens_type='NFW', z_lens=z_cluster, z_source=z_source
         )
         # Adjust lens positions back to original coordinates
         self.lenses.x += self.centroid_x

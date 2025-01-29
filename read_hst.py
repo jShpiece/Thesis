@@ -3,20 +3,19 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.visualization import ImageNormalize, LogStretch
 import warnings
-import os
 import main
 import source_obj
 import halo_obj
 import utils
-from astropy.visualization import hist as fancy_hist
-from matplotlib.path import Path
-import matplotlib.patches as patches
-import pandas as pd
-from matplotlib import gridspec
+
 
 plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
+
+# Define some constants
+arcsec_per_pixel = 0.03 # From the instrumentation documentation
 h = 0.7 # Hubble constant
 z_cluster = 0.308 # Redshift of the cluster
+z_source = 0.52 # Mean redshift of the sources
 
 
 def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, legend=True):
@@ -51,7 +50,7 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
 
 def compare_mass_estimates(halos, plot_name):
     # Radii in kpc
-    r = np.linspace(100, 300, 1000)  
+    r = np.linspace(150, 300, 100)  
     
     # Literature mass estimates: dictionary of form {label: (mass, radius)}
     mass_estimates = {
@@ -60,6 +59,7 @@ def compare_mass_estimates(halos, plot_name):
         'GRALE': (2.25e14, 250),
         'Merten et al.': (2.24e14, 250)
     }
+    # The mass estimates are in solar masses, and the radii are in kpc
     
     # 2D grid setup (in kpc)
     nx, ny = 200, 200
@@ -115,7 +115,6 @@ def compare_mass_estimates(halos, plot_name):
     plt.savefig(plot_name)
 
 
-
 def get_img_data(fits_file_path) -> np.ndarray:
     # Get the image data from the fits file
     fits_file = fits.open(fits_file_path)
@@ -142,7 +141,7 @@ def get_file_paths(cluster='a2744', field='cluster'):
     return fits_file_path, csv_file_path, vmax, dx, dy
 
 
-def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_flags=[True, True, True], lens_type='SIS'):
+def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], lens_type='NFW'):
     # Take in a file of sources and reconstruct the lensing system
 
     # Read in the data (csv)
@@ -174,20 +173,9 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_flags=[
     e1, e2 = shear_mag * np.cos(2*phi), shear_mag * np.sin(2*phi)
 
     # Compute noise parameters
-    sigs_mag = np.mean([np.std(e1), np.std(e2)])
-    sigs = np.ones_like(x) * sigs_mag
-
-    sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
-    sigf = sigaf / a 
-
-    sigg = np.mean([np.std(g1), np.std(g2)])
-    sigg = np.ones_like(x) * sigg
-
-    if randomize:
-        # randomize the e1, e2 and f1, f2 vectors by rotating them by a random angle
-        rand_angle = np.random.uniform(0, 2*np.pi, len(e1))
-        e1, e2 = e1 * np.cos(rand_angle) - e2 * np.sin(rand_angle), e1 * np.sin(rand_angle) + e2 * np.cos(rand_angle)
-        f1, f2 = f1 * np.cos(rand_angle) - f2 * np.sin(rand_angle), f1 * np.sin(rand_angle) + f2 * np.cos(rand_angle)
+    sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
+    sigf = np.full_like(f1, np.mean([np.std(a*f1), np.std(a*f2)]) / a)
+    sigg = np.full_like(g1, np.mean([np.std(g1), np.std(g2)]))
 
     # Set the centroid to be the origin
     x -= centroid[0]
@@ -195,7 +183,7 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_flags=[
 
     # Create source object and perform the lensing fit
     sources = source_obj.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg)
-    recovered_lenses, reducedchi2 = main.fit_lensing_field(sources, xmax=xmax, flags=flags, use_flags=use_flags, lens_type=lens_type)
+    recovered_lenses, reducedchi2 = main.fit_lensing_field(sources, xmax=xmax, flags=flags, use_flags=use_flags, lens_type=lens_type, z_lens=z_cluster, z_source=z_source)
 
     # Move our sourecs and lenses back to the original centroid
     sources.x += centroid[0]
@@ -206,18 +194,14 @@ def reconstruct_system(file, dx, dy, flags=False, randomize = False, use_flags=[
     return recovered_lenses, sources, xmax, reducedchi2
 
 
-def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=False, use_flags=[True, True, True], lens_type='SIS'):
+def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[True, True, True], lens_type='SIS'):
     '''
     A handler function to plot the lensing field of Abell 2744 - either the cluster or parallel field.
     --------------------
     Parameters:
         field: 'cluster' or 'parallel' - which field to plot
-        randomize: whether or not to randomize the source orientations, which helps test the algorithm's tendency to overfit
         full_reconstruction: whether or not to perform a full reconstruction of the lensing field, or to load in a precomputed one
     '''
-    # Define some constants
-    z_source = 0.52 # Mean redshift of the sources
-    arcsec_per_pixel = 0.03 # From the instrumentation documentation
 
     warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
 
@@ -229,32 +213,26 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     elif field == 'parallel':
         img_data = [img_data]
 
+    # Define some file paths
+    dir = 'Output//abel//'
+    file_name = 'A2744'
+    file_name += '_par' if field == 'parallel' else '_clu'
+
     if full_reconstruction:
-        lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, randomize=randomize, use_flags=use_flags, lens_type=lens_type)
+        lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, use_flags=use_flags, lens_type=lens_type)
         lenses.mass /= h # Convert the mass to h^-1 solar masses
         print('Completed reconstruction')
 
-        # Save the class objects so that we can replot without having to rerun the code
-        if randomize:
-            # If we're randomizing, I don't need to save the data
-            pass
-        else:
-            dir = 'Output//abel//'
-            file_name = 'a2744' 
-            file_name += '_par' if field == 'parallel' else '_clu' 
-            if lens_type == 'SIS':
-                np.save(dir + file_name + '_lenses', np.array([lenses.x, lenses.y, lenses.te, lenses.chi2]))
-            else:
-                np.save(dir + file_name + '_lenses', np.array([lenses.x, lenses.y, lenses.mass, lenses.chi2]))
-            np.save(dir + file_name + '_sources', np.array([sources.x, sources.y, sources.e1, sources.e2, sources.f1, sources.f2, sources.sigs, sources.sigf]))
-            print('Saved data')
+        lenses.export_to_csv(dir + file_name + '_lenses.csv')
+        sources.export_to_csv(dir + file_name + '_sources.csv')
     else:
         # If we're not doing a full reconstruction, we need to load in the data
-        dir = 'Output//abel//'
-        file_name = 'a2744' 
-        file_name += '_par' if field == 'parallel' else '_clu' 
-        lenses = halo_obj.SIS_Lens(*np.load(dir + file_name + '_lenses.npy')) if lens_type == 'SIS' else halo_obj.NFW_Lens(*np.load(dir + file_name + '_lenses.npy'))
-        sources = source_obj.Source(*np.load(dir + file_name + '_sources.npy'))
+        if lens_type == 'SIS':
+            lenses = halo_obj.SIS_Lens.load_from_csv(dir + file_name + '_lenses.csv')
+        else:
+            lenses = halo_obj.NFW_Lens.load_from_csv(dir + file_name + '_lenses.csv')
+        sources = source_obj.Source.load_from_csv(dir + file_name + '_sources.csv')
+        print('Loaded in data')
 
     # Generate a convergence map that spans the same area as the image
     # I'd like the kappa scale to be 1 arcsecond per pixel. This means each kappa pixel is 20 image pixels
@@ -268,19 +246,9 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         mass = utils.calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
     else:
         mass = np.sum(lenses.mass) # Calculate the mass of the NFW lenses
-
-    # Create labels for the plot
-    dir = 'Output/abel/'
-
+    
     # Build the file name
-    file_name = 'A2744_kappa_'
-    file_name += 'par' if field == 'parallel' else 'clu'
-
-    if randomize:
-        file_name += '_rand'
-
-    file_name += '_SIS' if lens_type == 'SIS' else '_NFW'
-
+    
     if use_flags == [True, True, True]:
         file_name += '_all'
     else:
@@ -292,15 +260,9 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
         if use_flags[2]:
             signals.append('_G')
         file_name += ''.join(signals)
-
+    
     # Build the title
-    title = 'Abell 2744 Convergence Map - '
-    title += 'Parallel Field' if field == 'parallel' else 'Cluster Field'
-
-    if randomize:
-        title += ' - Randomized'
-
-    title += f'\n M = {mass:.3e} $h^{{-1}} M_\\odot$'
+    title = 'Abell 2744 Convergence Map - ' + 'Parallel Field' if field == 'parallel' else 'Cluster Field' + '\n' + f'M = {mass:.3e} $h^{{-1}} M_\\odot$'
 
     if use_flags != [True, True, True]:
         title += '\n Signals Used: '
@@ -315,30 +277,14 @@ def reconstruct_a2744(field='cluster', randomize=False, full_reconstruction=Fals
     else:
         title += '\n All Signals Used'
     
-    # Create the figure and gridspec
-    
+    # Create the figure 
+    '''
     fig = plt.figure(figsize=(8, 10))
-    # gs = gridspec.GridSpec(2, 1, height_ratios=[4, 1])
-
-    # Create the main plot axis
-    # ax = fig.add_subplot(gs[0])
     ax = fig.add_subplot(111)
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
     ax.set_title(title)
-
-    # Save the figure
-    if randomize:
-        # If there's already a randomized plot, I don't want to overwrite it
-        # Can we add a number to the end of the file name?
-        # First, check if the file exists
-        i = 1
-        while True:
-            if os.path.isfile(dir + file_name + f'_{i}.png'):
-                i += 1
-            else:
-                break
-        file_name += f'_{i}'
     plt.savefig(dir + file_name + '.png')
+    '''
     
     # Now compare the mass estimates - for now, only do this for all signals
     plot_name = dir + file_name + '_mass.png'
@@ -358,4 +304,4 @@ if __name__ == '__main__':
         
     for field in ['cluster']:
         for use_flags in signal_choices:
-            reconstruct_a2744(field=field, randomize=False, full_reconstruction=True, use_flags=use_flags, lens_type='NFW')
+            reconstruct_a2744(field=field, full_reconstruction=True, use_flags=use_flags, lens_type='NFW')

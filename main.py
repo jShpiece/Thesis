@@ -12,7 +12,7 @@ Functions:
 
 import pipeline
 
-def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], lens_type='SIS'):
+def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], lens_type='SIS', z_lens=0.5, z_source=1):
     """
     Reconstructs the lensing field that produced the observed source properties.
 
@@ -52,8 +52,7 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
                 print(f'Reduced Chi^2: {reduced_chi2:.4f}')
 
     # Step 1: Generate initial candidate lenses from source guesses
-    z_lens = 0.194  # Example redshift of the lens
-    lenses = pipeline.generate_initial_guess(sources, lens_type=lens_type, z_l=z_lens)
+    lenses = pipeline.generate_initial_guess(sources, lens_type=lens_type, z_l=z_lens, z_s=z_source)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "Initial Guesses:", lenses, reduced_chi2)
 
