@@ -304,18 +304,14 @@ class JWSTPipeline:
 
         
         # Overlay convergence contours
-        contour_levels = np.percentile(kappa, np.linspace(60, 100, 5))
+        contour_levels = np.percentile(kappa, np.linspace(60, 100, 6))
         contours = ax.contour(
             X, Y, kappa, levels=contour_levels, cmap='plasma', linewidths=1.5
         )
         # Add colorbar for contours
+        ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
         cbar = plt.colorbar(contours, ax=ax)
-        # And the convergence map itself
-        # cmap = ax.imshow(kappa, cmap='plasma', origin='lower', extent=img_extent, alpha=0.5)
 
-        # Add colorbar for convergence 
-        # cbar = plt.colorbar(cmap, ax=ax)
-        # cbar.set_label('Convergence')
 
         # Plot lens positions
         ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
