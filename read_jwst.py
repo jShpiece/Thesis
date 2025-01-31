@@ -23,6 +23,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # Redshifts
 z_cluster = 0.308
 z_source = 0.5
+h = 0.7
 
 class JWSTPipeline:
     """
@@ -44,6 +45,20 @@ class JWSTPipeline:
         self.image_path = Path(config['image_path'])
         self.output_dir = Path(config['output_dir'])
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        # Interpret signal choice
+        # can be all, shear_f, f_g, or shear_g
+        # corresponds to [True, True, True], [True, True, False], [False, True, True], [True, False, True]
+        self.signal_choice = config['signal_choice']
+        if self.signal_choice == 'all':
+            self.use_flags = [True, True, True]
+        elif self.signal_choice == 'shear_f':
+            self.use_flags = [True, True, False]
+        elif self.signal_choice == 'f_g':
+            self.use_flags = [False, True, True]
+        elif self.signal_choice == 'shear_g':
+            self.use_flags = [True, False, True]
+        else:
+            raise ValueError(f"Invalid signal choice: {self.signal_choice}")
 
         # Data placeholders
         self.IDs = None
@@ -259,11 +274,12 @@ class JWSTPipeline:
         print(f"Running lens fitting with {len(self.sources.x)} sources.")
         print(f"Maximum source distance: {xmax:.2f} arcsec.")
         self.lenses, _ = main.fit_lensing_field(
-            self.sources, xmax, flags=True, use_flags=[True, True, True], lens_type='NFW', z_lens=z_cluster, z_source=z_source
+            self.sources, xmax, flags=True, use_flags=self.use_flags, lens_type='NFW', z_lens=z_cluster, z_source=z_source
         )
         # Adjust lens positions back to original coordinates
         self.lenses.x += self.centroid_x
         self.lenses.y += self.centroid_y
+        self.lenses.mass /= h # Convert mass to M_sun h^-1
 
     def save_results(self):
         """
@@ -316,22 +332,20 @@ class JWSTPipeline:
         ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
         cbar = plt.colorbar(contours, ax=ax)
 
-
         # Plot lens positions
         ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
-
-        # Plot source positions
-        # ax.scatter(self.sources.x, self.sources.y, s=50, c='blue', label='Sources', marker='.')
 
         # Labels and title
         ax.set_xlabel('RA Offset (arcsec)')
         ax.set_ylabel('Dec Offset (arcsec)')
-        ax.set_title('Convergence Map Overlaid on JWST Image \n All Signals \n Mass = {:.2e}'.format(np.sum(self.lenses.mass)))
-
+        ax.set_title('Convergence Map Overlaid on JWST Image \n {} \n Mass = {:.2e} M_sun h^-1'.format(self.signal_choice, np.sum(self.lenses.mass)))
+        ax.set_title(r'Mass Reconstruction of A2744 with JWST - {} \n Total Mass = {:.2e} M_\odot h^-1'.format(self.signal_choice, np.sum(self.lenses.mass)))
         # Save and display
         plt.legend()
         plt.tight_layout()
-        plt.savefig(self.output_dir / 'convergence_map_all.png', dpi=300)
+        plt.savefig(self.output_dir / 'A2744_clu_{}.png'.format(self.signal_choice), dpi=300)
+
+        utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice))
 
 
     def get_image_data(self):
@@ -345,13 +359,17 @@ class JWSTPipeline:
 
 if __name__ == '__main__':
     # Configuration dictionary
-    config = {
-        'flexion_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/multiband_flexion.pkl',
-        'source_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/stacked_cat.ecsv',
-        'image_path': 'JWST_Data/JWST/Cluster_Field/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
-        'output_dir': 'Output/JWST',
-    }
+    signals = ['all', 'shear_f', 'f_g', 'shear_g']
 
-    # Initialize and run the pipeline
-    pipeline = JWSTPipeline(config)
-    pipeline.run()
+    for signal in signals:
+        config = {
+            'flexion_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/multiband_flexion.pkl',
+            'source_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/stacked_cat.ecsv',
+            'image_path': 'JWST_Data/JWST/Cluster_Field/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
+            'output_dir': 'Output/JWST',
+            'signal_choice': signal
+        }
+
+        # Initialize and run the pipeline
+        pipeline = JWSTPipeline(config)
+        pipeline.run()

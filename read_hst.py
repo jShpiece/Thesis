@@ -17,7 +17,6 @@ h = 0.7 # Hubble constant
 z_cluster = 0.308 # Redshift of the cluster
 z_source = 0.52 # Mean redshift of the sources
 
-
 def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, legend=True):
     # Plotting function to overlay lensing reconstruction - in the form of lenses or convergence contours, 
     # ontop of an optical image of the cluster
@@ -26,7 +25,7 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
     for img in img_data:
         # Allow for multiple images to be overlayed - allows for band or epoch stacking
         norm = ImageNormalize(img, vmin=0, vmax=vmax, stretch=LogStretch())
-        ax.imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray')
+        ax.imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
 
     if conv is not None:
         # Adjusted contour levels for better feature representation.
@@ -46,73 +45,6 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
 
     if legend:
         ax.legend()
-
-
-def compare_mass_estimates(halos, plot_name):
-    # Radii in kpc
-    r = np.linspace(150, 300, 100)  
-    
-    # Literature mass estimates: dictionary of form {label: (mass, radius)}
-    mass_estimates = {
-        'MARS': (1.73e14, 200, ), 
-        'Bird': (1.93e14, 200), 
-        'GRALE': (2.25e14, 250),
-        'Merten et al.': (2.24e14, 250)
-    }
-    # The mass estimates are in solar masses, and the radii are in kpc
-    
-    # 2D grid setup (in kpc)
-    nx, ny = 200, 200
-    x_range, y_range = (-500, 500), (-500, 500)  # Adjust as appropriate
-    x_vals = np.linspace(x_range[0], x_range[1], nx)
-    y_vals = np.linspace(y_range[0], y_range[1], ny)
-    M_2D_total = np.zeros((ny, nx), dtype=float)
-    
-    # Sum the mass grids from all halos
-    for i in range(len(halos.x)):
-        # Compute 2D mass for this halo, centered at (halo.x, halo.y) if needed
-        # Construct the halo (non-iterable)
-        halo = halo_obj.NFW_Lens(halos.x[i], halos.y[i], [0], halos.concentration[i], halos.mass[i], z_cluster, halos.chi2[i])
-        M_2D_halo = utils.nfw_projected_mass(
-            halo,
-            r_p=0,          # Dummy placeholder since we want the 2D grid
-            return_2d=True,
-            nx=nx,
-            ny=ny,
-            x_range=x_range,
-            y_range=y_range,
-            x_center=halo.x,  # or halo.x_pos if your object stores it differently
-            y_center=halo.y   # or halo.y_pos if your object stores it differently
-        )
-        M_2D_total += M_2D_halo
-    
-    # Coordinates of each pixel in the grid
-    XX, YY = np.meshgrid(x_vals, y_vals)
-    RR = np.sqrt(XX**2 + YY**2)  # Distance of each pixel from (0,0), adjust if needed
-    
-    # Compute the enclosed mass at each radius in r
-    mass_enclosed = np.zeros_like(r)
-    for i, radius in enumerate(r):
-        mask = (RR <= radius)
-        mass_enclosed[i] = np.sum(M_2D_total[mask])
-    
-    # Plot results
-    fig, ax = plt.subplots()
-    fig.suptitle('Mass Estimates')
-    
-    # Our reconstruction
-    ax.plot(r, mass_enclosed, label='Reconstruction')
-    
-    # Literature estimates
-    markers = ['o', 's', 'D', '^']
-    for i, (label, (mass_lit, r_lit)) in enumerate(mass_estimates.items()):
-        ax.scatter(r_lit, mass_lit, label=label, marker=markers[i % len(markers)])
-    
-    ax.set_xlabel('Radius (kpc)')
-    ax.set_ylabel(r'Mass ($M_\odot$)')
-    ax.set_yscale('log')
-    ax.legend()
-    plt.savefig(plot_name)
 
 
 def get_img_data(fits_file_path) -> np.ndarray:
@@ -241,7 +173,6 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
     X, Y, kappa = utils.calculate_kappa(lenses, extent, smoothing_scale=1, lens_type=lens_type)
     print('Calculated kappa')
     
-    # kappa = mass_sheet_transformation(kappa, (1-np.mean(kappa))**-1) # Set the mean kappa to 0
     if lens_type=='SIS':
         mass = utils.calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
     else:
@@ -278,17 +209,16 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         title += '\n All Signals Used'
     
     # Create the figure 
-    '''
+    
     fig = plt.figure(figsize=(8, 10))
     ax = fig.add_subplot(111)
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
     ax.set_title(title)
     plt.savefig(dir + file_name + '.png')
-    '''
     
     # Now compare the mass estimates - for now, only do this for all signals
     plot_name = dir + file_name + '_mass.png'
-    compare_mass_estimates(lenses, plot_name)
+    utils.compare_mass_estimates(lenses, plot_name)
     plt.close()
     print('Plotted and saved')
 

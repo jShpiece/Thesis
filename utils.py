@@ -30,6 +30,8 @@ from astropy import units as u
 import scipy.ndimage
 from itertools import combinations
 from scipy.integrate import quad
+import matplotlib.pyplot as plt
+import halo_obj
 
 
 # ------------------------
@@ -644,3 +646,76 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     g_flexion_2 = np.sum(g_flexion_mag * sin3phi, axis=0)
 
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
+
+
+
+def compare_mass_estimates_a2744(halos, plot_name):
+    """
+    Compares our mass reconstruction to literature estimates for Abell 2744.
+    """
+
+    # Radii in kpc
+    z_cluster = 0.308
+    r = np.linspace(150, 300, 100)  
+    
+    # Literature mass estimates: dictionary of form {label: (mass, radius)}
+    mass_estimates = {
+        'MARS': (1.73e14, 200, ), 
+        'Bird': (1.93e14, 200), 
+        'GRALE': (2.25e14, 250),
+        'Merten et al.': (2.24e14, 250)
+    }
+    # The mass estimates are in solar masses, and the radii are in kpc
+    
+    # 2D grid setup (in kpc)
+    nx, ny = 200, 200
+    x_range, y_range = (-500, 500), (-500, 500)  # Adjust as appropriate
+    x_vals = np.linspace(x_range[0], x_range[1], nx)
+    y_vals = np.linspace(y_range[0], y_range[1], ny)
+    M_2D_total = np.zeros((ny, nx), dtype=float)
+    
+    # Sum the mass grids from all halos
+    for i in range(len(halos.x)):
+        # Compute 2D mass for this halo, centered at (halo.x, halo.y) if needed
+        # Construct the halo (non-iterable)
+        halo = halo_obj.NFW_Lens(halos.x[i], halos.y[i], [0], halos.concentration[i], halos.mass[i], z_cluster, halos.chi2[i])
+        M_2D_halo = nfw_projected_mass(
+            halo,
+            r_p=0,          # Dummy placeholder since we want the 2D grid
+            return_2d=True,
+            nx=nx,
+            ny=ny,
+            x_range=x_range,
+            y_range=y_range,
+            x_center=halo.x,  # or halo.x_pos if your object stores it differently
+            y_center=halo.y   # or halo.y_pos if your object stores it differently
+        )
+        M_2D_total += M_2D_halo
+    
+    # Coordinates of each pixel in the grid
+    XX, YY = np.meshgrid(x_vals, y_vals)
+    RR = np.sqrt(XX**2 + YY**2)  # Distance of each pixel from (0,0), adjust if needed
+    
+    # Compute the enclosed mass at each radius in r
+    mass_enclosed = np.zeros_like(r)
+    for i, radius in enumerate(r):
+        mask = (RR <= radius)
+        mass_enclosed[i] = np.sum(M_2D_total[mask])
+    
+    # Plot results
+    fig, ax = plt.subplots()
+    fig.suptitle('Mass Estimates')
+    
+    # Our reconstruction
+    ax.plot(r, mass_enclosed, label='Reconstruction')
+    
+    # Literature estimates
+    markers = ['o', 's', 'D', '^']
+    for i, (label, (mass_lit, r_lit)) in enumerate(mass_estimates.items()):
+        ax.scatter(r_lit, mass_lit, label=label, marker=markers[i % len(markers)])
+    
+    ax.set_xlabel('Radius (kpc)')
+    ax.set_ylabel(r'Mass ($M_\odot$)')
+    ax.set_yscale('log')
+    ax.legend()
+    plt.savefig(plot_name)
