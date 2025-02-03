@@ -138,34 +138,30 @@ def nfw_projected_mass(
         M_2D: 2D ndarray
             A 2D map of the projected mass (in M_sun) over the specified grid.
     """
-    G = 4.302e-6  # kpc (km/s)^2 M_sun^-1
 
-    M200 = halos.mass
     R200_m = halos.calc_R200()[0]  # in meters
     R200_kpc = R200_m * 3.24078e-20  # in kpc
     c = halos.concentration
     r_s = R200_kpc / c  # kpc
 
-    def m_func(x):
-        return np.log(1 + x) - x / (1 + x)
-
-    m_c = m_func(c)
-    rho_s = M200 / (4 * np.pi * r_s**3 * m_c)  # M_sun kpc^-3
+    rho_c = cosmo.critical_density(halos.redshift).to(u.M_sun / u.kpc**3).value
+    delta_c = (200/3) * c**3 / (np.log(1 + c) - c / (1 + c))
 
     def Sigma(R):
         x = R / r_s
+        leading_term = 2 * rho_c * r_s * delta_c
         if x < 1:
             factor = 1.0 / (x**2 - 1)
             term1 = 1.0
             term2 = 2.0 / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
-            return 2.0 * rho_s * r_s * factor * (term1 - term2)
+            return leading_term * factor * (term1 - term2)
         elif np.isclose(x, 1.0):
-            return (2.0 / 3.0) * rho_s * r_s
+            return leading_term / 3.0
         else:
             factor = 1.0 / (x**2 - 1)
             term1 = 1.0
             term2 = 2.0 / np.sqrt(x**2 - 1) * np.arctan(np.sqrt((x - 1) / (1 + x)))
-            return 2.0 * rho_s * r_s * factor * (term1 - term2)
+            return leading_term * factor * (term1 - term2)
 
     if not return_2d:
         r_p = np.atleast_1d(r_p)
@@ -389,8 +385,6 @@ def calculate_kappa(lenses, extent, smoothing_scale, lens_type='SIS'):
 
     return X, Y, kappa
                 
-
-
     # Apply Gaussian smoothing if smoothing_scale is provided
     if smoothing_scale:
         kappa = scipy.ndimage.gaussian_filter(kappa, sigma=smoothing_scale)
@@ -702,6 +696,14 @@ def compare_mass_estimates_a2744(halos, plot_name):
         mask = (RR <= radius)
         mass_enclosed[i] = np.sum(M_2D_total[mask])
     
+    # Tell me how far off we are from the literature estimates
+    for label, (mass_lit, r_lit) in mass_estimates.items():
+        mass_recon = np.interp(r_lit, r, mass_enclosed)
+        # Write masses in scientific notation
+        mass_lit_val = f'{mass_lit:.2e}'
+        mass_recon_val = f'{mass_recon:.2e}'
+        print(f'{label}: Literature mass = {mass_lit_val}, Reconstruction = {mass_recon_val}, % Error = {100 * (mass_recon - mass_lit) / mass_lit}')
+
     # Plot results
     fig, ax = plt.subplots()
     fig.suptitle('Mass Estimates')

@@ -13,7 +13,7 @@ plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentat
 
 # Define some constants
 arcsec_per_pixel = 0.03 # From the instrumentation documentation
-h = 0.7 # Hubble constant
+hubble_param = 0.67 # Hubble constant
 z_cluster = 0.308 # Redshift of the cluster
 z_source = 0.52 # Mean redshift of the sources
 
@@ -152,7 +152,7 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
 
     if full_reconstruction:
         lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, use_flags=use_flags, lens_type=lens_type)
-        lenses.mass /= h # Convert the mass to h^-1 solar masses
+        lenses.mass *= hubble_param # Convert the mass to h^-1 solar masses
         print('Completed reconstruction')
 
         lenses.export_to_csv(dir + file_name + '_lenses.csv')
@@ -209,16 +209,16 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         title += '\n All Signals Used'
     
     # Create the figure 
-    
+    '''
     fig = plt.figure(figsize=(8, 10))
     ax = fig.add_subplot(111)
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
     ax.set_title(title)
     plt.savefig(dir + file_name + '.png')
-    
+    '''
     # Now compare the mass estimates - for now, only do this for all signals
     plot_name = dir + file_name + '_mass.png'
-    utils.compare_mass_estimates(lenses, plot_name)
+    utils.compare_mass_estimates_a2744(lenses, plot_name)
     plt.close()
     print('Plotted and saved')
 

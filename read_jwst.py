@@ -23,7 +23,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # Redshifts
 z_cluster = 0.308
 z_source = 0.5
-h = 0.67
+hubble_param = 0.67 # Hubble constant
 
 class JWSTPipeline:
     """
@@ -279,7 +279,7 @@ class JWSTPipeline:
         # Adjust lens positions back to original coordinates
         self.lenses.x += self.centroid_x
         self.lenses.y += self.centroid_y
-        self.lenses.mass *= h # Convert mass to M_sun h^-1
+        self.lenses.mass *= hubble_param # Convert mass to M_sun h^-1
 
     def save_results(self):
         """
@@ -314,6 +314,7 @@ class JWSTPipeline:
 
 
         # Plot settings
+        '''
         fig, ax = plt.subplots(figsize=(10, 10))
         norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
 
@@ -343,6 +344,7 @@ class JWSTPipeline:
         plt.legend()
         plt.tight_layout()
         plt.savefig(self.output_dir / 'A2744_clu_{}.png'.format(self.signal_choice), dpi=300)
+        '''
 
         utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice))
 
