@@ -23,7 +23,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 # Redshifts
 z_cluster = 0.308
 z_source = 0.5
-h = 0.7
+h = 0.67
 
 class JWSTPipeline:
     """
@@ -279,7 +279,7 @@ class JWSTPipeline:
         # Adjust lens positions back to original coordinates
         self.lenses.x += self.centroid_x
         self.lenses.y += self.centroid_y
-        self.lenses.mass /= h # Convert mass to M_sun h^-1
+        self.lenses.mass *= h # Convert mass to M_sun h^-1
 
     def save_results(self):
         """
@@ -338,8 +338,7 @@ class JWSTPipeline:
         # Labels and title
         ax.set_xlabel('RA Offset (arcsec)')
         ax.set_ylabel('Dec Offset (arcsec)')
-        ax.set_title('Convergence Map Overlaid on JWST Image \n {} \n Mass = {:.2e} M_sun h^-1'.format(self.signal_choice, np.sum(self.lenses.mass)))
-        ax.set_title(r'Mass Reconstruction of A2744 with JWST - {} \n Total Mass = {:.2e} M_\odot h^-1'.format(self.signal_choice, np.sum(self.lenses.mass)))
+        ax.set_title(r'Mass Reconstruction of A2744 with JWST - {}'.format(self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass)))
         # Save and display
         plt.legend()
         plt.tight_layout()
