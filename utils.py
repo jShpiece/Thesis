@@ -145,7 +145,7 @@ def nfw_projected_mass(
     r_s = R200_kpc / c  # kpc
 
     rho_c = cosmo.critical_density(halos.redshift).to(u.M_sun / u.kpc**3).value
-    delta_c = (200/3) * c**3 / (np.log(1 + c) - c / (1 + c))
+    delta_c = halos.calc_delta_c()
 
     def Sigma(R):
         x = R / r_s
@@ -153,14 +153,14 @@ def nfw_projected_mass(
         if x < 1:
             factor = 1.0 / (x**2 - 1)
             term1 = 1.0
-            term2 = 2.0 / np.sqrt(1 - x**2) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
+            term2 = (2.0 / np.sqrt(1 - x**2)) * np.arctanh(np.sqrt((1 - x) / (1 + x)))
             return leading_term * factor * (term1 - term2)
         elif np.isclose(x, 1.0):
             return leading_term / 3.0
         else:
             factor = 1.0 / (x**2 - 1)
             term1 = 1.0
-            term2 = 2.0 / np.sqrt(x**2 - 1) * np.arctan(np.sqrt((x - 1) / (1 + x)))
+            term2 = (2.0 / np.sqrt(x**2 - 1)) * np.arctan(np.sqrt((x - 1) / (1 + x)))
             return leading_term * factor * (term1 - term2)
 
     if not return_2d:
@@ -169,7 +169,7 @@ def nfw_projected_mass(
 
         for i, r in enumerate(r_p):
             integrand = lambda rr: 2 * np.pi * Sigma(rr) * rr
-            M_proj[i], _ = quad(integrand, 0.0, r, limit=1000)
+            M_proj[i], _ = quad(integrand, 0, r, limit=1000)
 
         return M_proj if len(M_proj) > 1 else M_proj[0]
 
@@ -184,7 +184,7 @@ def nfw_projected_mass(
     for i in range(ny):
         for j in range(nx):
             # Distance from halo center at (x_center, y_center)
-            R = np.sqrt((x_vals[i] - x_center)**2 + (y_vals[j] - y_center)**2)
+            R = np.sqrt((x_vals[j] - x_center)**2 + (y_vals[i] - y_center)**2)
             M_2D[i, j] = Sigma(R) * area_per_pixel
 
     return M_2D
@@ -327,7 +327,7 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     return term1 * term2
 
 
-def calculate_kappa(lenses, extent, smoothing_scale, lens_type='SIS'):
+def calculate_kappa(lenses, extent, smoothing_scale, lens_type='SIS', source_redshift=0.8):
     """
     Calculates the convergence (kappa) map for a given set of lenses.
 
@@ -365,7 +365,7 @@ def calculate_kappa(lenses, extent, smoothing_scale, lens_type='SIS'):
 
     elif lens_type == 'NFW':
         # Critical surface density at lens redshift
-        sigma_crit = critical_surface_density(lenses.redshift, 0.8)
+        sigma_crit = critical_surface_density(lenses.redshift, source_redshift)
         rho_c = cosmo.critical_density(lenses.redshift).to(u.kg / u.m**3).value
         delta_c = lenses.calc_delta_c()
         rho_s = rho_c * delta_c
@@ -380,7 +380,7 @@ def calculate_kappa(lenses, extent, smoothing_scale, lens_type='SIS'):
             x = np.abs(r / rs_2[k])
             term_1 = radial_term_1(x)
             kappa_s = rho_s[k] * rs_1[k] / sigma_crit  # Dimensionless surface density
-            kappa += kappa_s * term_1 / (x ** 2 - 1)
+            kappa += 2 * kappa_s * term_1 / (x ** 2 - 1)
 
     return X, Y, kappa
                 
@@ -685,11 +685,19 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title):
             ny=ny,
             x_range=x_range,
             y_range=y_range,
-            x_center=halo.x,  # or halo.x_pos if your object stores it differently
-            y_center=halo.y   # or halo.y_pos if your object stores it differently
+            x_center=halo.x, 
+            y_center=halo.y   
         )
         M_2D_total += M_2D_halo
-    
+
+    fig2, ax2 = plt.subplots()
+    fig2.suptitle('Surface Mass Distribution for Abell 2744 (log scale)')
+    cbar = ax2.imshow(np.log10(M_2D_total), extent=[x_range[0], x_range[1], y_range[0], y_range[1]], origin='lower')
+    fig2.colorbar(cbar)
+    ax2.set_xlabel('x (kpc)')
+    ax2.set_ylabel('y (kpc)')
+    plt.savefig('mass_distribution_a2744.png')
+    raise ValueError('Check the mass distribution plot')
     # Coordinates of each pixel in the grid
     XX, YY = np.meshgrid(x_vals, y_vals)
     RR = np.sqrt(XX**2 + YY**2)  # Distance of each pixel from (0,0), adjust if needed

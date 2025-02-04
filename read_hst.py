@@ -211,13 +211,13 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         title += '\n All Signals Used'
     
     # Create the figure 
-    
+    '''
     fig = plt.figure(figsize=(8, 10))
     ax = fig.add_subplot(111)
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
     ax.set_title(title)
     plt.savefig(dir + file_name + '.png')
-    
+    '''
     # Now compare the mass estimates - for now, only do this for all signals
     plot_name = dir + file_name + '_mass.png'
     title = 'Abell 2744 Mass Estimates - ' + 'All Signals Used' if use_flags == [True, True, True] else 'Abell 2744 Mass Estimates - ' + ' '.join(signals)

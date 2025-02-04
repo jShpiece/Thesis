@@ -346,7 +346,7 @@ class JWSTPipeline:
         plt.savefig(self.output_dir / 'A2744_clu_{}.png'.format(self.signal_choice), dpi=300)
         '''
 
-        utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice))
+        utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice), 'Mass Estimates for A2744 with JWST - {}'.format(self.signal_choice))
 
 
     def get_image_data(self):
@@ -364,6 +364,7 @@ if __name__ == '__main__':
 
     for signal in signals:
         config = {
+            'cluster_name': 'A2744',
             'flexion_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/multiband_flexion.pkl',
             'source_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/stacked_cat.ecsv',
             'image_path': 'JWST_Data/JWST/Cluster_Field/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
