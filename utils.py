@@ -184,11 +184,10 @@ def nfw_projected_mass(
     for i in range(ny):
         for j in range(nx):
             # Distance from halo center at (x_center, y_center)
-            R = np.sqrt((x_vals[j] - x_center)**2 + (y_vals[i] - y_center)**2)
+            R = np.sqrt((x_vals[i] - x_center)**2 + (y_vals[j] - y_center)**2)
             M_2D[i, j] = Sigma(R) * area_per_pixel
 
     return M_2D
-
 
 
 # ------------------------
@@ -642,8 +641,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
 
-
-def compare_mass_estimates_a2744(halos, plot_name):
+def compare_mass_estimates_a2744(halos, plot_name, plot_title):
     """
     Compares our mass reconstruction to literature estimates for Abell 2744.
     """
@@ -654,16 +652,22 @@ def compare_mass_estimates_a2744(halos, plot_name):
     
     # Literature mass estimates: dictionary of form {label: (mass, radius)}
     mass_estimates = {
-        'MARS': (1.73e14, 200, ), 
+        'MARS': (1.73e14, 200), 
         'Bird': (1.93e14, 200), 
         'GRALE': (2.25e14, 250),
         'Merten et al.': (2.24e14, 250)
     }
     # The mass estimates are in solar masses, and the radii are in kpc
     
+    # Move the halos to be centered on the primary halo
+    largest_halo = np.argmax(halos.mass)
+    centroid = (halos.x[largest_halo], halos.y[largest_halo])
+    halos.x -= centroid[0]
+    halos.y -= centroid[1]
+
     # 2D grid setup (in kpc)
-    nx, ny = 200, 200
-    x_range, y_range = (-500, 500), (-500, 500)  # Adjust as appropriate
+    x_range, y_range = (-200, 200), (-200, 200)  # Adjust as appropriate
+    nx, ny = 400, 400
     x_vals = np.linspace(x_range[0], x_range[1], nx)
     y_vals = np.linspace(y_range[0], y_range[1], ny)
     M_2D_total = np.zeros((ny, nx), dtype=float)
@@ -706,7 +710,7 @@ def compare_mass_estimates_a2744(halos, plot_name):
 
     # Plot results
     fig, ax = plt.subplots()
-    fig.suptitle('Mass Estimates')
+    fig.suptitle(plot_title)
     
     # Our reconstruction
     ax.plot(r, mass_enclosed, label='Reconstruction')
@@ -721,3 +725,6 @@ def compare_mass_estimates_a2744(halos, plot_name):
     ax.set_yscale('log')
     ax.legend()
     plt.savefig(plot_name)
+
+    halos.x += centroid[0]
+    halos.y += centroid[1]

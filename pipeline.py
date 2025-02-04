@@ -75,10 +75,6 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
         # Prepare arrays to store estimated masses
         masses = np.zeros_like(sources.x)
 
-        # Precompute common quantities to avoid redundant calculations
-        z_l_array = np.full_like(sources.x, z_l)
-        z_s_array = np.full_like(sources.x, z_s)
-
         # Loop over each source to estimate the mass
         for i in range(len(sources.x)):
             # Define the objective function for mass estimation
@@ -533,7 +529,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', num_iter
             result = opt.minimize(
                 chi2wrapper, guess, args=params,
                 method='L-BFGS-B',
-                bounds=[(9, 16)],
+                bounds=[(10, 16)],
                 options={'maxiter': 1000, 'ftol': 1e-6}
             )
             lenses.mass[i] = 10 ** result.x

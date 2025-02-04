@@ -150,6 +150,18 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
     file_name = 'A2744'
     file_name += '_par' if field == 'parallel' else '_clu'
 
+    if use_flags == [True, True, True]:
+        file_name += '_all'
+    else:
+        signals = []
+        if use_flags[0]:
+            signals.append('_gamma')
+        if use_flags[1]:
+            signals.append('_F')
+        if use_flags[2]:
+            signals.append('_G')
+        file_name += ''.join(signals)
+
     if full_reconstruction:
         lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, use_flags=use_flags, lens_type=lens_type)
         lenses.mass *= hubble_param # Convert the mass to h^-1 solar masses
@@ -162,8 +174,12 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         if lens_type == 'SIS':
             lenses = halo_obj.SIS_Lens.load_from_csv(dir + file_name + '_lenses.csv')
         else:
-            lenses = halo_obj.NFW_Lens.load_from_csv(dir + file_name + '_lenses.csv')
-        sources = source_obj.Source.load_from_csv(dir + file_name + '_sources.csv')
+            # lenses = halo_obj.NFW_Lens.load_from_csv(dir + file_name + '_lenses.csv')
+            lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], 0, [0])
+            lenses.redshift = z_cluster
+            lenses.import_from_csv(dir + file_name + '_lenses.csv')
+        sources = source_obj.Source([0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0])
+        sources.import_from_csv(dir + file_name + '_sources.csv')
         print('Loaded in data')
 
     # Generate a convergence map that spans the same area as the image
@@ -177,20 +193,6 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         mass = utils.calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
     else:
         mass = np.sum(lenses.mass) # Calculate the mass of the NFW lenses
-    
-    # Build the file name
-    
-    if use_flags == [True, True, True]:
-        file_name += '_all'
-    else:
-        signals = []
-        if use_flags[0]:
-            signals.append('_gamma')
-        if use_flags[1]:
-            signals.append('_F')
-        if use_flags[2]:
-            signals.append('_G')
-        file_name += ''.join(signals)
     
     # Build the title
     title = 'Abell 2744 Convergence Map - ' + 'Parallel Field' if field == 'parallel' else 'Cluster Field' + '\n' + f'M = {mass:.3e} $h^{{-1}} M_\\odot$'
@@ -209,22 +211,21 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         title += '\n All Signals Used'
     
     # Create the figure 
-    '''
+    
     fig = plt.figure(figsize=(8, 10))
     ax = fig.add_subplot(111)
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
     ax.set_title(title)
     plt.savefig(dir + file_name + '.png')
-    '''
+    
     # Now compare the mass estimates - for now, only do this for all signals
     plot_name = dir + file_name + '_mass.png'
-    utils.compare_mass_estimates_a2744(lenses, plot_name)
+    title = 'Abell 2744 Mass Estimates - ' + 'All Signals Used' if use_flags == [True, True, True] else 'Abell 2744 Mass Estimates - ' + ' '.join(signals)
+    utils.compare_mass_estimates_a2744(lenses, plot_name, title)
     plt.close()
     print('Plotted and saved')
 
 if __name__ == '__main__':
-    # lenses = np.load('Output//a2744_clu_lenses.npy')
-    # compare_mass_estimates(lenses, 'Output//abel//a2744_clu_mass.png')
 
     use_all_signals = [True, True, True] # Use all signals
     shear_flex = [True, True, False] # Use shear and flexion
@@ -234,4 +235,4 @@ if __name__ == '__main__':
         
     for field in ['cluster']:
         for use_flags in signal_choices:
-            reconstruct_a2744(field=field, full_reconstruction=True, use_flags=use_flags, lens_type='NFW')
+            reconstruct_a2744(field=field, full_reconstruction=False, use_flags=use_flags, lens_type='NFW')
