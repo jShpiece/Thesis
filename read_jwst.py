@@ -314,7 +314,7 @@ class JWSTPipeline:
 
 
         # Plot settings
-        '''
+        
         fig, ax = plt.subplots(figsize=(10, 10))
         norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
 
@@ -343,10 +343,10 @@ class JWSTPipeline:
         # Save and display
         plt.legend()
         plt.tight_layout()
-        plt.savefig(self.output_dir / 'A2744_clu_{}.png'.format(self.signal_choice), dpi=300)
-        '''
+        plt.savefig(self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), dpi=300)
+        
 
-        utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice), 'Mass Estimates for A2744 with JWST - {}'.format(self.signal_choice))
+        utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice), 'Output/JWST/mass_comparison_{}.csv'.format(self.signal_choice))
 
 
     def get_image_data(self):
@@ -363,15 +363,24 @@ if __name__ == '__main__':
     signals = ['all', 'shear_f', 'f_g', 'shear_g']
 
     for signal in signals:
-        config = {
-            'cluster_name': 'A2744',
-            'flexion_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/multiband_flexion.pkl',
-            'source_catalog_path': 'JWST_Data/JWST/Cluster_Field/Catalogs/stacked_cat.ecsv',
-            'image_path': 'JWST_Data/JWST/Cluster_Field/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
-            'output_dir': 'Output/JWST',
+        abell_config = {
+            'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
+            'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
+            'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
+            'output_dir': 'Output/JWST/ABELL/',
+            'cluster_name': 'ABELL_2744',
+            'signal_choice': signal
+        }
+
+        el_gordo_config = {
+            'flexion_catalog_path': 'JWST_Data/JWST/EL_GORDO/Catalogs/multiband_flexion.pkl',
+            'source_catalog_path': 'JWST_Data/JWST/EL_GORDO/Catalogs/stacked_cat.ecsv',
+            'image_path': 'JWST_Data\JWST\EL_GORDO\Image_Data\stacked.fits',
+            'output_dir': 'Output/JWST/EL_GORDO/',
+            'cluster_name': 'EL_GORDO',
             'signal_choice': signal
         }
 
         # Initialize and run the pipeline
-        pipeline = JWSTPipeline(config)
+        pipeline = JWSTPipeline(el_gordo_config)
         pipeline.run()
