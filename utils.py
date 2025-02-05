@@ -146,6 +146,9 @@ def nfw_projected_mass(
 
     rho_c = cosmo.critical_density(halos.redshift).to(u.M_sun / u.kpc**3).value
     delta_c = halos.calc_delta_c()
+    sigma_c = critical_surface_density(halos.redshift, 0.8)
+    sigma_c = sigma_c * u.M_sun / u.kpc**2
+    sigma_c = sigma_c.value
 
     def Sigma(R):
         x = R / r_s
@@ -175,19 +178,24 @@ def nfw_projected_mass(
 
     x_vals = np.linspace(x_range[0], x_range[1], nx)
     y_vals = np.linspace(y_range[0], y_range[1], ny)
-    M_2D = np.zeros((ny, nx))
 
     dx = (x_range[1] - x_range[0]) / (nx - 1)
     dy = (y_range[1] - y_range[0]) / (ny - 1)
     area_per_pixel = dx * dy
 
+    kappa = np.zeros((ny, nx))
+
     for i in range(ny):
         for j in range(nx):
             # Distance from halo center at (x_center, y_center)
             R = np.sqrt((x_vals[j] - x_center)**2 + (y_vals[i] - y_center)**2)
-            M_2D[i, j] = Sigma(R) * area_per_pixel
+            surface_density = Sigma(R)
+            kappa[i, j] = surface_density / sigma_c
+    # perform a mass sheet transformation - such that the convergence goes to zero at large radii
+    # use the function mass_sheet_transformation(kappa, k) where k is the mass sheet parameter
+    # Determine the mass sheet parameter k so that the convergence goes to zero at large radii
 
-    return M_2D
+    return kappa, area_per_pixel
 
 
 # ------------------------
@@ -670,14 +678,14 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title):
     nx, ny = 400, 400
     x_vals = np.linspace(x_range[0], x_range[1], nx)
     y_vals = np.linspace(y_range[0], y_range[1], ny)
-    M_2D_total = np.zeros((ny, nx), dtype=float)
+    kappa_total = np.zeros((ny, nx), dtype=float)
     
     # Sum the mass grids from all halos
     for i in range(len(halos.x)):
         # Compute 2D mass for this halo, centered at (halo.x, halo.y) if needed
         # Construct the halo (non-iterable)
         halo = halo_obj.NFW_Lens(halos.x[i], halos.y[i], [0], halos.concentration[i], halos.mass[i], z_cluster, halos.chi2[i])
-        M_2D_halo = nfw_projected_mass(
+        kappa, area_per_pixel = nfw_projected_mass(
             halo,
             r_p=0,          # Dummy placeholder since we want the 2D grid
             return_2d=True,
@@ -688,16 +696,30 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title):
             x_center=halo.x, 
             y_center=halo.y   
         )
-        M_2D_total += M_2D_halo
+        kappa_total += kappa
+    
+    # Now find a way to break the mass sheet degeneracy
+    # Choose a value of k
+    k = 2
+    kappa_total = mass_sheet_transformation(kappa_total, k)
 
+    # Then convert back to a 2D mass distribution
+    sigma_c = critical_surface_density(z_cluster, 0.8)
+    sigma_c = sigma_c * u.M_sun / u.kpc**2
+    sigma_c = sigma_c.value
+    M_2D_total = kappa_total * sigma_c * area_per_pixel
+
+    
     fig2, ax2 = plt.subplots()
     fig2.suptitle('Surface Mass Distribution for Abell 2744 (log scale)')
-    cbar = ax2.imshow(np.log10(M_2D_total), extent=[x_range[0], x_range[1], y_range[0], y_range[1]], origin='lower')
+    cbar = ax2.imshow(np.log10(kappa_total), extent=[x_range[0], x_range[1], y_range[0], y_range[1]], origin='lower')
     fig2.colorbar(cbar)
     ax2.set_xlabel('x (kpc)')
     ax2.set_ylabel('y (kpc)')
+    plt.show()
     plt.savefig('mass_distribution_a2744.png')
-    raise ValueError('Check the mass distribution plot')
+    # raise ValueError('Check the mass distribution plot')
+    
     # Coordinates of each pixel in the grid
     XX, YY = np.meshgrid(x_vals, y_vals)
     RR = np.sqrt(XX**2 + YY**2)  # Distance of each pixel from (0,0), adjust if needed
