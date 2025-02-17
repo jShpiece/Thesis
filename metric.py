@@ -39,7 +39,7 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
         return np.inf
     return dof
 
-def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=False, use_priors = False, sigma=1.0) -> float:
+def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', z_source = 0.8, use_weights=False, sigma=1.0) -> float:
     """
     Calculate the chi-squared statistic for the difference between observed and modeled source properties.
 
@@ -68,7 +68,7 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
     source_clone.zero_lensing_signals()
 
     # Apply lensing effects to the cloned source based on the lensing model
-    source_clone.apply_lensing(lenses, lens_type=lens_type)
+    source_clone.apply_lensing(lenses, lens_type=lens_type, z_source=z_source)
 
     # Calculate the squared differences for each lensing signal component
     chi_squared_components = {}
@@ -133,13 +133,6 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', use_weights=F
         # No penalties defined for NFW lenses in this function
         pass
 
-    if use_priors:
-        # Add a prior term based on the sum of the log masses
-        log_prior = -1.9 * np.sum(np.log(lenses.mass))
-        # Multiply by -2 to match chi-squared scaling
-        prior_term = -2 * log_prior  # This becomes +3.8 * sum(log M)
-        prior_strength = 0.005 # Strength of the prior term
-        total_chi_squared += prior_strength * prior_term
 
 
     # Return the total chi-squared including penalties

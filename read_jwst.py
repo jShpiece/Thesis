@@ -21,8 +21,8 @@ plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exis
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # Redshifts
-z_cluster = 0.308
-z_source = 0.5
+z_cluster = 0.87
+z_source = 4.0
 hubble_param = 0.67 # Hubble constant
 
 class JWSTPipeline:
@@ -45,6 +45,7 @@ class JWSTPipeline:
         self.image_path = Path(config['image_path'])
         self.output_dir = Path(config['output_dir'])
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.cluster_name = config['cluster_name']
         # Interpret signal choice
         # can be all, shear_f, f_g, or shear_g
         # corresponds to [True, True, True], [True, True, False], [False, True, True], [True, False, True]
@@ -309,9 +310,10 @@ class JWSTPipeline:
 
         # Calculate convergence map
         X, Y, kappa = utils.calculate_kappa(
-            self.lenses, extent=img_extent, smoothing_scale=5, lens_type='NFW'
+            self.lenses, extent=img_extent, smoothing_scale=5, lens_type='NFW', source_redshift=z_source
         )
-
+        # check that kappa is not all zeros
+        assert np.any(kappa), 'Kappa is all zeros'
 
         # Plot settings
         
@@ -375,7 +377,7 @@ if __name__ == '__main__':
         el_gordo_config = {
             'flexion_catalog_path': 'JWST_Data/JWST/EL_GORDO/Catalogs/multiband_flexion.pkl',
             'source_catalog_path': 'JWST_Data/JWST/EL_GORDO/Catalogs/stacked_cat.ecsv',
-            'image_path': 'JWST_Data\JWST\EL_GORDO\Image_Data\stacked.fits',
+            'image_path': 'JWST_Data/JWST/EL_GORDO/Image_Data/stacked.fits',
             'output_dir': 'Output/JWST/EL_GORDO/',
             'cluster_name': 'EL_GORDO',
             'signal_choice': signal

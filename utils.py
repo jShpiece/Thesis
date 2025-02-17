@@ -709,15 +709,16 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title):
     sigma_c = sigma_c.value
     M_2D_total = kappa_total * sigma_c * area_per_pixel
 
-    
+    '''
     fig2, ax2 = plt.subplots()
     fig2.suptitle('Surface Mass Distribution for Abell 2744 (log scale)')
     cbar = ax2.imshow(np.log10(kappa_total), extent=[x_range[0], x_range[1], y_range[0], y_range[1]], origin='lower')
     fig2.colorbar(cbar)
     ax2.set_xlabel('x (kpc)')
     ax2.set_ylabel('y (kpc)')
-    plt.show()
+    # plt.show()
     plt.savefig('mass_distribution_a2744.png')
+    '''
     # raise ValueError('Check the mass distribution plot')
     
     # Coordinates of each pixel in the grid
@@ -739,6 +740,7 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title):
         print(f'{label}: Literature mass = {mass_lit_val}, Reconstruction = {mass_recon_val}, % Error = {100 * (mass_recon - mass_lit) / mass_lit}')
 
     # Plot results
+    
     fig, ax = plt.subplots()
     fig.suptitle(plot_title)
     
@@ -755,6 +757,6 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title):
     ax.set_yscale('log')
     ax.legend()
     plt.savefig(plot_name)
-
+    
     halos.x += centroid[0]
     halos.y += centroid[1]
