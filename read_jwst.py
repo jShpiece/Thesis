@@ -214,7 +214,7 @@ class JWSTPipeline:
         self.sources.sigf = sigf
         self.sources.sigg = sigg
 
-        '''
+        
         # Do histograms of q, phi, f1, f2, a, and chi2
         
         signals = [self.sources.e1, self.sources.e2, self.sources.f1, self.sources.f2, a, self.chi2, self.phi]
@@ -228,7 +228,7 @@ class JWSTPipeline:
             ax.set_title(f'{name} Distribution - With Cuts')
             plt.savefig(self.output_dir / f'{name}_distribution_with_cuts.png', dpi=300)
         plt.close('all')
-        '''
+        
         
 
     def match_sources(self):
@@ -348,7 +348,7 @@ class JWSTPipeline:
         plt.savefig(self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), dpi=300)
         
 
-        utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice), 'Output/JWST/mass_comparison_{}.csv'.format(self.signal_choice))
+        # utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice), 'Output/JWST/mass_comparison_{}.csv'.format(self.signal_choice))
 
 
     def get_image_data(self):

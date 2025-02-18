@@ -62,7 +62,7 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
     print_step_info(flags, "After Local Minimization:", lenses, reduced_chi2)
 
     # Step 3: Filter out lenses that are too close to sources or too far from the center
-    lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type=lens_type, z_source=z_source)
+    lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type=lens_type)
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
     print_step_info(flags, "After Filtering:", lenses, reduced_chi2)
 
