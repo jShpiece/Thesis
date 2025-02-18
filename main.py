@@ -63,7 +63,7 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
 
     # Step 3: Filter out lenses that are too close to sources or too far from the center
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type=lens_type)
-    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type, z_source=z_source)
     print_step_info(flags, "After Filtering:", lenses, reduced_chi2)
 
     # Step 4: Iteratively eliminate lenses to find the best reduced chi-squared value
@@ -81,7 +81,8 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
     print_step_info(flags, "After Merging Lenses:", lenses, reduced_chi2)
 
     # Step 6: Perform a final optimization on the lens strengths
-    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type=lens_type)
+    lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type=lens_type, z_source=z_source)
+    print('Hunt for the rogue redshifts')
     # Always use all signals for final fit
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type, z_source=z_source)
     print_step_info(flags, "After Final Optimization:", lenses, reduced_chi2)

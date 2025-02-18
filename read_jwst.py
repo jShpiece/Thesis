@@ -122,6 +122,7 @@ class JWSTPipeline:
 
         # Eliminate all entries with chi2 > 10
         # Add any indice where a < 0.1 - this is too small to get a good reading 
+        
         bad_chi2 = self.chi2 > 10
         bad_a = (self.a < 0.1) | (self.a > 10)
         print('There are {} entries with a < 0.1 or a > 10'.format(np.sum(bad_a)))
@@ -192,9 +193,10 @@ class JWSTPipeline:
             sigf=sigf,
             sigg=sigg  # Adjust if necessary
         )
-
-        bad_indices = self.sources.filter_sources()
-        print(f"Removing {len(bad_indices)} sources with flexion > 0.1.")
+        
+        max_flexion = 1.0
+        bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
+        print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
 
         # Calculate the noise levels for each signal
         a = self.a
@@ -213,7 +215,7 @@ class JWSTPipeline:
         self.sources.sigs = sigs
         self.sources.sigf = sigf
         self.sources.sigg = sigg
-
+        
         
         # Do histograms of q, phi, f1, f2, a, and chi2
         
@@ -228,7 +230,6 @@ class JWSTPipeline:
             ax.set_title(f'{name} Distribution - With Cuts')
             plt.savefig(self.output_dir / f'{name}_distribution_with_cuts.png', dpi=300)
         plt.close('all')
-        
         
 
     def match_sources(self):
@@ -341,7 +342,7 @@ class JWSTPipeline:
         # Labels and title
         ax.set_xlabel('RA Offset (arcsec)')
         ax.set_ylabel('Dec Offset (arcsec)')
-        ax.set_title(r'Mass Reconstruction of A2744 with JWST - {}'.format(self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass)))
+        ax.set_title(r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass)))
         # Save and display
         plt.legend()
         plt.tight_layout()

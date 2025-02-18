@@ -429,7 +429,7 @@ def forward_lens_selection(
                 )
 
             # Compute chi-squared and reduced chi-squared
-            chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type)
+            chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type, z_source=z_source)
             dof = metric.calc_degrees_of_freedom(sources, test_lenses, use_flags)
             reduced_chi2 = chi2 / dof if dof > 0 else np.inf
             chi2_list.append(reduced_chi2)
@@ -523,7 +523,8 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', z_source
             params = [
                 'NFW', 'constrained',
                 lenses.x[i], lenses.y[i], lenses.redshift,
-                lenses.concentration[i], sources, use_flags
+                lenses.concentration[i], sources, use_flags, 
+                z_source
             ]
 
             result = opt.minimize(
@@ -617,6 +618,7 @@ def chi2wrapper(guess, params):
 
     elif model_type == 'NFW':
         if constraint_type == 'unconstrained':
+            print('This function was called')
             lenses = halo_obj.NFW_Lens(
                 guess[0], guess[1], np.zeros_like(guess[0]),
                 params[2], 10 ** guess[2], params[3], [0]
@@ -630,7 +632,7 @@ def chi2wrapper(guess, params):
                 params[3], 10 ** guess, params[2], np.empty_like(params[0])
             )
             lenses.calculate_concentration()
-            return metric.calculate_chi_squared(params[4], lenses, params[5], lens_type='NFW', use_weights=False)
+            return metric.calculate_chi_squared(params[4], lenses, params[5], lens_type='NFW', z_source=params[6])
         
         elif constraint_type == 'dual':
             # Fit both mass and concentration
