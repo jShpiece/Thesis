@@ -123,10 +123,10 @@ class JWSTPipeline:
         # Eliminate all entries with chi2 > 10
         # Add any indice where a < 0.1 - this is too small to get a good reading 
         
-        bad_chi2 = self.chi2 > 10
-        bad_a = (self.a < 0.1) | (self.a > 10)
-        print('There are {} entries with a < 0.1 or a > 10'.format(np.sum(bad_a)))
-        print('There are {} entries with chi2 > 10'.format(np.sum(bad_chi2)))
+        bad_chi2 = self.chi2 > 2
+        bad_a = (self.a < 0.5) | (self.a > 10)
+        print('There are {} entries with a < 0.1 or a > 5'.format(np.sum(bad_a)))
+        print('There are {} entries with chi2 > 2'.format(np.sum(bad_chi2)))
         bad_indices = (bad_chi2) | (bad_a)
         print(f"Removing {np.sum(bad_indices)} entries with chi2 > 10 or a < 0.1.")
         
@@ -324,7 +324,6 @@ class JWSTPipeline:
         ax.imshow(
             img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
         )
-
         
         # Overlay convergence contours
         contour_levels = np.percentile(kappa, np.linspace(60, 100, 6))
