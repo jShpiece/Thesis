@@ -127,55 +127,5 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', z_source = 0.
         # No penalties defined for NFW lenses in this function
         pass
 
-
-
     # Return the total chi-squared including penalties
     return total_chi_squared
-
-def gaussian_weighting(sources, lenses, sigma=50.0, min_distance_threshold=1e-5):
-    """
-    Computes Gaussian weights for each source based on its distance to the closest lens.
-    
-    Parameters:
-        sources (Source): Source object containing source positions (sources.x, sources.y).
-        lenses (NFW_Lens): NFW_Lens object containing lens positions (lenses.x, lenses.y).
-        sigma (float): Standard deviation of the Gaussian function. Controls the weight fall-off. Default is 1.0.
-        min_distance_threshold (float): Minimum distance to avoid zero distance issues. Default is 1e-5.
-        
-    Returns:
-        np.ndarray: Array of weights for each source.
-    """
-    # Check if sigma is valid
-    if sigma <= 0:
-        raise ValueError(f"Invalid sigma value: {sigma}. Sigma must be positive and non-zero.")
-
-    # Number of sources
-    n_sources = len(sources.x)
-    
-    # Initialize weight array
-    weights = np.zeros(n_sources)
-
-    # Calculate weights for each source based on the distance to the nearest lens
-    for i in range(n_sources):
-        # Calculate the distance from the current source to all lenses
-        distances = np.sqrt((sources.x[i] - lenses.x) ** 2 + (sources.y[i] - lenses.y) ** 2)
-        
-        # Apply minimum distance threshold to avoid zero distances
-        distances = np.clip(distances, min_distance_threshold, None)
-        
-        # Find the minimum distance to any lens
-        min_distance = np.min(distances)
-        
-        # Calculate Gaussian weight based on the minimum distance
-        weights[i] = np.exp(-min_distance ** 2 / (2 * sigma ** 2))
-    
-    # Check for sum of weights before normalization to avoid division by zero
-    weight_sum = np.sum(weights)
-    if weight_sum == 0:
-        # raise ValueError("Sum of Gaussian weights is zero. Check source and lens positions or modify sigma.")
-        weights += 1e-5
-
-    # Normalize weights to sum to 1
-    weights /= weight_sum
-    
-    return weights
