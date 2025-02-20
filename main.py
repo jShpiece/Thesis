@@ -82,8 +82,8 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=[True, True, True], 
 
     # Step 6: Perform a final optimization on the lens strengths
     lenses = pipeline.optimize_lens_strength(sources, lenses, use_flags, lens_type=lens_type, z_source=z_source)
-    print('Hunt for the rogue redshifts')
     # Always use all signals for final fit
+    use_flags = [True, True, True]
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type=lens_type, z_source=z_source)
     print_step_info(flags, "After Final Optimization:", lenses, reduced_chi2)
 

@@ -194,7 +194,7 @@ class JWSTPipeline:
             sigg=sigg  # Adjust if necessary
         )
         
-        max_flexion = 1.0
+        max_flexion = 0.12
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
 
@@ -215,7 +215,6 @@ class JWSTPipeline:
         self.sources.sigs = sigs
         self.sources.sigf = sigf
         self.sources.sigg = sigg
-        
         
         # Do histograms of q, phi, f1, f2, a, and chi2
         
@@ -348,8 +347,9 @@ class JWSTPipeline:
         plt.tight_layout()
         plt.savefig(self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), dpi=300)
         
-
-        # utils.compare_mass_estimates_a2744(self.lenses, 'Output/JWST/mass_comparison_{}.png'.format(self.signal_choice), 'Output/JWST/mass_comparison_{}.csv'.format(self.signal_choice))
+        plot_name = 'Output/JWST/mass_{}_{}.png'.format(self.cluster_name, self.signal_choice)
+        plot_title = 'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice)
+        utils.compare_mass_estimates_a2744(self.lenses, plot_name, plot_title, self.cluster_name)
 
 
     def get_image_data(self):

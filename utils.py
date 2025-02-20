@@ -649,23 +649,33 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
 
-def compare_mass_estimates_a2744(halos, plot_name, plot_title):
+def compare_mass_estimates_a2744(halos, plot_name, plot_title, cluster_name='Abell_2744'):
     """
     Compares our mass reconstruction to literature estimates for Abell 2744.
     """
 
     # Radii in kpc
     z_cluster = 0.308
-    r = np.linspace(150, 300, 100)  
+    r = np.linspace(100, 1000, 100)  
     
     # Literature mass estimates: dictionary of form {label: (mass, radius)}
-    mass_estimates = {
+    mass_estimates_abell = {
         'MARS': (1.73e14, 200), 
         'Bird': (1.93e14, 200), 
         'GRALE': (2.25e14, 250),
         'Merten et al.': (2.24e14, 250)
     }
-    # The mass estimates are in solar masses, and the radii are in kpc
+    mass_estimates_elgordo = {
+        'Cerny et al.': (1.1e15, 500),
+        'Caminha et all.': (1.84e15, 1000),
+        'Diego et al': (1e15, 500),
+    }
+
+    # Choose a cluster
+    if cluster_name == 'Abell_2744':
+        mass_estimates = mass_estimates_abell
+    elif cluster_name == 'EL_GORDO':
+        mass_estimates = mass_estimates_elgordo
     
     # Move the halos to be centered on the primary halo
     largest_halo = np.argmax(halos.mass)
@@ -708,18 +718,6 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title):
     sigma_c = sigma_c * u.M_sun / u.kpc**2
     sigma_c = sigma_c.value
     M_2D_total = kappa_total * sigma_c * area_per_pixel
-
-    '''
-    fig2, ax2 = plt.subplots()
-    fig2.suptitle('Surface Mass Distribution for Abell 2744 (log scale)')
-    cbar = ax2.imshow(np.log10(kappa_total), extent=[x_range[0], x_range[1], y_range[0], y_range[1]], origin='lower')
-    fig2.colorbar(cbar)
-    ax2.set_xlabel('x (kpc)')
-    ax2.set_ylabel('y (kpc)')
-    # plt.show()
-    plt.savefig('mass_distribution_a2744.png')
-    '''
-    # raise ValueError('Check the mass distribution plot')
     
     # Coordinates of each pixel in the grid
     XX, YY = np.meshgrid(x_vals, y_vals)
@@ -740,7 +738,6 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title):
         print(f'{label}: Literature mass = {mass_lit_val}, Reconstruction = {mass_recon_val}, % Error = {100 * (mass_recon - mass_lit) / mass_lit}')
 
     # Plot results
-    
     fig, ax = plt.subplots()
     fig.suptitle(plot_title)
     
