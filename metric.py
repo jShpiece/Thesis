@@ -39,7 +39,7 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
         return np.inf
     return dof
 
-def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', z_source = 0.8, use_weights=False, sigma=1.0) -> float:
+def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', z_source = 0.8) -> float:
     """
     Calculate the chi-squared statistic for the difference between observed and modeled source properties.
 
@@ -98,13 +98,7 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', z_source = 0.
     for component in chi_squared_components.values():
         total_chi_squared_array += component
 
-    # Sum over all sources, optionally using weights
-    if use_weights:
-        # Compute Gaussian weights based on lens-source distances
-        weights = gaussian_weighting(sources, lenses, sigma)
-        total_chi_squared = np.sum(weights * total_chi_squared_array)
-    else:
-        total_chi_squared = np.sum(total_chi_squared_array)
+    total_chi_squared = np.sum(total_chi_squared_array)
 
 
     # Define penalty functions for lens parameters

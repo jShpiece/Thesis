@@ -608,7 +608,7 @@ def chi2wrapper(guess, params):
         if constraint_type == 'unconstrained':
             # Create lens with guessed parameters
             lenses = halo_obj.SIS_Lens(guess[0], guess[1], guess[2], [0])
-            return metric.calculate_chi_squared(params[0], lenses, params[1], use_weights=False)
+            return metric.calculate_chi_squared(params[0], lenses, params[1])
         elif constraint_type == 'constrained':
             # Optimize strength parameter(s)
             lenses = halo_obj.SIS_Lens(params[0], params[1], guess, np.empty_like(params[0]))
@@ -624,7 +624,7 @@ def chi2wrapper(guess, params):
                 params[2], 10 ** guess[2], params[3], [0]
             )
             lenses.calculate_concentration()
-            return metric.calculate_chi_squared(params[0], lenses, params[1], lens_type='NFW', use_weights=False)
+            return metric.calculate_chi_squared(params[0], lenses, params[1], lens_type='NFW')
 
         elif constraint_type == 'constrained':
             lenses = halo_obj.NFW_Lens(
@@ -640,7 +640,7 @@ def chi2wrapper(guess, params):
                 params[0], params[1], np.zeros_like(params[0]),
                 guess[1], 10 ** guess[0], params[2], np.empty_like(params[0])
             )
-            return metric.calculate_chi_squared(params[3], lenses, params[4], lens_type='NFW', use_weights=False)
+            return metric.calculate_chi_squared(params[3], lenses, params[4], lens_type='NFW')
 
 
     else:
