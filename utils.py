@@ -672,10 +672,12 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title, cluster_name='Abe
     }
 
     # Choose a cluster
-    if cluster_name == 'Abell_2744':
+    if cluster_name == 'ABELL_2744':
         mass_estimates = mass_estimates_abell
     elif cluster_name == 'EL_GORDO':
         mass_estimates = mass_estimates_elgordo
+    else:
+        raise ValueError('Invalid cluster name. Choose from "ABELL_2744" or "EL_GORDO".')
     
     # Move the halos to be centered on the primary halo
     largest_halo = np.argmax(halos.mass)
@@ -711,7 +713,7 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title, cluster_name='Abe
     # Now find a way to break the mass sheet degeneracy
     # Choose a value of k
     k = 2
-    kappa_total = mass_sheet_transformation(kappa_total, k)
+    # kappa_total = mass_sheet_transformation(kappa_total, k)
 
     # Then convert back to a 2D mass distribution
     sigma_c = critical_surface_density(z_cluster, 0.8)

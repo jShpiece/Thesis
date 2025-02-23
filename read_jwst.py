@@ -21,8 +21,7 @@ plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exis
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # Redshifts
-z_cluster = 0.87
-z_source = 4.0
+z_cluster = 0.87 # Cluster redshift
 hubble_param = 0.67 # Hubble constant
 
 class JWSTPipeline:
@@ -60,6 +59,10 @@ class JWSTPipeline:
             self.use_flags = [True, False, True]
         else:
             raise ValueError(f"Invalid signal choice: {self.signal_choice}")
+        
+        # Create source redshift as a global variable
+        global z_source
+        z_source = config['source_redshift']
 
         # Data placeholders
         self.IDs = None
@@ -111,7 +114,6 @@ class JWSTPipeline:
         self.IDs = df['label'].to_numpy()
         self.q = df['q'].to_numpy()
         self.phi = df['phi'].to_numpy()
-        #self.phi = np.deg2rad(self.phi)  # Convert phi to radians if necessary
         self.F1_fit = df['F1_fit'].to_numpy()
         self.F2_fit = df['F2_fit'].to_numpy() 
         self.G1_fit = df['G1_fit'].to_numpy() 
@@ -123,10 +125,8 @@ class JWSTPipeline:
         # Eliminate all entries with chi2 > 10
         # Add any indice where a < 0.1 - this is too small to get a good reading 
         
-        bad_chi2 = self.chi2 > 2
-        bad_a = (self.a < 0.5) | (self.a > 10)
-        print('There are {} entries with a < 0.1 or a > 5'.format(np.sum(bad_a)))
-        print('There are {} entries with chi2 > 2'.format(np.sum(bad_chi2)))
+        bad_chi2 = self.chi2 > 10
+        bad_a = (self.a < 0.1) | (self.a > 10)
         bad_indices = (bad_chi2) | (bad_a)
         print(f"Removing {np.sum(bad_indices)} entries with chi2 > 10 or a < 0.1.")
         
@@ -194,7 +194,7 @@ class JWSTPipeline:
             sigg=sigg  # Adjust if necessary
         )
         
-        max_flexion = 0.12
+        max_flexion = 0.1
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
 
@@ -216,6 +216,18 @@ class JWSTPipeline:
         self.sources.sigf = sigf
         self.sources.sigg = sigg
         
+        # plot the system - source distribution
+        fig, ax = plt.subplots()
+        ax.scatter(self.sources.x, self.sources.y, s=5)
+        # Attach arrows for flexion
+        for x, y, f1, f2 in zip(self.sources.x, self.sources.y, self.sources.f1, self.sources.f2):
+            ax.arrow(x, y, f1, f2, head_width=0.1, head_length=0.1, fc='r', ec='r')
+        ax.set_xlabel('RA Offset (arcsec)')
+        ax.set_ylabel('Dec Offset (arcsec)')
+        ax.set_title('Source Distribution')
+        plt.savefig(self.output_dir / 'source_distribution.png', dpi=300)
+        # plt.show()
+
         # Do histograms of q, phi, f1, f2, a, and chi2
         
         signals = [self.sources.e1, self.sources.e2, self.sources.f1, self.sources.f2, a, self.chi2, self.phi]
@@ -256,7 +268,9 @@ class JWSTPipeline:
         ])
 
         # Remove entries with no matching source
+        # (This is a sanity check - should not happen if the catalogs are correct)
         valid = ~np.isnan(self.xc) & ~np.isnan(self.yc)
+        print(f"Removing {np.sum(~valid)} entries with no matching source.")
         self.IDs = self.IDs[valid]
         self.q = self.q[valid]
         self.phi = self.phi[valid]
@@ -310,7 +324,7 @@ class JWSTPipeline:
 
         # Calculate convergence map
         X, Y, kappa = utils.calculate_kappa(
-            self.lenses, extent=img_extent, smoothing_scale=5, lens_type='NFW', source_redshift=z_source
+            self.lenses, extent=img_extent, smoothing_scale=1, lens_type='NFW', source_redshift=z_source
         )
         # check that kappa is not all zeros
         assert np.any(kappa), 'Kappa is all zeros'
@@ -346,9 +360,31 @@ class JWSTPipeline:
         plt.tight_layout()
         plt.savefig(self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), dpi=300)
         
-        plot_name = 'Output/JWST/mass_{}_{}.png'.format(self.cluster_name, self.signal_choice)
+        plot_name = self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice)
         plot_title = 'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice)
         utils.compare_mass_estimates_a2744(self.lenses, plot_name, plot_title, self.cluster_name)
+
+        # This isn't looking right - lets plot the flexion maps to see if those look appropriate
+        # bin the flexion data in a 2D histogram
+        # plot the histogram
+        # trivial way to get f1 and f2 - take the gradient of the kappa map
+        F2, F1 = np.gradient(kappa, self.CDELT)
+        
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+        cmap = ax[0].imshow(F1, cmap='plasma', origin='lower', extent=img_extent)
+        fig.colorbar(cmap, ax=ax[0])
+        ax[0].set_title('F1')
+        ax[0].set_xlabel('RA Offset (arcsec)')
+        ax[0].set_ylabel('Dec Offset (arcsec)')
+        cmap = ax[1].imshow(F2, cmap='plasma', origin='lower', extent=img_extent)
+        fig.colorbar(cmap, ax=ax[1])
+        ax[1].set_title('F2')
+        ax[1].set_xlabel('RA Offset (arcsec)')
+        ax[1].set_ylabel('Dec Offset (arcsec)')
+        plt.tight_layout()
+        plt.savefig(self.output_dir / 'flexion_maps.png', dpi=300)
+        plt.close('all')
+
 
 
     def get_image_data(self):
@@ -371,6 +407,7 @@ if __name__ == '__main__':
             'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
             'output_dir': 'Output/JWST/ABELL/',
             'cluster_name': 'ABELL_2744',
+            'source_redshift': 1,
             'signal_choice': signal
         }
 
@@ -380,9 +417,11 @@ if __name__ == '__main__':
             'image_path': 'JWST_Data/JWST/EL_GORDO/Image_Data/stacked.fits',
             'output_dir': 'Output/JWST/EL_GORDO/',
             'cluster_name': 'EL_GORDO',
+            'source_redshift': 4.0,
             'signal_choice': signal
         }
 
         # Initialize and run the pipeline
-        pipeline = JWSTPipeline(el_gordo_config)
+        # pipeline = JWSTPipeline(el_gordo_config)
+        pipeline = JWSTPipeline(abell_config)
         pipeline.run()
