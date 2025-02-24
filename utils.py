@@ -15,6 +15,7 @@ from itertools import combinations
 from scipy.integrate import quad
 import matplotlib.pyplot as plt
 import halo_obj
+from scipy.ndimage import gaussian_filter
 
 
 # ------------------------
@@ -95,7 +96,8 @@ def nfw_projected_mass(
     x_range=(-300, 300),
     y_range=(-300, 300),
     x_center=0.0,
-    y_center=0.0
+    y_center=0.0,
+    z_source=0.8
 ):
     """
     Compute the projected mass for an NFW halo, with an option to return a 2D map.
@@ -129,7 +131,7 @@ def nfw_projected_mass(
 
     rho_c = cosmo.critical_density(halos.redshift).to(u.M_sun / u.kpc**3).value
     delta_c = halos.calc_delta_c()
-    sigma_c = critical_surface_density(halos.redshift, 0.8)
+    sigma_c = critical_surface_density(halos.redshift, z_source)
     sigma_c = sigma_c * u.M_sun / u.kpc**2
     sigma_c = sigma_c.value
 
@@ -626,14 +628,10 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
 
-def compare_mass_estimates_a2744(halos, plot_name, plot_title, cluster_name='Abell_2744'):
+def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_2744'):
     """
     Compares our mass reconstruction to literature estimates for Abell 2744.
     """
-
-    # Radii in kpc
-    z_cluster = 0.308
-    r = np.linspace(100, 1000, 100)  
     
     # Literature mass estimates: dictionary of form {label: (mass, radius)}
     mass_estimates_abell = {
@@ -651,10 +649,21 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title, cluster_name='Abe
     # Choose a cluster
     if cluster_name == 'ABELL_2744':
         mass_estimates = mass_estimates_abell
+        z_cluster = 0.308
+        z_source = 0.8
     elif cluster_name == 'EL_GORDO':
         mass_estimates = mass_estimates_elgordo
+        z_cluster = 0.870
+        z_source = 4.0
     else:
         raise ValueError('Invalid cluster name. Choose from "ABELL_2744" or "EL_GORDO".')
+    
+    # Radii in kpc
+    # Take the minimum mass estimate and the maximum
+    r_min = min([r for m, r in mass_estimates.values()])
+    r_max = max([r for m, r in mass_estimates.values()])
+    r = np.linspace(r_min/2, 2*r_max, 100)
+    print(f'Radii range: {r_min} - {r_max} kpc')
     
     # Move the halos to be centered on the primary halo
     largest_halo = np.argmax(halos.mass)
@@ -683,17 +692,19 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title, cluster_name='Abe
             x_range=x_range,
             y_range=y_range,
             x_center=halo.x, 
-            y_center=halo.y   
+            y_center=halo.y,
+            z_source=z_source
         )
         kappa_total += kappa
     
     # Now find a way to break the mass sheet degeneracy
     # Choose a value of k
-    k = 2
-    # kappa_total = mass_sheet_transformation(kappa_total, k)
+    if cluster_name == 'ABELL_2744':
+        kappa_total = mass_sheet_transformation(kappa_total, k=2)
 
     # Then convert back to a 2D mass distribution
-    sigma_c = critical_surface_density(z_cluster, 0.8)
+    print(z_source, z_cluster)
+    sigma_c = critical_surface_density(z_cluster, z_source)
     sigma_c = sigma_c * u.M_sun / u.kpc**2
     sigma_c = sigma_c.value
     M_2D_total = kappa_total * sigma_c * area_per_pixel
@@ -731,7 +742,7 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title, cluster_name='Abe
     ax.set_xlabel('Radius (kpc)')
     ax.set_ylabel(r'Mass ($M_\odot$)')
     ax.set_yscale('log')
-    ax.legend()
+    ax.legend() 
     plt.savefig(plot_name)
     
     halos.x += centroid[0]
@@ -767,7 +778,7 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     # Create grid arrays
     x_range = np.linspace(xmin, xmax, nx)
     y_range = np.linspace(ymin, ymax, ny)
-    X, Y = np.meshgrid(x_range, y_range)
+    X, Y = np.meshgrid(x_range, y_range, indexing='xy')
 
     # Initialize and bin flexion values (averaging within each pixel)
     F1_interp = np.zeros_like(X)
@@ -780,12 +791,12 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
             mask = r < 1
             count = np.sum(mask)
             if count > 0:
-                F1_interp[j, i] = np.sum(F1[mask]) # / count
-                F2_interp[j, i] = np.sum(F2[mask]) # / count
+                F1_interp[j, i] = np.sum(F1[mask]) / count
+                F2_interp[j, i] = np.sum(F2[mask]) / count
 
-    # Smooth the binned flexion maps (assumed helper functions)
-    F1_smooth = convolve_image(F1_interp, create_gaussian_kernel(nx, nx//10))
-    F2_smooth = convolve_image(F2_interp, create_gaussian_kernel(ny, ny//10))
+    # Smooth the binned flexion maps 
+    F1_smooth = gaussian_filter(F1_interp, sigma=nx//20)
+    F2_smooth = gaussian_filter(F2_interp, sigma=ny//20)
 
     # Fourier transform of the smoothed fields
     ft_F1 = np.fft.rfft2(F1_smooth)

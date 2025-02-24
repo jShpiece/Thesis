@@ -242,7 +242,21 @@ class JWSTPipeline:
             ax.set_title(f'{name} Distribution - With Cuts')
             plt.savefig(self.output_dir / f'{name}_distribution_with_cuts.png', dpi=300)
         plt.close('all')
-        
+
+        '''
+        img_data = self.get_image_data()[0]
+        img_extent = [
+            0, img_data.shape[1] * self.CDELT,
+            0, img_data.shape[0] * self.CDELT
+        ]
+        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
+
+        fig, ax = plt.subplots()
+        cmap = ax.contour(X,Y,kappa_ks, cmap='plasma', origin='lower', extent=img_extent)
+        fig.colorbar(cmap, ax=ax)
+        ax.set_title('Kaiser-Squires Reconstruction of Flexion')
+        plt.show()
+        '''
 
     def match_sources(self):
         """
@@ -341,9 +355,9 @@ class JWSTPipeline:
             )
             
             # Overlay convergence contours
-            contour_levels = np.percentile(convergence, np.linspace(60, 100, 6))
+            contour_levels = np.percentile(convergence[2], np.linspace(60, 100, 6))
             contours = ax.contour(
-                X, Y, convergence, levels=contour_levels, cmap='plasma', linewidths=1.5
+                convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
             )
             # Add colorbar for contours
             ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
@@ -363,23 +377,21 @@ class JWSTPipeline:
 
         # Plot the cluster
         title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
-        plot_cluster(kappa, title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
+        plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
         
         plot_name = self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice)
         plot_title = 'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice)
-        utils.compare_mass_estimates_a2744(self.lenses, plot_name, plot_title, self.cluster_name)
+
+        # Compare mass estimates
+        utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
-        save_title = self.output_dir / 'ks_{}_{}.png'.format(self.cluster_name, self.signal_choice)
-        plot_cluster(kappa_ks, title, save_title)
+        save_title = self.output_dir / 'ks_{}.png'.format(self.cluster_name)
+        plot_cluster([X,Y,kappa_ks], title, save_title)
         
-
         # This isn't looking right - lets plot the flexion maps to see if those look appropriate
-        # bin the flexion data in a 2D histogram
-        # plot the histogram
-        # trivial way to get f1 and f2 - take the gradient of the kappa map
         F2, F1 = np.gradient(kappa, self.CDELT)
         
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
@@ -396,7 +408,6 @@ class JWSTPipeline:
         plt.tight_layout()
         plt.savefig(self.output_dir / 'flexion_maps.png', dpi=300)
         plt.close('all')
-
 
     def get_image_data(self):
         """
@@ -435,6 +446,9 @@ if __name__ == '__main__':
         }
 
         # Initialize and run the pipeline
-        # pipeline = JWSTPipeline(el_gordo_config)
-        pipeline = JWSTPipeline(abell_config)
-        pipeline.run()
+        pipeline_el_gordo = JWSTPipeline(el_gordo_config)
+        pipeline_abell = JWSTPipeline(abell_config)
+        
+        pipeline_el_gordo.run()
+        pipeline_abell.run()
+        print('Finished running pipeline for signal: {}'.format(signal))
