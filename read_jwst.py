@@ -21,7 +21,6 @@ plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exis
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # Redshifts
-z_cluster = 0.87 # Cluster redshift
 hubble_param = 0.67 # Hubble constant
 
 class JWSTPipeline:
@@ -60,9 +59,11 @@ class JWSTPipeline:
         else:
             raise ValueError(f"Invalid signal choice: {self.signal_choice}")
         
-        # Create source redshift as a global variable
+        # Create redshifts as a global variable
         global z_source
         z_source = config['source_redshift']
+        global z_cluster
+        z_cluster = config['cluster_redshift']
 
         # Data placeholders
         self.IDs = None
@@ -125,7 +126,7 @@ class JWSTPipeline:
         # Eliminate all entries with chi2 > 10
         # Add any indice where a < 0.1 - this is too small to get a good reading 
         
-        bad_chi2 = self.chi2 > 10
+        bad_chi2 = self.chi2 > 2
         bad_a = (self.a < 0.1) | (self.a > 10)
         bad_indices = (bad_chi2) | (bad_a)
         print(f"Removing {np.sum(bad_indices)} entries with chi2 > 10 or a < 0.1.")
@@ -307,7 +308,7 @@ class JWSTPipeline:
         """
         Plots the convergence map overlaid on the JWST image.
         """
-        img_data, img_header = self.get_image_data()
+        img_data, _ = self.get_image_data()
         img_extent = [
             0, img_data.shape[1] * self.CDELT,
             0, img_data.shape[0] * self.CDELT
@@ -324,45 +325,56 @@ class JWSTPipeline:
 
         # Calculate convergence map
         X, Y, kappa = utils.calculate_kappa(
-            self.lenses, extent=img_extent, smoothing_scale=1, lens_type='NFW', source_redshift=z_source
+            self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
         )
         # check that kappa is not all zeros
         assert np.any(kappa), 'Kappa is all zeros'
 
         # Plot settings
-        
-        fig, ax = plt.subplots(figsize=(10, 10))
-        norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+        def plot_cluster(convergence, title, save_name):
+            fig, ax = plt.subplots(figsize=(10, 10))
+            norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
 
-        # Display image
-        ax.imshow(
-            img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
-        )
-        
-        # Overlay convergence contours
-        contour_levels = np.percentile(kappa, np.linspace(60, 100, 6))
-        contours = ax.contour(
-            X, Y, kappa, levels=contour_levels, cmap='plasma', linewidths=1.5
-        )
-        # Add colorbar for contours
-        ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
-        cbar = plt.colorbar(contours, ax=ax)
+            # Display image
+            ax.imshow(
+                img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
+            )
+            
+            # Overlay convergence contours
+            contour_levels = np.percentile(convergence, np.linspace(60, 100, 6))
+            contours = ax.contour(
+                X, Y, convergence, levels=contour_levels, cmap='plasma', linewidths=1.5
+            )
+            # Add colorbar for contours
+            ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
+            cbar = plt.colorbar(contours, ax=ax)
 
-        # Plot lens positions
-        ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
+            # Plot lens positions
+            ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
 
-        # Labels and title
-        ax.set_xlabel('RA Offset (arcsec)')
-        ax.set_ylabel('Dec Offset (arcsec)')
-        ax.set_title(r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass)))
-        # Save and display
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), dpi=300)
+            # Labels and title
+            ax.set_xlabel('RA Offset (arcsec)')
+            ax.set_ylabel('Dec Offset (arcsec)')
+            ax.set_title(title)
+            # Save and display
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(save_name, dpi=300)
+
+        # Plot the cluster
+        title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
+        plot_cluster(kappa, title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
         
         plot_name = self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice)
         plot_title = 'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice)
         utils.compare_mass_estimates_a2744(self.lenses, plot_name, plot_title, self.cluster_name)
+
+        # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
+        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
+        title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
+        save_title = self.output_dir / 'ks_{}_{}.png'.format(self.cluster_name, self.signal_choice)
+        plot_cluster(kappa_ks, title, save_title)
+        
 
         # This isn't looking right - lets plot the flexion maps to see if those look appropriate
         # bin the flexion data in a 2D histogram
@@ -386,7 +398,6 @@ class JWSTPipeline:
         plt.close('all')
 
 
-
     def get_image_data(self):
         """
         Reads image data from a FITS file.
@@ -407,6 +418,7 @@ if __name__ == '__main__':
             'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
             'output_dir': 'Output/JWST/ABELL/',
             'cluster_name': 'ABELL_2744',
+            'cluster_redshift': 0.308,
             'source_redshift': 1,
             'signal_choice': signal
         }
@@ -417,6 +429,7 @@ if __name__ == '__main__':
             'image_path': 'JWST_Data/JWST/EL_GORDO/Image_Data/stacked.fits',
             'output_dir': 'Output/JWST/EL_GORDO/',
             'cluster_name': 'EL_GORDO',
+            'cluster_redshift': 0.870,
             'source_redshift': 4.0,
             'signal_choice': signal
         }

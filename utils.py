@@ -5,29 +5,12 @@ This module provides a collection of utility functions used in gravitational len
 including cosmological calculations, image processing, chi-squared utilities, and lensing signal
 computations.
 
-Functions:
-    - print_progress_bar
-    - angular_diameter_distances
-    - critical_surface_density
-    - convolve_image
-    - create_gaussian_kernel
-    - compute_source_weights
-    - find_combinations
-    - filter_combinations
-    - stn_flexion
-    - stn_shear
-    - calculate_kappa
-    - calculate_mass
-    - mass_sheet_transformation
-    - calculate_lensing_signals_sis
-    - calculate_lensing_signals_nfw
 """
 
 import numpy as np
 from astropy.cosmology import Planck15 as cosmo
 from astropy.constants import c, G
 from astropy import units as u
-import scipy.ndimage
 from itertools import combinations
 from scipy.integrate import quad
 import matplotlib.pyplot as plt
@@ -335,7 +318,7 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     return term1 * term2
 
 
-def calculate_kappa(lenses, extent, smoothing_scale, lens_type='SIS', source_redshift=0.8):
+def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8):
     """
     Calculates the convergence (kappa) map for a given set of lenses.
 
@@ -389,12 +372,6 @@ def calculate_kappa(lenses, extent, smoothing_scale, lens_type='SIS', source_red
             term_1 = radial_term_1(x)
             kappa_s = rho_s[k] * rs_1[k] / sigma_crit  # Dimensionless surface density
             kappa += 2 * kappa_s * term_1 / (x ** 2 - 1)
-
-    return X, Y, kappa
-                
-    # Apply Gaussian smoothing if smoothing_scale is provided
-    if smoothing_scale:
-        kappa = scipy.ndimage.gaussian_filter(kappa, sigma=smoothing_scale)
 
     return X, Y, kappa
 
@@ -759,3 +736,80 @@ def compare_mass_estimates_a2744(halos, plot_name, plot_title, cluster_name='Abe
     
     halos.x += centroid[0]
     halos.y += centroid[1]
+
+
+def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
+    '''
+    Reconstruct the convergence map using the flexion-based Kaiser-Squires method.
+    Automatically checks if the provided extent is centered on the origin.
+    '''
+    import numpy as np
+
+    # Define source positions and flexion signals
+    x_s = sources.x
+    y_s = sources.y
+    F1 = sources.f1
+    F2 = sources.f2
+
+    # Unpack extent: (xmin, xmax, ymin, ymax)
+    xmin, xmax, ymin, ymax = extent
+
+    # Check if extent is centered on the origin:
+    centered_extent = np.isclose(xmin, -xmax) and np.isclose(ymin, -ymax)
+
+    # Define grid dimensions
+    nx = int(xmax - xmin)
+    ny = int(ymax - ymin)
+    # Ensure the grid is square
+    if nx != ny:
+        nx = ny = min(nx, ny)
+    
+    # Create grid arrays
+    x_range = np.linspace(xmin, xmax, nx)
+    y_range = np.linspace(ymin, ymax, ny)
+    X, Y = np.meshgrid(x_range, y_range)
+
+    # Initialize and bin flexion values (averaging within each pixel)
+    F1_interp = np.zeros_like(X)
+    F2_interp = np.zeros_like(X)
+    for i in range(nx):
+        for j in range(ny):
+            x = X[j, i]
+            y = Y[j, i]
+            r = np.hypot(x - x_s, y - y_s)
+            mask = r < 1
+            count = np.sum(mask)
+            if count > 0:
+                F1_interp[j, i] = np.sum(F1[mask]) # / count
+                F2_interp[j, i] = np.sum(F2[mask]) # / count
+
+    # Smooth the binned flexion maps (assumed helper functions)
+    F1_smooth = convolve_image(F1_interp, create_gaussian_kernel(nx, nx//10))
+    F2_smooth = convolve_image(F2_interp, create_gaussian_kernel(ny, ny//10))
+
+    # Fourier transform of the smoothed fields
+    ft_F1 = np.fft.rfft2(F1_smooth)
+    ft_F2 = np.fft.rfft2(F2_smooth)
+
+    # Compute grid spacings and corresponding frequency arrays
+    dx = (xmax - xmin) / nx
+    dy = (ymax - ymin) / ny
+    lx = np.fft.rfftfreq(nx, d=dx)  # frequencies along x (columns)
+    ly = np.fft.fftfreq(ny, d=dy)   # frequencies along y (rows)
+    Lx, Ly = np.meshgrid(lx, ly)
+    l_squared = Lx**2 + Ly**2
+    l_squared[0, 0] = 1.0  # avoid division by zero
+
+    # Flexion inversion in Fourier space
+    ft_conv = -1j * (Lx * ft_F1 + Ly * ft_F2) / l_squared
+    ft_conv[0, 0] = 0.0
+
+    # Inverse Fourier transform to obtain convergence
+    kappa = np.fft.irfft2(ft_conv, s=(ny, nx))
+    
+    # Apply fftshift only if the grid is not centered on the origin
+    if not centered_extent:
+        print('Shifting the grid to center on the origin')
+        kappa = np.fft.fftshift(kappa) # Center the map on the origin
+
+    return X, Y, kappa

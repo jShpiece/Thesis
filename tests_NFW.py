@@ -654,7 +654,27 @@ def test_source_sep():
 
 
 if __name__ == '__main__':
-    run_simple_tests()
+    # run_simple_tests()
+
+    # Create a very simple system
+    Nlens = 1
+    Nsource = 100
+    xmax = 50
+    lens_mass = 1e15
+    true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=True)
+
+    # Run a kaiser squires reconstruction
+    X, Y, kappa = utils.perform_kaiser_squire_reconstruction(sources, [-xmax, xmax, -xmax, xmax], 'flexion')
+
+    # plot the results
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+    ax.imshow(kappa, origin='lower', extent=[-xmax, xmax, -xmax, xmax], cmap='viridis')
+    ax.contour(X, Y, kappa, levels=10, colors='black', alpha=0.5)
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    ax.set_title('Kaiser-Squires Reconstruction')
+    plt.show()
+
     raise SystemExit
     
     Ntrial = 1000
