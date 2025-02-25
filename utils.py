@@ -663,7 +663,6 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     r_min = min([r for m, r in mass_estimates.values()])
     r_max = max([r for m, r in mass_estimates.values()])
     r = np.linspace(r_min/2, 2*r_max, 100)
-    print(f'Radii range: {r_min} - {r_max} kpc')
     
     # Move the halos to be centered on the primary halo
     largest_halo = np.argmax(halos.mass)
@@ -703,7 +702,6 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
         kappa_total = mass_sheet_transformation(kappa_total, k=2)
 
     # Then convert back to a 2D mass distribution
-    print(z_source, z_cluster)
     sigma_c = critical_surface_density(z_cluster, z_source)
     sigma_c = sigma_c * u.M_sun / u.kpc**2
     sigma_c = sigma_c.value
@@ -759,8 +757,24 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     # Define source positions and flexion signals
     x_s = sources.x
     y_s = sources.y
+    shear_1 = sources.e1
+    shear_2 = sources.e2
     F1 = sources.f1
     F2 = sources.f2
+    G1 = sources.g1
+    G2 = sources.g2
+
+    if signal == 'flexion':
+        S1 = F1
+        S2 = F2
+    elif signal == 'g_flexion':
+        S1 = G1
+        S2 = G2
+    elif signal == 'shear':
+        S1 = shear_1
+        S2 = shear_2
+    else:
+        raise ValueError('Invalid signal type. Choose from "flexion", "g_flexion", or "shear".')
 
     # Unpack extent: (xmin, xmax, ymin, ymax)
     xmin, xmax, ymin, ymax = extent
@@ -781,26 +795,24 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     X, Y = np.meshgrid(x_range, y_range, indexing='xy')
 
     # Initialize and bin flexion values (averaging within each pixel)
-    F1_interp = np.zeros_like(X)
-    F2_interp = np.zeros_like(X)
+    S1_interp = np.zeros_like(X)
+    S2_interp = np.zeros_like(X)
     for i in range(nx):
         for j in range(ny):
             x = X[j, i]
             y = Y[j, i]
             r = np.hypot(x - x_s, y - y_s)
             mask = r < 1
-            count = np.sum(mask)
-            if count > 0:
-                F1_interp[j, i] = np.sum(F1[mask]) / count
-                F2_interp[j, i] = np.sum(F2[mask]) / count
+            S1_interp[j][i] = np.sum(S1[mask])
+            S2_interp[j][i] = np.sum(S2[mask])
 
     # Smooth the binned flexion maps 
-    F1_smooth = gaussian_filter(F1_interp, sigma=nx//20)
-    F2_smooth = gaussian_filter(F2_interp, sigma=ny//20)
+    S1_smooth = gaussian_filter(S1_interp, sigma=nx//20)
+    S2_smooth = gaussian_filter(S2_interp, sigma=ny//20)
 
     # Fourier transform of the smoothed fields
-    ft_F1 = np.fft.rfft2(F1_smooth)
-    ft_F2 = np.fft.rfft2(F2_smooth)
+    ft_S1 = np.fft.rfft2(S1_smooth)
+    ft_S2 = np.fft.rfft2(S2_smooth)
 
     # Compute grid spacings and corresponding frequency arrays
     dx = (xmax - xmin) / nx
@@ -811,9 +823,26 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     l_squared = Lx**2 + Ly**2
     l_squared[0, 0] = 1.0  # avoid division by zero
 
-    # Flexion inversion in Fourier space
-    ft_conv = -1j * (Lx * ft_F1 + Ly * ft_F2) / l_squared
-    ft_conv[0, 0] = 0.0
+    if signal == 'flexion':
+        # Flexion inversion in Fourier space
+        ft_conv = -1j * (Lx * ft_S1 + Ly * ft_S2) / l_squared
+        ft_conv[0, 0] = 0.0
+    elif signal == 'g_flexion':
+        raise NotImplementedError('G-flexion inversion not yet implemented.')
+    elif signal == 'shear':
+        # Shear inversion in Fourier space
+        sin_2_phi = 2.0 * lx[np.newaxis,:] * ly[:,np.newaxis] / l_squared
+        cos_2_phi = (lx[np.newaxis,:]**2 - ly[:,np.newaxis]**2) / l_squared
+
+		#Compute E and B components
+        ft_E = cos_2_phi * ft_S1 + sin_2_phi * ft_S2
+        ft_B = -1.0 * sin_2_phi * ft_S1 + cos_2_phi * ft_S2
+
+        ft_E[0,0] = 0.0
+        ft_B[0,0] = 0.0
+
+        #Compute the convergence - just use the E mode
+        ft_conv = ft_E
 
     # Inverse Fourier transform to obtain convergence
     kappa = np.fft.irfft2(ft_conv, s=(ny, nx))

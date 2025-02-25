@@ -115,7 +115,7 @@ class JWSTPipeline:
         self.IDs = df['label'].to_numpy()
         self.q = df['q'].to_numpy()
         self.phi = df['phi'].to_numpy()
-        self.F1_fit = df['F1_fit'].to_numpy()
+        self.F1_fit = -df['F1_fit'].to_numpy()
         self.F2_fit = df['F2_fit'].to_numpy() 
         self.G1_fit = df['G1_fit'].to_numpy() 
         self.G2_fit = df['G2_fit'].to_numpy()
@@ -195,7 +195,7 @@ class JWSTPipeline:
             sigg=sigg  # Adjust if necessary
         )
         
-        max_flexion = 0.1
+        max_flexion = 0.12
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
 
@@ -388,8 +388,14 @@ class JWSTPipeline:
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
-        save_title = self.output_dir / 'ks_{}.png'.format(self.cluster_name)
+        save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_ks], title, save_title)
+
+        # Do this for the shear as well
+        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='shear')
+        title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
+        save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
+        plot_cluster([X,Y,kappa_shear], title, save_title)
         
         # This isn't looking right - lets plot the flexion maps to see if those look appropriate
         F2, F1 = np.gradient(kappa, self.CDELT)
@@ -450,5 +456,5 @@ if __name__ == '__main__':
         pipeline_abell = JWSTPipeline(abell_config)
         
         pipeline_el_gordo.run()
-        pipeline_abell.run()
+        # pipeline_abell.run()
         print('Finished running pipeline for signal: {}'.format(signal))

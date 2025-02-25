@@ -660,7 +660,7 @@ if __name__ == '__main__':
     Nlens = 1
     Nsource = 100
     xmax = 50
-    lens_mass = 1e15
+    lens_mass = 1e14
     true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=True)
 
     # Run a kaiser squires reconstruction
