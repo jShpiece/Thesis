@@ -791,8 +791,10 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     
     # Create grid arrays
     x_range = np.linspace(xmin, xmax, nx)
+    # flip the x range (RA runs backwards)
+    x_range = x_range[::-1]
     y_range = np.linspace(ymin, ymax, ny)
-    X, Y = np.meshgrid(x_range, y_range, indexing='xy')
+    Y, X = np.meshgrid(x_range, y_range, indexing='xy')
 
     # Initialize and bin flexion values (averaging within each pixel)
     S1_interp = np.zeros_like(X)
@@ -851,5 +853,5 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     if not centered_extent:
         print('Shifting the grid to center on the origin')
         kappa = np.fft.fftshift(kappa) # Center the map on the origin
-
+    
     return X, Y, kappa

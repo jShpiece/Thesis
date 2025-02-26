@@ -97,6 +97,64 @@ class JWSTPipeline:
         self.save_results()
         self.plot_results()
 
+    def run_ks_test(self):
+        """
+        Runs the KS test on the flexion catalog.
+        """
+        self.read_flexion_catalog()
+        self.read_source_catalog()
+        self.match_sources()
+        self.initialize_sources()
+
+        # Plot settings
+        def plot_cluster(convergence, title, save_name):
+            fig, ax = plt.subplots(figsize=(10, 10))
+            norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+
+            # Display image
+            ax.imshow(
+                img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
+            )
+            
+            # Overlay convergence contours
+            contour_levels = np.percentile(convergence[2], np.linspace(60, 100, 6))
+            contours = ax.contour(
+                convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
+            )
+            # Add colorbar for contours
+            ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
+            cbar = plt.colorbar(contours, ax=ax)
+
+            # Plot lens positions
+            # ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
+
+            # Labels and title
+            ax.set_xlabel('RA Offset (arcsec)')
+            ax.set_ylabel('Dec Offset (arcsec)')
+            ax.set_title(title)
+            # Save and display
+            plt.tight_layout()
+            plt.savefig(save_name, dpi=300)
+
+        img_data, _ = self.get_image_data()
+        img_extent = [
+            0, img_data.shape[1] * self.CDELT,
+            0, img_data.shape[0] * self.CDELT
+        ]
+
+        # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
+        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
+        title = 'Kaiser-Squires (Flexion) Reconstruction of {}'.format(self.cluster_name)
+        save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
+        plot_cluster([X,Y,kappa_ks], title, save_title)
+
+        # Do this for the shear as well
+        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='shear')
+        title = 'Kaiser-Squires (Shear) Reconstruction of {}'.format(self.cluster_name)
+        save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
+        plot_cluster([X,Y,kappa_shear], title, save_title)
+        
+
     def read_source_catalog(self):
         """
         Reads the source catalog.
@@ -195,7 +253,11 @@ class JWSTPipeline:
             sigg=sigg  # Adjust if necessary
         )
         
-        max_flexion = 0.12
+        if self.cluster_name == 'ABELL_2744':
+            max_flexion = 0.1
+        elif self.cluster_name == 'EL_GORDO':
+            max_flexion = 0.12
+        # Remove sources with flexion > max_flexion
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
 
@@ -455,6 +517,9 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
         
-        pipeline_el_gordo.run()
+        # pipeline_el_gordo.run()
         # pipeline_abell.run()
+        pipeline_abell.run_ks_test()
+        pipeline_el_gordo.run_ks_test()
+        raise SystemExit
         print('Finished running pipeline for signal: {}'.format(signal))
