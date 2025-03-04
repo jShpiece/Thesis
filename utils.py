@@ -16,6 +16,7 @@ from scipy.integrate import quad
 import matplotlib.pyplot as plt
 import halo_obj
 from scipy.ndimage import gaussian_filter
+# lets use scipy's fft library
 
 
 # ------------------------
@@ -792,9 +793,9 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     # Create grid arrays
     x_range = np.linspace(xmin, xmax, nx)
     # flip the x range (RA runs backwards)
-    x_range = x_range[::-1]
+    # x_range = x_range[::-1]
     y_range = np.linspace(ymin, ymax, ny)
-    Y, X = np.meshgrid(x_range, y_range, indexing='xy')
+    X, Y = np.meshgrid(x_range, y_range, indexing='xy')
 
     # Initialize and bin flexion values (averaging within each pixel)
     S1_interp = np.zeros_like(X)
@@ -811,6 +812,9 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     # Smooth the binned flexion maps 
     S1_smooth = gaussian_filter(S1_interp, sigma=nx//20)
     S2_smooth = gaussian_filter(S2_interp, sigma=ny//20)
+
+    S1_smooth = np.fft.ifftshift(S1_smooth)
+    S2_smooth = np.fft.ifftshift(S2_smooth)
 
     # Fourier transform of the smoothed fields
     ft_S1 = np.fft.rfft2(S1_smooth)
@@ -847,11 +851,7 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
         ft_conv = ft_E
 
     # Inverse Fourier transform to obtain convergence
-    kappa = np.fft.irfft2(ft_conv, s=(ny, nx))
-    
-    # Apply fftshift only if the grid is not centered on the origin
-    if not centered_extent:
-        print('Shifting the grid to center on the origin')
-        kappa = np.fft.fftshift(kappa) # Center the map on the origin
+    kappa = np.fft.irfft2(ft_conv, s=(ny, nx)) 
+    kappa = np.fft.ifftshift(kappa) # Center the map on the origin
     
     return X, Y, kappa

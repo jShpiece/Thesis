@@ -127,8 +127,8 @@ def build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=False):
     """
     # Create lens positions
     if Nlens == 1:
-        x = np.array([0])
-        y = np.array([0])
+        x = np.array([-20])
+        y = np.array([15])
     elif Nlens == 2:
         x = np.linspace(-xmax / 2, xmax / 2, Nlens)
         y = np.array([0, 0])
@@ -670,7 +670,7 @@ if __name__ == '__main__':
 
     # plot the results
     fig, ax = plt.subplots(1, 3, figsize=(20, 6))
-    fig.suptitle('Kaiser Squires Reconstruction')
+    fig.suptitle('Kaiser Squires Reconstruction - Flexion')
     cbar = ax[0].imshow(kappa, extent=[-xmax, xmax, -xmax, xmax], origin='lower', cmap='viridis')
     plt.colorbar(cbar, ax=ax[0])
     ax[0].set_title('Kaiser Squires Reconstruction')
