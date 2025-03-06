@@ -117,10 +117,12 @@ class JWSTPipeline:
             )
             
             # Overlay convergence contours
-            contour_levels = np.percentile(convergence[2], np.linspace(60, 100, 6))
+            contour_levels = np.percentile(convergence[2], np.linspace(60, 100, 4))
+            
             contours = ax.contour(
-                convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
+                convergence[0], convergence[1], convergence[2], cmap='plasma', linewidths=1.5, levels=contour_levels
             )
+            
             # Add colorbar for contours
             ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
             cbar = plt.colorbar(contours, ax=ax)
@@ -144,12 +146,18 @@ class JWSTPipeline:
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
+        # Flip the y and x axis
+        # kappa_ks = np.flip(kappa_ks, axis=0)
+        # kappa_ks = np.flip(kappa_ks, axis=1)
         title = 'Kaiser-Squires (Flexion) Reconstruction of {}'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_ks], title, save_title)
 
         # Do this for the shear as well
         X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='shear')
+        # Flip the y axis and x axis
+        # kappa_shear = np.flip(kappa_shear, axis=0)
+        # kappa_shear = np.flip(kappa_shear, axis=1)
         title = 'Kaiser-Squires (Shear) Reconstruction of {}'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
@@ -173,7 +181,7 @@ class JWSTPipeline:
         self.IDs = df['label'].to_numpy()
         self.q = df['q'].to_numpy()
         self.phi = df['phi'].to_numpy()
-        self.F1_fit = -df['F1_fit'].to_numpy()
+        self.F1_fit = df['F1_fit'].to_numpy()
         self.F2_fit = df['F2_fit'].to_numpy() 
         self.G1_fit = df['G1_fit'].to_numpy() 
         self.G2_fit = df['G2_fit'].to_numpy()
@@ -353,6 +361,8 @@ class JWSTPipeline:
         self.phi = self.phi[valid]
         self.F1_fit = self.F1_fit[valid]
         self.F2_fit = self.F2_fit[valid]
+        self.G1_fit = self.G1_fit[valid]
+        self.G2_fit = self.G2_fit[valid]
         self.a = self.a[valid]
         self.chi2 = self.chi2[valid]
         self.xc = self.xc[valid]
@@ -521,5 +531,5 @@ if __name__ == '__main__':
         # pipeline_abell.run()
         pipeline_abell.run_ks_test()
         pipeline_el_gordo.run_ks_test()
-        raise SystemExit
         print('Finished running pipeline for signal: {}'.format(signal))
+        raise SystemExit
