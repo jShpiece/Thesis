@@ -825,8 +825,8 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     # Properly normalized binning
     S1_smooth = CIC_2d(fsize=1, npixels=nx, xpos=x_s, ypos=y_s, signal_values=S1)
     S2_smooth = CIC_2d(fsize=1, npixels=ny, xpos=x_s, ypos=y_s, signal_values=S2)
-    S1_filter = gaussian_filter(S1_smooth, sigma=10)
-    S2_filter = gaussian_filter(S2_smooth, sigma=10)
+    S1_filter = gaussian_filter(S1_smooth, sigma=10, mode='constant', cval=0)
+    S2_filter = gaussian_filter(S2_smooth, sigma=10, mode='constant', cval=0)
 
     # Ensure smoothing has not changed the normalization
     S1_filter *= np.sum(S1) / np.sum(S1_filter)

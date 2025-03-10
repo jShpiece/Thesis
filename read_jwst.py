@@ -162,6 +162,46 @@ class JWSTPipeline:
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
         
+    def run_source_test(self):
+        """
+        Plots the source distribution on the JWST image
+        """
+        self.read_flexion_catalog()
+        self.read_source_catalog()
+        self.match_sources()
+        self.initialize_sources()
+
+        # Plot settings
+        def plot_cluster(title, save_name):
+            fig, ax = plt.subplots(figsize=(10, 10))
+            norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+
+            # Display image
+            ax.imshow(
+                img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
+            )
+
+            # Plot lens positions
+            ax.scatter(self.sources.x + self.centroid_x, self.sources.y + self.centroid_y, s=10, facecolors='none', edgecolors='red', label='Sources', alpha=0.5)
+
+            # Labels and title
+            ax.set_xlabel('RA Offset (arcsec)')
+            ax.set_ylabel('Dec Offset (arcsec)')
+            ax.set_title(title)
+            # Save and display
+            plt.tight_layout()
+            plt.savefig(save_name, dpi=300)
+
+        img_data, _ = self.get_image_data()
+        img_extent = [
+            0, img_data.shape[1] * self.CDELT,
+            0, img_data.shape[0] * self.CDELT
+        ]
+
+
+        title = 'Sources of El Gordo Reconstruction of {}'.format(self.cluster_name)
+        save_title = self.output_dir / 'sources_{}.png'.format(self.cluster_name)
+        plot_cluster(title, save_title)
 
     def read_source_catalog(self):
         """
@@ -230,6 +270,12 @@ class JWSTPipeline:
         self.xc_arcsec = self.xc * self.CDELT
         self.yc_arcsec = self.yc * self.CDELT
 
+        if self.cluster_name == 'EL_GORDO':
+            # Flip the x axis
+            # self.xc_arcsec = -self.xc_arcsec
+            self.xc_arcsec = np.flip(self.xc_arcsec)
+            self.yc_arcsec = np.flip(self.yc_arcsec)
+
         # Calculate shear components
         shear_magnitude = (self.q - 1) / (self.q + 1)
         e1 = shear_magnitude * np.cos(2 * self.phi)
@@ -297,7 +343,6 @@ class JWSTPipeline:
         ax.set_ylabel('Dec Offset (arcsec)')
         ax.set_title('Source Distribution')
         plt.savefig(self.output_dir / 'source_distribution.png', dpi=300)
-        # plt.show()
 
         # Do histograms of q, phi, f1, f2, a, and chi2
         
@@ -312,21 +357,6 @@ class JWSTPipeline:
             ax.set_title(f'{name} Distribution - With Cuts')
             plt.savefig(self.output_dir / f'{name}_distribution_with_cuts.png', dpi=300)
         plt.close('all')
-
-        '''
-        img_data = self.get_image_data()[0]
-        img_extent = [
-            0, img_data.shape[1] * self.CDELT,
-            0, img_data.shape[0] * self.CDELT
-        ]
-        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
-
-        fig, ax = plt.subplots()
-        cmap = ax.contour(X,Y,kappa_ks, cmap='plasma', origin='lower', extent=img_extent)
-        fig.colorbar(cmap, ax=ax)
-        ax.set_title('Kaiser-Squires Reconstruction of Flexion')
-        plt.show()
-        '''
 
     def match_sources(self):
         """
@@ -527,9 +557,9 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
         
-        # pipeline_el_gordo.run()
+        pipeline_el_gordo.run()
         # pipeline_abell.run()
-        pipeline_abell.run_ks_test()
-        pipeline_el_gordo.run_ks_test()
-        print('Finished running pipeline for signal: {}'.format(signal))
-        raise SystemExit
+
+        # pipeline_abell.run_source_test()
+        # pipeline_el_gordo.run_source_test()
+        # raise ValueError('Stop here')

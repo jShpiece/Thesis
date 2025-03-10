@@ -50,9 +50,11 @@ def main_2d():
 
     # Generate a 2D sine wave
     z = np.sin(2 * np.pi * fx * X) + np.sin(2 * np.pi * fy * Y)
+    # Smooth the signal
+    z_smooth = utils.gaussian_filter(z, sigma=10, mode = 'wrap')
 
     # Compute the 2D Fourier Transform
-    Z = np.fft.fft2(z)  # Preserve complex values
+    Z = np.fft.fft2(z_smooth)  # Preserve complex values
     Z_magnitude = np.abs(Z)  # Compute magnitude for visualization
     freq_x = np.fft.fftfreq(Nx, d=(x[1] - x[0]))
     freq_y = np.fft.fftfreq(Ny, d=(y[1] - y[0]))
@@ -68,11 +70,10 @@ def main_2d():
     ax[0].set_xlabel("X")
     ax[0].set_ylabel("Y")
 
-    ax[1].imshow(np.fft.fftshift(Z_magnitude), cmap="inferno",
-                extent=[freq_x.min(), freq_x.max(), freq_y.min(), freq_y.max()])
-    ax[1].set_title("2D Fourier Transform (Magnitude)")
-    ax[1].set_xlabel("Frequency X")
-    ax[1].set_ylabel("Frequency Y")
+    ax[1].imshow(z_smooth, cmap="viridis", extent=[np.min(x), np.max(x), np.min(y), np.max(y)])
+    ax[1].set_title("Smoothed 2D Sine Wave")
+    ax[1].set_xlabel("X")
+    ax[1].set_ylabel("Y")
 
     ax[2].imshow(z_reconstructed, cmap="viridis", extent=[np.min(x), np.max(x), np.min(y), np.max(y)])
     ax[2].set_title("Reconstructed 2D Sine Wave")
@@ -84,4 +85,4 @@ def main_2d():
 
 
 if __name__ == "__main__":
-    main()
+    main_2d()
