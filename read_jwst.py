@@ -78,11 +78,11 @@ class JWSTPipeline:
         self.G2_fit = None
         self.a = None
         self.chi2 = None
-        self.xc = None
+        self.xc = None # Source positions
         self.yc = None
         self.lenses = None
         self.sources = None
-        self.centroid_x = None
+        self.centroid_x = None # Centroid among all sources
         self.centroid_y = None
 
     def run(self):
@@ -96,112 +96,6 @@ class JWSTPipeline:
         self.run_lens_fitting()
         self.save_results()
         self.plot_results()
-
-    def run_ks_test(self):
-        """
-        Runs the KS test on the flexion catalog.
-        """
-        self.read_flexion_catalog()
-        self.read_source_catalog()
-        self.match_sources()
-        self.initialize_sources()
-
-        # Plot settings
-        def plot_cluster(convergence, title, save_name):
-            fig, ax = plt.subplots(figsize=(10, 10))
-            norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
-
-            # Display image
-            ax.imshow(
-                img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
-            )
-            
-            # Overlay convergence contours
-            contour_levels = np.percentile(convergence[2], np.linspace(60, 100, 4))
-            
-            contours = ax.contour(
-                convergence[0], convergence[1], convergence[2], cmap='plasma', linewidths=1.5, levels=contour_levels
-            )
-            
-            # Add colorbar for contours
-            ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
-            cbar = plt.colorbar(contours, ax=ax)
-
-            # Plot lens positions
-            # ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
-
-            # Labels and title
-            ax.set_xlabel('RA Offset (arcsec)')
-            ax.set_ylabel('Dec Offset (arcsec)')
-            ax.set_title(title)
-            # Save and display
-            plt.tight_layout()
-            plt.savefig(save_name, dpi=300)
-
-        img_data, _ = self.get_image_data()
-        img_extent = [
-            0, img_data.shape[1] * self.CDELT,
-            0, img_data.shape[0] * self.CDELT
-        ]
-
-        # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
-        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
-        # Flip the y and x axis
-        # kappa_ks = np.flip(kappa_ks, axis=0)
-        # kappa_ks = np.flip(kappa_ks, axis=1)
-        title = 'Kaiser-Squires (Flexion) Reconstruction of {}'.format(self.cluster_name)
-        save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
-        plot_cluster([X,Y,kappa_ks], title, save_title)
-
-        # Do this for the shear as well
-        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='shear')
-        # Flip the y axis and x axis
-        # kappa_shear = np.flip(kappa_shear, axis=0)
-        # kappa_shear = np.flip(kappa_shear, axis=1)
-        title = 'Kaiser-Squires (Shear) Reconstruction of {}'.format(self.cluster_name)
-        save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
-        plot_cluster([X,Y,kappa_shear], title, save_title)
-        
-    def run_source_test(self):
-        """
-        Plots the source distribution on the JWST image
-        """
-        self.read_flexion_catalog()
-        self.read_source_catalog()
-        self.match_sources()
-        self.initialize_sources()
-
-        # Plot settings
-        def plot_cluster(title, save_name):
-            fig, ax = plt.subplots(figsize=(10, 10))
-            norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
-
-            # Display image
-            ax.imshow(
-                img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
-            )
-
-            # Plot lens positions
-            ax.scatter(self.sources.x + self.centroid_x, self.sources.y + self.centroid_y, s=10, facecolors='none', edgecolors='red', label='Sources', alpha=0.5)
-
-            # Labels and title
-            ax.set_xlabel('RA Offset (arcsec)')
-            ax.set_ylabel('Dec Offset (arcsec)')
-            ax.set_title(title)
-            # Save and display
-            plt.tight_layout()
-            plt.savefig(save_name, dpi=300)
-
-        img_data, _ = self.get_image_data()
-        img_extent = [
-            0, img_data.shape[1] * self.CDELT,
-            0, img_data.shape[0] * self.CDELT
-        ]
-
-
-        title = 'Sources of El Gordo Reconstruction of {}'.format(self.cluster_name)
-        save_title = self.output_dir / 'sources_{}.png'.format(self.cluster_name)
-        plot_cluster(title, save_title)
 
     def read_source_catalog(self):
         """
@@ -227,15 +121,16 @@ class JWSTPipeline:
         self.G2_fit = df['G2_fit'].to_numpy()
         self.a = df['a'].to_numpy()
         self.chi2 = df['rchi2'].to_numpy()
+        rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
-        # Eliminate all entries with chi2 > 10
-        # Add any indice where a < 0.1 - this is too small to get a good reading 
+        # Eliminate all entries with chi2 > 1.5
         
-        bad_chi2 = self.chi2 > 2
+        bad_chi2 = self.chi2 > 1.5
         bad_a = (self.a < 0.1) | (self.a > 10)
-        bad_indices = (bad_chi2) | (bad_a)
-        print(f"Removing {np.sum(bad_indices)} entries with chi2 > 10 or a < 0.1.")
+        bad_rs = (rs > 10)
+        bad_indices = (bad_chi2) | (bad_a) | (bad_rs)
+        print(f"Removing {np.sum(bad_indices)} entries with bad chi2, a, or rs.")
         
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
@@ -248,7 +143,6 @@ class JWSTPipeline:
         self.chi2 = self.chi2[~bad_indices]
         
         # Check for NaN values
-        
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
         if np.any(nan_indices):
             warnings.warn(f"Found NaN values in flexion catalog. Removing {np.sum(nan_indices)} entries.")
@@ -267,14 +161,13 @@ class JWSTPipeline:
         Prepares the Source object with calculated lensing signals and uncertainties.
         """
         # Convert positions to arcseconds
-        self.xc_arcsec = self.xc * self.CDELT
-        self.yc_arcsec = self.yc * self.CDELT
+        self.xc *= self.CDELT
+        self.yc *= self.CDELT
 
         if self.cluster_name == 'EL_GORDO':
-            # Flip the x axis
-            # self.xc_arcsec = -self.xc_arcsec
-            self.xc_arcsec = np.flip(self.xc_arcsec)
-            self.yc_arcsec = np.flip(self.yc_arcsec)
+            # Flip the coordinates for EL_GORDO
+            self.xc = np.flip(self.xc)
+            self.yc = np.flip(self.yc)
 
         # Calculate shear components
         shear_magnitude = (self.q - 1) / (self.q + 1)
@@ -282,10 +175,10 @@ class JWSTPipeline:
         e2 = shear_magnitude * np.sin(2 * self.phi)
 
         # Center coordinates
-        self.centroid_x = np.mean(self.xc_arcsec) # Store centroid for later use
-        self.centroid_y = np.mean(self.yc_arcsec)
-        self.xc_centered = self.xc_arcsec - self.centroid_x
-        self.yc_centered = self.yc_arcsec - self.centroid_y
+        self.centroid_x = np.mean(self.xc) # Store centroid for later use
+        self.centroid_y = np.mean(self.yc)
+        self.xc_centered = self.xc - self.centroid_x
+        self.yc_centered = self.yc - self.centroid_y
 
         # Use dummy values for uncertainties to initialize Source object
         sigs = np.ones_like(e1) 
@@ -332,35 +225,11 @@ class JWSTPipeline:
         self.sources.sigs = sigs
         self.sources.sigf = sigf
         self.sources.sigg = sigg
-        
-        # plot the system - source distribution
-        fig, ax = plt.subplots()
-        ax.scatter(self.sources.x, self.sources.y, s=5)
-        # Attach arrows for flexion
-        for x, y, f1, f2 in zip(self.sources.x, self.sources.y, self.sources.f1, self.sources.f2):
-            ax.arrow(x, y, f1, f2, head_width=0.1, head_length=0.1, fc='r', ec='r')
-        ax.set_xlabel('RA Offset (arcsec)')
-        ax.set_ylabel('Dec Offset (arcsec)')
-        ax.set_title('Source Distribution')
-        plt.savefig(self.output_dir / 'source_distribution.png', dpi=300)
-
-        # Do histograms of q, phi, f1, f2, a, and chi2
-        
-        signals = [self.sources.e1, self.sources.e2, self.sources.f1, self.sources.f2, a, self.chi2, self.phi]
-        signal_names = ['e1', 'e2', 'F1', 'F2', 'a', 'chi2', 'phi']
-        for signal, name in zip(signals, signal_names):
-            fig, ax = plt.subplots()
-            fancyhist(signal, bins='scott', ax=ax, histtype='step', density=True, label = 'Range: {} - {}'.format(np.min(signal), np.max(signal)))
-            ax.set_xlabel(name)
-            ax.set_ylabel('Count')
-            ax.legend()
-            ax.set_title(f'{name} Distribution - With Cuts')
-            plt.savefig(self.output_dir / f'{name}_distribution_with_cuts.png', dpi=300)
-        plt.close('all')
 
     def match_sources(self):
         """
         Matches flexion data with source positions based on IDs.
+        This is necessary to get the positions of the sources on the image.
         """
         label_to_index = {label: idx for idx, label in enumerate(self.labels)}
         matched_indices = []
@@ -488,6 +357,8 @@ class JWSTPipeline:
         utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
+        self.sources.x += self.centroid_x # Move sources back to original coordinates
+        self.sources.y += self.centroid_y
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
@@ -498,24 +369,6 @@ class JWSTPipeline:
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
-        
-        # This isn't looking right - lets plot the flexion maps to see if those look appropriate
-        F2, F1 = np.gradient(kappa, self.CDELT)
-        
-        fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-        cmap = ax[0].imshow(F1, cmap='plasma', origin='lower', extent=img_extent)
-        fig.colorbar(cmap, ax=ax[0])
-        ax[0].set_title('F1')
-        ax[0].set_xlabel('RA Offset (arcsec)')
-        ax[0].set_ylabel('Dec Offset (arcsec)')
-        cmap = ax[1].imshow(F2, cmap='plasma', origin='lower', extent=img_extent)
-        fig.colorbar(cmap, ax=ax[1])
-        ax[1].set_title('F2')
-        ax[1].set_xlabel('RA Offset (arcsec)')
-        ax[1].set_ylabel('Dec Offset (arcsec)')
-        plt.tight_layout()
-        plt.savefig(self.output_dir / 'flexion_maps.png', dpi=300)
-        plt.close('all')
 
     def get_image_data(self):
         """
@@ -556,10 +409,8 @@ if __name__ == '__main__':
         # Initialize and run the pipeline
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
-        
-        pipeline_el_gordo.run()
-        # pipeline_abell.run()
 
-        # pipeline_abell.run_source_test()
-        # pipeline_el_gordo.run_source_test()
-        # raise ValueError('Stop here')
+        pipeline_el_gordo.run()
+        pipeline_abell.run()
+        print(f"Finished running pipeline for signal choice: {signal}")
+        # raise SystemExit # Exit after running one signal choice
