@@ -44,10 +44,7 @@ class JWSTPipeline:
         self.output_dir = Path(config['output_dir'])
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.cluster_name = config['cluster_name']
-        # Interpret signal choice
-        # can be all, shear_f, f_g, or shear_g
-        # corresponds to [True, True, True], [True, True, False], [False, True, True], [True, False, True]
-        self.signal_choice = config['signal_choice']
+        self.signal_choice = config['signal_choice'] # Need to interpret this after reading in
         if self.signal_choice == 'all':
             self.use_flags = [True, True, True]
         elif self.signal_choice == 'shear_f':
@@ -125,7 +122,6 @@ class JWSTPipeline:
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
         # Eliminate all entries with chi2 > 1.5
-        
         bad_chi2 = self.chi2 > 1.5
         bad_a = (self.a < 0.1) | (self.a > 10)
         bad_rs = (rs > 10)
@@ -177,8 +173,8 @@ class JWSTPipeline:
         # Center coordinates
         self.centroid_x = np.mean(self.xc) # Store centroid for later use
         self.centroid_y = np.mean(self.yc)
-        self.xc_centered = self.xc - self.centroid_x
-        self.yc_centered = self.yc - self.centroid_y
+        self.xc -= self.centroid_x
+        self.yc -= self.centroid_y
 
         # Use dummy values for uncertainties to initialize Source object
         sigs = np.ones_like(e1) 
@@ -187,8 +183,8 @@ class JWSTPipeline:
 
         # Create Source object
         self.sources = source_obj.Source(
-            x=self.xc_centered,
-            y=self.yc_centered,
+            x=self.xc,
+            y=self.yc,
             e1=e1,
             e2=e2,
             f1=self.F1_fit,
@@ -200,10 +196,7 @@ class JWSTPipeline:
             sigg=sigg  # Adjust if necessary
         )
         
-        if self.cluster_name == 'ABELL_2744':
-            max_flexion = 0.1
-        elif self.cluster_name == 'EL_GORDO':
-            max_flexion = 0.12
+        max_flexion = 0.2
         # Remove sources with flexion > max_flexion
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
@@ -219,8 +212,6 @@ class JWSTPipeline:
         sigag = np.mean([np.std(a * self.sources.g1), np.std(a * self.sources.g2)])
         sigg = sigag / (a + epsilon)
 
-        assert len(sigs) == len(sigf) == len(sigg) == len(self.sources.x), 'Lengths of sigs, sigf, and sigg do not match the number of sources: {} vs {} vs {} vs {}'.format(len(sigs), len(sigf), len(sigg), len(self.sources.x))
-        
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
         self.sources.sigf = sigf
@@ -254,18 +245,14 @@ class JWSTPipeline:
         # Remove entries with no matching source
         # (This is a sanity check - should not happen if the catalogs are correct)
         valid = ~np.isnan(self.xc) & ~np.isnan(self.yc)
-        print(f"Removing {np.sum(~valid)} entries with no matching source.")
+        # print(f"Removing {np.sum(~valid)} entries with no matching source.") # We have proven that this will always be 0
         self.IDs = self.IDs[valid]
-        self.q = self.q[valid]
-        self.phi = self.phi[valid]
-        self.F1_fit = self.F1_fit[valid]
-        self.F2_fit = self.F2_fit[valid]
-        self.G1_fit = self.G1_fit[valid]
-        self.G2_fit = self.G2_fit[valid]
+        self.q, self.phi = self.q[valid], self.phi[valid] # Shear signals
+        self.F1_fit, self.F2_fit = self.F1_fit[valid], self.F2_fit[valid] # Flexion signals - first
+        self.G1_fit, self.G2_fit = self.G1_fit[valid], self.G2_fit[valid] # Flexion signals - second
         self.a = self.a[valid]
         self.chi2 = self.chi2[valid]
-        self.xc = self.xc[valid]
-        self.yc = self.yc[valid]
+        self.xc, self.yc = self.xc[valid], self.yc[valid] # Source positions
 
     def run_lens_fitting(self):
         """
@@ -281,6 +268,8 @@ class JWSTPipeline:
         self.lenses.x += self.centroid_x
         self.lenses.y += self.centroid_y
         self.lenses.mass *= hubble_param # Convert mass to M_sun h^-1
+        self.sources.x += self.centroid_x # Move sources back to original coordinates
+        self.sources.y += self.centroid_y
 
     def save_results(self):
         """
@@ -331,7 +320,7 @@ class JWSTPipeline:
                 convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
             )
             # Add colorbar for contours
-            ax.clabel(contours, inline=True, fontsize=8, fmt='%.2f')
+            ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
             cbar = plt.colorbar(contours, ax=ax)
 
             # Plot lens positions
@@ -357,15 +346,14 @@ class JWSTPipeline:
         utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
-        self.sources.x += self.centroid_x # Move sources back to original coordinates
-        self.sources.y += self.centroid_y
-        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='flexion')
+        kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
+        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion')
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_ks], title, save_title)
 
         # Do this for the shear as well
-        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=img_extent, signal='shear')
+        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear')
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
@@ -410,7 +398,7 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        pipeline_el_gordo.run()
+        # pipeline_el_gordo.run()
         pipeline_abell.run()
         print(f"Finished running pipeline for signal choice: {signal}")
-        # raise SystemExit # Exit after running one signal choice
+        raise ValueError('Finished running pipeline for signal choice: {}'.format(signal))

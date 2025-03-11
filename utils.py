@@ -816,17 +816,20 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
 
     xmin, xmax, ymin, ymax = extent
     nx, ny = int(xmax - xmin), int(ymax - ymin)
-    nx = ny = min(nx, ny)  # Ensure square grid
+    nx = ny = max(nx, ny)  # Ensure square grid
     
     x_range = np.linspace(xmin, xmax, nx)
     y_range = np.linspace(ymin, ymax, ny)
+    # Flip x (not sure why this is needed)
+    x_range = x_range[::-1]
+    y_range = y_range[::-1]
     X, Y = np.meshgrid(x_range, y_range, indexing='xy')
 
     # Properly normalized binning
     S1_smooth = CIC_2d(fsize=1, npixels=nx, xpos=x_s, ypos=y_s, signal_values=S1)
     S2_smooth = CIC_2d(fsize=1, npixels=ny, xpos=x_s, ypos=y_s, signal_values=S2)
-    S1_filter = gaussian_filter(S1_smooth, sigma=10, mode='wrap', cval=0)
-    S2_filter = gaussian_filter(S2_smooth, sigma=10, mode='wrap', cval=0)
+    S1_filter = gaussian_filter(S1_smooth, sigma=10)
+    S2_filter = gaussian_filter(S2_smooth, sigma=10)
 
     # Ensure smoothing has not changed the normalization
     S1_filter *= np.sum(S1) / np.sum(S1_filter)
@@ -852,6 +855,6 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
         raise NotImplementedError('Only flexion and shear supported.')
 
     # Apply inverse FFT with shift correction
-    kappa = np.fft.ifft2(np.fft.ifftshift(ft_conv), norm='ortho').real # * nx * ny
+    kappa = np.fft.ifft2(np.fft.ifftshift(ft_conv), norm='ortho').real 
     
     return X, Y, kappa
