@@ -401,4 +401,4 @@ if __name__ == '__main__':
         # pipeline_el_gordo.run()
         pipeline_abell.run()
         print(f"Finished running pipeline for signal choice: {signal}")
-        raise ValueError('Finished running pipeline for signal choice: {}'.format(signal))
+        # raise ValueError('Finished running pipeline for signal choice: {}'.format(signal))
