@@ -125,6 +125,7 @@ class JWSTPipeline:
         bad_chi2 = self.chi2 > 1.5
         bad_a = (self.a < 0.1) | (self.a > 10)
         bad_rs = (rs > 10)
+        
         bad_indices = (bad_chi2) | (bad_a) | (bad_rs)
         print(f"Removing {np.sum(bad_indices)} entries with bad chi2, a, or rs.")
         
@@ -152,6 +153,7 @@ class JWSTPipeline:
             self.a = self.a[~nan_indices]
             self.chi2 = self.chi2[~nan_indices]
         
+        
     def initialize_sources(self):
         """
         Prepares the Source object with calculated lensing signals and uncertainties.
@@ -160,10 +162,12 @@ class JWSTPipeline:
         self.xc *= self.CDELT
         self.yc *= self.CDELT
 
+        '''
         if self.cluster_name == 'EL_GORDO':
             # Flip the coordinates for EL_GORDO
             self.xc = np.flip(self.xc)
             self.yc = np.flip(self.yc)
+        '''
 
         # Calculate shear components
         shear_magnitude = (self.q - 1) / (self.q + 1)
@@ -201,16 +205,14 @@ class JWSTPipeline:
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
 
-        # Calculate the noise levels for each signal
-        a = self.a
         # We also need to remove the bad indices from the a array
-        a = np.delete(a, bad_indices)
+        self.a = np.delete(self.a, bad_indices)
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
-        sigaf = np.mean([np.std(a * self.sources.f1), np.std(a * self.sources.f2)])
+        sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)])
         epsilon = 1e-8 # Small value to avoid division by zero
-        sigf = sigaf / (a + epsilon)
-        sigag = np.mean([np.std(a * self.sources.g1), np.std(a * self.sources.g2)])
-        sigg = sigag / (a + epsilon)
+        sigf = sigaf / (self.a + epsilon)
+        sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
+        sigg = sigag / (self.a + epsilon)
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
@@ -261,9 +263,11 @@ class JWSTPipeline:
         xmax = np.max(np.hypot(self.sources.x, self.sources.y))
         print(f"Running lens fitting with {len(self.sources.x)} sources.")
         print(f"Maximum source distance: {xmax:.2f} arcsec.")
+        
         self.lenses, _ = main.fit_lensing_field(
             self.sources, xmax, flags=True, use_flags=self.use_flags, lens_type='NFW', z_lens=z_cluster, z_source=z_source
         )
+        
         # Adjust lens positions back to original coordinates
         self.lenses.x += self.centroid_x
         self.lenses.y += self.centroid_y
@@ -315,6 +319,7 @@ class JWSTPipeline:
             )
             
             # Overlay convergence contours
+            
             contour_levels = np.percentile(convergence[2], np.linspace(60, 100, 6))
             contours = ax.contour(
                 convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
@@ -322,9 +327,13 @@ class JWSTPipeline:
             # Add colorbar for contours
             ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
             cbar = plt.colorbar(contours, ax=ax)
+            
 
             # Plot lens positions
             ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
+
+            # Plot source positions
+            # ax.scatter(self.sources.x, self.sources.y, s=20, color='blue', label='Sources', alpha=0.5, edgecolors='black')
 
             # Labels and title
             ax.set_xlabel('RA Offset (arcsec)')
@@ -398,7 +407,7 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        # pipeline_el_gordo.run()
-        pipeline_abell.run()
+        pipeline_el_gordo.run()
+        # pipeline_abell.run()
         print(f"Finished running pipeline for signal choice: {signal}")
         # raise ValueError('Finished running pipeline for signal choice: {}'.format(signal))
