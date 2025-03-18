@@ -531,7 +531,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', z_source
                 chi2wrapper, guess, args=params,
                 method='L-BFGS-B',
                 bounds=[(10, 16)],
-                options={'maxiter': 1000, 'ftol': 1e-6}
+                options={'maxiter': 1e3, 'ftol': 1e-6}
             )
             lenses.mass[i] = 10 ** result.x
             lenses.calculate_concentration()

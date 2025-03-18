@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.table import Table
 from astropy.visualization import ImageNormalize, LogStretch
-from astropy.visualization import hist as fancyhist
 from pathlib import Path
 import warnings
 
@@ -152,8 +151,7 @@ class JWSTPipeline:
             self.G2_fit = self.G2_fit[~nan_indices]
             self.a = self.a[~nan_indices]
             self.chi2 = self.chi2[~nan_indices]
-        
-        
+
     def initialize_sources(self):
         """
         Prepares the Source object with calculated lensing signals and uncertainties.
@@ -161,13 +159,6 @@ class JWSTPipeline:
         # Convert positions to arcseconds
         self.xc *= self.CDELT
         self.yc *= self.CDELT
-
-        '''
-        if self.cluster_name == 'EL_GORDO':
-            # Flip the coordinates for EL_GORDO
-            self.xc = np.flip(self.xc)
-            self.yc = np.flip(self.yc)
-        '''
 
         # Calculate shear components
         shear_magnitude = (self.q - 1) / (self.q + 1)
@@ -200,13 +191,14 @@ class JWSTPipeline:
             sigg=sigg  # Adjust if necessary
         )
         
-        max_flexion = 0.2
+        max_flexion = 0.5
         # Remove sources with flexion > max_flexion
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
-
+        
         # We also need to remove the bad indices from the a array
         self.a = np.delete(self.a, bad_indices)
+        
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)])
         epsilon = 1e-8 # Small value to avoid division by zero
@@ -399,7 +391,7 @@ if __name__ == '__main__':
             'output_dir': 'Output/JWST/EL_GORDO/',
             'cluster_name': 'EL_GORDO',
             'cluster_redshift': 0.870,
-            'source_redshift': 4.0,
+            'source_redshift': 4.25,
             'signal_choice': signal
         }
 

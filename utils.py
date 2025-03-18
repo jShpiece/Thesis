@@ -733,22 +733,7 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     if cluster_name == 'ABELL_2744':
         kappa_total = mass_sheet_transformation(kappa_total, k=2)
     elif cluster_name == 'EL_GORDO':
-        # Choose k such that the convergence goes to zero at the edge of the grid
-        for k in np.linspace(0, 100, 1000):
-            kappa_test = mass_sheet_transformation(kappa_total, k=k)
-            # Just consider the edges
-            kappa_mask = np.zeros_like(kappa_total, dtype=bool)
-            kappa_mask[0, :] = True
-            kappa_mask[-1, :] = True
-            kappa_mask[:, 0] = True
-            kappa_mask[:, -1] = True
-            if np.mean(kappa_test[kappa_mask]) < 1e-3:
-                print(f'Mass sheet transformation converged with k = {k}.')
-                kappa_total = kappa_test
-                break
-        else:
-            # raise ValueError('Mass sheet transformation did not converge.')
-            print('Mass sheet transformation did not converge.')
+        pass
 
     # Then convert back to a 2D mass distribution
     sigma_c = critical_surface_density(z_cluster, z_source)
