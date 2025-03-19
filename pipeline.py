@@ -191,7 +191,7 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS', z
             bounds = [
                 (lenses.x[i] - xmax*2, lenses.x[i] + xmax*2),  
                 (lenses.y[i] - xmax*2, lenses.y[i] + xmax*2),  # Allow the minimizer to move the lens out of the field - corresponds to a "delete" operation
-                (10, 16)  # Mass bounds in log10(M_sun)
+                (10, 17)  # Mass bounds in log10(M_sun)
             ]
 
             # Minimize relative to sources only within a certain distance of the lens
@@ -530,7 +530,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', z_source
             result = opt.minimize(
                 chi2wrapper, guess, args=params,
                 method='L-BFGS-B',
-                bounds=[(10, 16)],
+                bounds=[(10, 17)],
                 options={'maxiter': 1e3, 'ftol': 1e-6}
             )
             lenses.mass[i] = 10 ** result.x
