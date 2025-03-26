@@ -675,36 +675,39 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     mass_estimates_elgordo = {
         'Cerny et al.': (1.1e15, 500),
         'Caminha et all.': (1.84e15, 1000),
-        'Diego et al': (1e15, 500),
+        'Diego et al': (0.8e15, 500),
     }
 
     # Choose a cluster
     if cluster_name == 'ABELL_2744':
         mass_estimates = mass_estimates_abell
         z_cluster = 0.308
-        z_source = 0.8
+        z_source = 1.0
     elif cluster_name == 'EL_GORDO':
         mass_estimates = mass_estimates_elgordo
         z_cluster = 0.870
-        z_source = 4.0
+        z_source = 4.25
     else:
         raise ValueError('Invalid cluster name. Choose from "ABELL_2744" or "EL_GORDO".')
     
     # Radii in kpc
     # Take the minimum mass estimate and the maximum
-    r_min = min([r for m, r in mass_estimates.values()])
-    r_max = max([r for m, r in mass_estimates.values()])
-    r = np.linspace(r_min/2, 2*r_max, 100)
+    r_min = min([r for _, r in mass_estimates.values()])
+    r_max = max([r for _, r in mass_estimates.values()])
+    r = np.linspace(r_min * 0, 1.25*r_max, 100)
     
     # Move the halos to be centered on the primary halo
-    largest_halo = np.argmax(halos.mass)
-    centroid = (halos.x[largest_halo], halos.y[largest_halo])
+    
+    # largest_halo = np.argmax(halos.mass)
+    # Calculate the centroid as the center of mass of the halos
+    centroid = np.array([np.sum(halos.x * halos.mass) / np.sum(halos.mass), np.sum(halos.y * halos.mass) / np.sum(halos.mass)])
+    # centroid = [100,40] # hardcoding the centroid for now - this is where we expect the center of mass for el gordo
     halos.x -= centroid[0]
     halos.y -= centroid[1]
 
     # 2D grid setup (in kpc)
-    x_range, y_range = (-200, 200), (-200, 200)  # Adjust as appropriate
-    nx, ny = 400, 400
+    x_range, y_range = (-r[-1], r[-1]), (-r[-1], r[-1])
+    nx, ny = int(x_range[1] - x_range[0]), int(y_range[1] - y_range[0])
     x_vals = np.linspace(x_range[0], x_range[1], nx)
     y_vals = np.linspace(y_range[0], y_range[1], ny)
     kappa_total = np.zeros((ny, nx), dtype=float)
@@ -731,9 +734,20 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     # Now find a way to break the mass sheet degeneracy
     # Choose a value of k
     if cluster_name == 'ABELL_2744':
+        # k value taken from literature
         kappa_total = mass_sheet_transformation(kappa_total, k=2)
     elif cluster_name == 'EL_GORDO':
-        pass
+        # Perform a transformation such that the convergence goes to zero at large radii
+        '''
+        top = kappa[0, :]
+        bottom = kappa[-1, :]
+        left = kappa[1:-1, 0]
+        right = kappa[1:-1, -1]
+        boundary_value = np.mean(np.concatenate([top, bottom, left, right]))
+        k = 1 / (1 - boundary_value)
+        print(k)
+        '''
+        kappa_total = mass_sheet_transformation(kappa_total, k=2)
 
     # Then convert back to a 2D mass distribution
     sigma_c = critical_surface_density(z_cluster, z_source)
@@ -753,7 +767,7 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     
     # Tell me how far off we are from the literature estimates
     for label, (mass_lit, r_lit) in mass_estimates.items():
-        mass_recon = np.interp(r_lit, r, mass_enclosed)
+        mass_recon = np.interp(r_lit, r, mass_enclosed) # Interpolate to find the mass at the literature radius
         # Write masses in scientific notation
         mass_lit_val = f'{mass_lit:.2e}'
         mass_recon_val = f'{mass_recon:.2e}'
@@ -777,7 +791,7 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     ax.legend() 
     plt.savefig(plot_name)
     
-    halos.x += centroid[0]
+    halos.x += centroid[0] # Put the halos back where they were
     halos.y += centroid[1]
 
 

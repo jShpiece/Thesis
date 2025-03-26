@@ -122,7 +122,7 @@ class JWSTPipeline:
 
         # Eliminate all entries with chi2 > 1.5
         bad_chi2 = self.chi2 > 1.5
-        bad_a = (self.a < 0.1) | (self.a > 10)
+        bad_a = (self.a < 0.01) | (self.a > 20)
         bad_rs = (rs > 10)
         
         bad_indices = (bad_chi2) | (bad_a) | (bad_rs)
@@ -346,6 +346,7 @@ class JWSTPipeline:
         # Compare mass estimates
         utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
+        '''
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion')
@@ -358,6 +359,7 @@ class JWSTPipeline:
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
+        '''
 
     def get_image_data(self):
         """
@@ -402,4 +404,3 @@ if __name__ == '__main__':
         pipeline_el_gordo.run()
         # pipeline_abell.run()
         print(f"Finished running pipeline for signal choice: {signal}")
-        # raise ValueError('Finished running pipeline for signal choice: {}'.format(signal))
