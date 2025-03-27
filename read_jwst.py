@@ -120,13 +120,13 @@ class JWSTPipeline:
         rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
-        # Eliminate all entries with chi2 > 1.5
+        # Eliminate all entries with chi2 > 1.5, that are inappropriate sizes, or with rs > 10 - also remove NaNs
         bad_chi2 = self.chi2 > 1.5
         bad_a = (self.a < 0.01) | (self.a > 20)
         bad_rs = (rs > 10)
+        nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
         
-        bad_indices = (bad_chi2) | (bad_a) | (bad_rs)
-        print(f"Removing {np.sum(bad_indices)} entries with bad chi2, a, or rs.")
+        bad_indices = (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) # Combine all bad indices
         
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
@@ -137,20 +137,6 @@ class JWSTPipeline:
         self.G2_fit = self.G2_fit[~bad_indices]
         self.a = self.a[~bad_indices]
         self.chi2 = self.chi2[~bad_indices]
-        
-        # Check for NaN values
-        nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
-        if np.any(nan_indices):
-            warnings.warn(f"Found NaN values in flexion catalog. Removing {np.sum(nan_indices)} entries.")
-            self.IDs = self.IDs[~nan_indices]
-            self.q = self.q[~nan_indices]
-            self.phi = self.phi[~nan_indices]
-            self.F1_fit = self.F1_fit[~nan_indices]
-            self.F2_fit = self.F2_fit[~nan_indices]
-            self.G1_fit = self.G1_fit[~nan_indices]
-            self.G2_fit = self.G2_fit[~nan_indices]
-            self.a = self.a[~nan_indices]
-            self.chi2 = self.chi2[~nan_indices]
 
     def initialize_sources(self):
         """
@@ -172,39 +158,26 @@ class JWSTPipeline:
         self.yc -= self.centroid_y
 
         # Use dummy values for uncertainties to initialize Source object
-        sigs = np.ones_like(e1) 
-        sigf = np.ones_like(e1) 
-        sigg = np.ones_like(e1) 
+        dummy = np.ones_like(e1) 
 
         # Create Source object
         self.sources = source_obj.Source(
-            x=self.xc,
-            y=self.yc,
-            e1=e1,
-            e2=e2,
-            f1=self.F1_fit,
-            f2=self.F2_fit,
-            g1=self.G1_fit,  
-            g2=self.G2_fit,  
-            sigs=sigs,
-            sigf=sigf,
-            sigg=sigg  # Adjust if necessary
+            x=self.xc, y=self.yc,
+            e1=e1, e2=e2,
+            f1=self.F1_fit, f2=self.F2_fit,
+            g1=self.G1_fit, g2=self.G2_fit,  
+            sigs=dummy, sigf=dummy, sigg=dummy
         )
         
         max_flexion = 0.5
         # Remove sources with flexion > max_flexion
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
-        print(f"Removing {len(bad_indices)} sources with flexion > {max_flexion}.")
-        
-        # We also need to remove the bad indices from the a array
-        self.a = np.delete(self.a, bad_indices)
-        
+        self.a = np.delete(self.a, bad_indices) # We also need to remove the bad indices from the a array (not part of the source object)
+
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)])
-        epsilon = 1e-8 # Small value to avoid division by zero
-        sigf = sigaf / (self.a + epsilon)
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
-        sigg = sigag / (self.a + epsilon)
+        sigf, sigg = sigaf / (self.a + 1e-10), sigag / (self.a + 1e-10)
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
@@ -236,32 +209,17 @@ class JWSTPipeline:
             for idx in matched_indices
         ])
 
-        # Remove entries with no matching source
-        # (This is a sanity check - should not happen if the catalogs are correct)
-        valid = ~np.isnan(self.xc) & ~np.isnan(self.yc)
-        # print(f"Removing {np.sum(~valid)} entries with no matching source.") # We have proven that this will always be 0
-        self.IDs = self.IDs[valid]
-        self.q, self.phi = self.q[valid], self.phi[valid] # Shear signals
-        self.F1_fit, self.F2_fit = self.F1_fit[valid], self.F2_fit[valid] # Flexion signals - first
-        self.G1_fit, self.G2_fit = self.G1_fit[valid], self.G2_fit[valid] # Flexion signals - second
-        self.a = self.a[valid]
-        self.chi2 = self.chi2[valid]
-        self.xc, self.yc = self.xc[valid], self.yc[valid] # Source positions
-
     def run_lens_fitting(self):
         """
         Runs the lens fitting pipeline.
         """
         xmax = np.max(np.hypot(self.sources.x, self.sources.y))
-        print(f"Running lens fitting with {len(self.sources.x)} sources.")
-        print(f"Maximum source distance: {xmax:.2f} arcsec.")
         
         self.lenses, _ = main.fit_lensing_field(
             self.sources, xmax, flags=True, use_flags=self.use_flags, lens_type='NFW', z_lens=z_cluster, z_source=z_source
         )
         
-        # Adjust lens positions back to original coordinates
-        self.lenses.x += self.centroid_x
+        self.lenses.x += self.centroid_x    # Adjust lens positions back to original coordinates
         self.lenses.y += self.centroid_y
         self.lenses.mass *= hubble_param # Convert mass to M_sun h^-1
         self.sources.x += self.centroid_x # Move sources back to original coordinates
@@ -278,7 +236,7 @@ class JWSTPipeline:
         """
         Plots the convergence map overlaid on the JWST image.
         """
-        img_data, _ = self.get_image_data()
+        img_data = self.get_image_data()
         img_extent = [
             0, img_data.shape[1] * self.CDELT,
             0, img_data.shape[0] * self.CDELT
@@ -297,8 +255,6 @@ class JWSTPipeline:
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
         )
-        # check that kappa is not all zeros
-        assert np.any(kappa), 'Kappa is all zeros'
 
         # Plot settings
         def plot_cluster(convergence, title, save_name):
@@ -311,7 +267,6 @@ class JWSTPipeline:
             )
             
             # Overlay convergence contours
-            
             contour_levels = np.percentile(convergence[2], np.linspace(60, 100, 6))
             contours = ax.contour(
                 convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
@@ -319,13 +274,9 @@ class JWSTPipeline:
             # Add colorbar for contours
             ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
             cbar = plt.colorbar(contours, ax=ax)
-            
 
             # Plot lens positions
             ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
-
-            # Plot source positions
-            # ax.scatter(self.sources.x, self.sources.y, s=20, color='blue', label='Sources', alpha=0.5, edgecolors='black')
 
             # Labels and title
             ax.set_xlabel('RA Offset (arcsec)')
@@ -367,8 +318,7 @@ class JWSTPipeline:
         """
         with fits.open(self.image_path) as hdul:
             img_data = hdul['SCI'].data
-            header = hdul['SCI'].header
-        return img_data, header
+        return img_data
 
 if __name__ == '__main__':
     # Configuration dictionary
