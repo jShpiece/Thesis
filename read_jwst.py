@@ -401,6 +401,6 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        pipeline_el_gordo.run()
-        # pipeline_abell.run()
+        # pipeline_el_gordo.run()
+        pipeline_abell.run()
         print(f"Finished running pipeline for signal choice: {signal}")
