@@ -101,7 +101,6 @@ class JWSTPipeline:
         self.x_centroids = np.array(table['xcentroid'])
         self.y_centroids = np.array(table['ycentroid'])
         self.labels = np.array(table['label'])
-        print(f"Read {len(self.labels)} sources from catalog.")
 
     def read_flexion_catalog(self):
         """
@@ -121,9 +120,14 @@ class JWSTPipeline:
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
         # Eliminate all entries with chi2 > 1.5, that are inappropriate sizes, or with rs > 10 - also remove NaNs
-        bad_chi2 = self.chi2 > 1.5
-        bad_a = (self.a < 0.01) | (self.a > 20)
-        bad_rs = (rs > 10)
+        if self.cluster_name == 'ABELL_2744':
+            bad_chi2 = self.chi2 > 1.5
+            bad_a = (self.a < 0.1) | (self.a > 10)
+            bad_rs = (rs > 10)
+        elif self.cluster_name == 'EL_GORDO':
+            bad_chi2 = self.chi2 > 1.5
+            bad_a = (self.a < 0.01) | (self.a > 20)
+            bad_rs = (rs > 10)
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
         
         bad_indices = (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) # Combine all bad indices
@@ -170,6 +174,8 @@ class JWSTPipeline:
         )
         
         max_flexion = 0.5
+        if self.cluster_name == 'ABELL_2744':
+            max_flexion = 0.1
         # Remove sources with flexion > max_flexion
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         self.a = np.delete(self.a, bad_indices) # We also need to remove the bad indices from the a array (not part of the source object)
@@ -297,7 +303,7 @@ class JWSTPipeline:
         # Compare mass estimates
         utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
-        '''
+        
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion')
@@ -310,7 +316,7 @@ class JWSTPipeline:
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
-        '''
+        
 
     def get_image_data(self):
         """
@@ -351,6 +357,6 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        # pipeline_el_gordo.run()
+        pipeline_el_gordo.run()
         pipeline_abell.run()
         print(f"Finished running pipeline for signal choice: {signal}")
