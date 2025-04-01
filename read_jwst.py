@@ -120,14 +120,9 @@ class JWSTPipeline:
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
         # Eliminate all entries with chi2 > 1.5, that are inappropriate sizes, or with rs > 10 - also remove NaNs
-        if self.cluster_name == 'ABELL_2744':
-            bad_chi2 = self.chi2 > 1.5
-            bad_a = (self.a < 0.1) | (self.a > 10)
-            bad_rs = (rs > 10)
-        elif self.cluster_name == 'EL_GORDO':
-            bad_chi2 = self.chi2 > 1.5
-            bad_a = (self.a < 0.01) | (self.a > 20)
-            bad_rs = (rs > 10)
+        bad_rs = (rs > 10)
+        bad_chi2 = self.chi2 > 1.5
+        bad_a = (self.a < 0.01) | (self.a > 20) if self.cluster_name == 'EL_GORDO' else (self.a < 0.1) | (self.a > 10)
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
         
         bad_indices = (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) # Combine all bad indices
@@ -175,7 +170,7 @@ class JWSTPipeline:
         
         max_flexion = 0.5
         if self.cluster_name == 'ABELL_2744':
-            max_flexion = 0.1
+            max_flexion = 0.2
         # Remove sources with flexion > max_flexion
         bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         self.a = np.delete(self.a, bad_indices) # We also need to remove the bad indices from the a array (not part of the source object)
@@ -303,7 +298,7 @@ class JWSTPipeline:
         # Compare mass estimates
         utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
-        
+        '''
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion')
@@ -316,7 +311,7 @@ class JWSTPipeline:
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
-        
+        '''
 
     def get_image_data(self):
         """
@@ -329,6 +324,11 @@ class JWSTPipeline:
 if __name__ == '__main__':
     # Configuration dictionary
     signals = ['all', 'shear_f', 'f_g', 'shear_g']
+
+    # Create an output file to store all the results
+    output_file = Path('Output/JWST/ABELL/combined_results.txt')
+    with open(output_file, 'w') as f:
+        f.write("Signal Choice\tCluster Name\tRA Offset\tDec Offset\tMass (M_sun h^-1)\n")
 
     for signal in signals:
         abell_config = {
@@ -359,4 +359,11 @@ if __name__ == '__main__':
 
         pipeline_el_gordo.run()
         pipeline_abell.run()
+        # Save results to the output file
+        with open(output_file, 'a') as f:
+            for i in range(len(pipeline_abell.lenses.x)):
+                f.write(f"{signal}\t{pipeline_abell.cluster_name}\t{pipeline_abell.lenses.x[i]:.2f}\t{pipeline_abell.lenses.y[i]:.2f}\t{pipeline_abell.lenses.mass[i]:.2e}\n")
+            for i in range(len(pipeline_el_gordo.lenses.x)):
+                f.write(f"{signal}\t{pipeline_el_gordo.cluster_name}\t{pipeline_el_gordo.lenses.x[i]:.2f}\t{pipeline_el_gordo.lenses.y[i]:.2f}\t{pipeline_el_gordo.lenses.mass[i]:.2e}\n")
+        # Print completion message
         print(f"Finished running pipeline for signal choice: {signal}")
