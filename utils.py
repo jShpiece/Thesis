@@ -820,8 +820,8 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
     x_range = np.linspace(xmin, xmax, nx)
     y_range = np.linspace(ymin, ymax, ny)
     # Flip x (not sure why this is needed)
-    x_range = x_range[::-1]
-    y_range = y_range[::-1]
+    # x_range = x_range[::-1]
+    # y_range = y_range[::-1]
     X, Y = np.meshgrid(x_range, y_range, indexing='xy')
 
     # Properly normalized binning

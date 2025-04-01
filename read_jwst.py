@@ -82,15 +82,16 @@ class JWSTPipeline:
         self.centroid_y = None
 
     def run(self):
-        """
+        """                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
         Runs the entire pipeline.
         """
         self.read_flexion_catalog()
         self.read_source_catalog()
         self.match_sources()
         self.initialize_sources()
-        self.run_lens_fitting()
-        self.save_results()
+        # self.run_lens_fitting()
+        # self.save_results()
+        self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
         self.plot_results()
 
     def read_source_catalog(self):
@@ -100,15 +101,6 @@ class JWSTPipeline:
         table = Table.read(self.source_catalog_path)
         self.x_centroids = np.array(table['xcentroid'])
         self.y_centroids = np.array(table['ycentroid'])
-        self.labels = np.array(table['label'])
-
-    def read_flexion_catalog(self):
-        """
-        Reads the JWST flexion catalog.
-        """
-        df = pd.read_pickle(self.flexion_catalog_path)
-        self.IDs = df['label'].to_numpy()
-        self.q = df['q'].to_numpy()
         self.phi = df['phi'].to_numpy()
         self.F1_fit = df['F1_fit'].to_numpy()
         self.F2_fit = df['F2_fit'].to_numpy() 
@@ -277,7 +269,7 @@ class JWSTPipeline:
             cbar = plt.colorbar(contours, ax=ax)
 
             # Plot lens positions
-            ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
+            # ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
 
             # Labels and title
             ax.set_xlabel('RA Offset (arcsec)')
@@ -290,15 +282,15 @@ class JWSTPipeline:
 
         # Plot the cluster
         title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
-        plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
+        # plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
         
         plot_name = self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice)
         plot_title = 'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice)
 
         # Compare mass estimates
-        utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
+        # utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
-        '''
+        
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion')
@@ -311,7 +303,7 @@ class JWSTPipeline:
         title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
-        '''
+        
 
     def get_image_data(self):
         """
@@ -326,9 +318,9 @@ if __name__ == '__main__':
     signals = ['all', 'shear_f', 'f_g', 'shear_g']
 
     # Create an output file to store all the results
-    output_file = Path('Output/JWST/ABELL/combined_results.txt')
+    output_file = Path('Output/JWST/ABELL/combined_results.csv')
     with open(output_file, 'w') as f:
-        f.write("Signal Choice\tCluster Name\tRA Offset\tDec Offset\tMass (M_sun h^-1)\n")
+        f.write("Signal\tCluster\tX\tY\tMass\n")
 
     for signal in signals:
         abell_config = {
@@ -360,10 +352,13 @@ if __name__ == '__main__':
         pipeline_el_gordo.run()
         pipeline_abell.run()
         # Save results to the output file
+        '''
         with open(output_file, 'a') as f:
             for i in range(len(pipeline_abell.lenses.x)):
                 f.write(f"{signal}\t{pipeline_abell.cluster_name}\t{pipeline_abell.lenses.x[i]:.2f}\t{pipeline_abell.lenses.y[i]:.2f}\t{pipeline_abell.lenses.mass[i]:.2e}\n")
             for i in range(len(pipeline_el_gordo.lenses.x)):
                 f.write(f"{signal}\t{pipeline_el_gordo.cluster_name}\t{pipeline_el_gordo.lenses.x[i]:.2f}\t{pipeline_el_gordo.lenses.y[i]:.2f}\t{pipeline_el_gordo.lenses.mass[i]:.2e}\n")
         # Print completion message
+        '''
         print(f"Finished running pipeline for signal choice: {signal}")
+        raise SystemExit("Exiting after running for all signals. Remove this line to run for each signal separately.")
