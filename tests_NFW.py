@@ -660,18 +660,22 @@ if __name__ == '__main__':
     Nlens = 1
     Nsource = 100
     xmax = 50
-    lens_mass = 1e17
+    lens_mass = 1e14
     true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=False)
-    # scramble the source positions
-    xs = np.random.uniform(-xmax, xmax, Nsource)
-    ys = np.random.uniform(-xmax, xmax, Nsource)
-    sources.x = xs
-    sources.y = ys
 
     # Run a kaiser squires reconstruction
     X, Y, kappa = utils.perform_kaiser_squire_reconstruction(sources, [-xmax, xmax, -xmax, xmax], 'flexion')
 
     X, Y, kappa_true = utils.calculate_kappa(true_lenses, [-xmax, xmax, -xmax, xmax], lens_type = 'NFW')
+
+    # print the kappa at the origin (remember the origin is at the center of the grid)
+    origin_x = int(len(X) / 2)
+    origin_y = int(len(Y) / 2)
+    kappa_origin_recon = kappa[origin_x, origin_y]
+    kappa_origin_true = kappa_true[origin_x, origin_y]
+    print(f'Kappa at origin: {kappa_origin_recon}')
+    print(f'True kappa at origin: {kappa_origin_true}')
+    print(f'Ratio: {kappa_origin_recon / kappa_origin_true}')
 
     # plot the results
     fig, ax = plt.subplots(1, 3, figsize=(20, 6))

@@ -188,36 +188,45 @@ def nfw_projected_mass(
 # Image Processing Functions
 # ------------------------
 
-def CIC_2d(fsize:u.Unit, npixels:int, xpos:np.ndarray, ypos:np.ndarray, signal_values:np.ndarray) -> np.ndarray:
-    """
-    Cloud-in-Cell interpolator
-    """
 
-    #unit = 1/signal_values.unit; signal_values = signal_values.value
-    #fsize = fsize.to(unit)
-    
+def CIC_2d(fsize, npixels, xpos, ypos, signal_values):
+    """
+    Cloud-in-Cell (CIC) 2D binning of scattered data onto a square grid.
+
+    Parameters:
+        fsize: total field size (assumed square, float)
+        npixels: number of pixels per side
+        xpos, ypos: source coordinates (same units as fsize)
+        signal_values: values to bin (same length as xpos/ypos)
+
+    Returns:
+        grid: 2D numpy array (npixels x npixels) with CIC-interpolated values
+    """
     grid = np.zeros((npixels, npixels), dtype=float)
-    pix_scl = fsize/(npixels)
+    pix_scl = fsize / npixels
 
-    ROW = (ypos/pix_scl) #.decompose().value
-    COL = (xpos/pix_scl) #.decompose().value
-    
-    iROW = (np.floor(ROW)).astype(int); iCOL = (np.floor(COL)).astype(int)
-    dROW = ROW-iROW; dCOL = COL-iCOL
+    row = ypos / pix_scl
+    col = xpos / pix_scl
 
-    index = np.vstack([iROW, iCOL])
-    unique_indices, unique_inverse, counts = np.unique(index, axis=1, return_inverse=True, return_counts=True)
-    output = counts[np.searchsorted(unique_indices[0], index[0])]
-    signal_values /= output
+    irow = np.floor(row).astype(int)
+    icol = np.floor(col).astype(int)
+    drow = row - irow
+    dcol = col - icol
 
-    # Perform accumulation using advanced indexing and broadcasting
-    grid[unique_indices[0] % npixels, unique_indices[1]% npixels] += np.bincount(unique_inverse, weights=(1 - dROW) * (1 - dCOL) * signal_values, minlength=len(unique_indices.T))
-    grid[(unique_indices[0] + 1)% npixels, unique_indices[1]% npixels] += np.bincount(unique_inverse, weights=(dROW) * (1 - dCOL) * signal_values, minlength=len(unique_indices.T))
-    grid[unique_indices[0]% npixels, (unique_indices[1] + 1)% npixels] += np.bincount(unique_inverse, weights=(1 - dROW) * (dCOL) * signal_values, minlength=len(unique_indices.T))
-    grid[(unique_indices[0] + 1)% npixels, (unique_indices[1] + 1)% npixels] += np.bincount(unique_inverse, weights=(dROW) * (dCOL) * signal_values, minlength=len(unique_indices.T))
+    for dr in [0, 1]:
+        for dc in [0, 1]:
+            w = (
+                (1 - drow if dr == 0 else drow) *
+                (1 - dcol if dc == 0 else dcol)
+            )
+            r_idx = irow + dr
+            c_idx = icol + dc
+
+            # Filter valid indices
+            mask = (r_idx >= 0) & (r_idx < npixels) & (c_idx >= 0) & (c_idx < npixels)
+            np.add.at(grid, (r_idx[mask], c_idx[mask]), signal_values[mask] * w[mask])
 
     return grid
-
 
 def convolve_image(img, kernel):
     """
@@ -795,65 +804,69 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     halos.y += centroid[1]
 
 
-def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion'):
-    '''
-    Reconstruct the convergence map using the flexion-based Kaiser-Squires method.
-    '''
-    x_s, y_s = sources.x, sources.y
-    shear_1, shear_2 = sources.e1, sources.e2
-    F1, F2 = sources.f1, sources.f2
-    G1, G2 = sources.g1, sources.g2
+def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoothing_sigma=10):
+    """
+    Kaiser-Squires Fourier inversion to reconstruct convergence (kappa) from lensing signal.
 
-    if signal == 'flexion':
-        S1, S2 = F1, F2
+    Parameters:
+        sources: object with attributes .x, .y, .e1, .e2, .f1, .f2, .g1, .g2 (1D arrays)
+        extent: tuple (xmin, xmax, ymin, ymax)
+        signal: one of 'shear', 'flexion', 'g_flexion'
+        smoothing_sigma: Gaussian filter width in pixels
+
+    Returns:
+        X, Y: coordinate grid
+        kappa: 2D convergence field
+    """
+    x_s, y_s = sources.x, sources.y
+
+    if signal == 'shear':
+        S1, S2 = sources.e1, sources.e2
+    elif signal == 'flexion':
+        S1, S2 = sources.f1, sources.f2
     elif signal == 'g_flexion':
-        S1, S2 = G1, G2
-    elif signal == 'shear':
-        S1, S2 = shear_1, shear_2
+        S1, S2 = sources.g1, sources.g2
     else:
-        raise ValueError('Invalid signal type. Choose from "flexion", "g_flexion", or "shear".')
+        raise ValueError("Invalid signal. Choose from 'shear', 'flexion', 'g_flexion'.")
 
     xmin, xmax, ymin, ymax = extent
-    nx, ny = int(xmax - xmin), int(ymax - ymin)
-    nx = ny = max(nx, ny)  # Ensure square grid
-    
-    x_range = np.linspace(xmin, xmax, nx)
-    y_range = np.linspace(ymin, ymax, ny)
-    # Flip x (not sure why this is needed)
-    # x_range = x_range[::-1]
-    # y_range = y_range[::-1]
-    X, Y = np.meshgrid(x_range, y_range, indexing='xy')
+    fsize = max(xmax - xmin, ymax - ymin)
+    npixels = int(fsize)
+    dx = fsize / npixels
 
-    # Properly normalized binning
-    S1_smooth = CIC_2d(fsize=1, npixels=nx, xpos=x_s, ypos=y_s, signal_values=S1)
-    S2_smooth = CIC_2d(fsize=1, npixels=ny, xpos=x_s, ypos=y_s, signal_values=S2)
-    S1_filter = gaussian_filter(S1_smooth, sigma=10)
-    S2_filter = gaussian_filter(S2_smooth, sigma=10)
+    x_s_rel = x_s - xmin
+    y_s_rel = y_s - ymin
 
-    # Ensure smoothing has not changed the normalization
-    S1_filter *= np.sum(S1) / np.sum(S1_filter)
-    S2_filter *= np.sum(S2) / np.sum(S2_filter)
+    # Bin signal components
+    S1_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S1)
+    S2_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S2)
 
-    # Apply FFT shift
-    ft_S1 = np.fft.fftshift(np.fft.fft2(S1_filter, norm='ortho'))
-    ft_S2 = np.fft.fftshift(np.fft.fft2(S2_filter, norm='ortho'))
+    # Optional smoothing
+    if smoothing_sigma > 0:
+        S1_grid = gaussian_filter(S1_grid, sigma=smoothing_sigma)
+        S2_grid = gaussian_filter(S2_grid, sigma=smoothing_sigma)
 
-    dx = (xmax - xmin) / nx
-    dy = (ymax - ymin) / ny
-    lx = np.fft.fftshift(np.fft.fftfreq(nx, d=dx))
-    ly = np.fft.fftshift(np.fft.fftfreq(ny, d=dy))
-    Lx, Ly = np.meshgrid(lx, ly)
+    # FFT
+    ft_S1 = np.fft.fft2(S1_grid, norm='ortho')
+    ft_S2 = np.fft.fft2(S2_grid, norm='ortho')
+
+    lx = np.fft.fftfreq(npixels, d=dx)
+    ly = np.fft.fftfreq(npixels, d=dx) 
+    Lx, Ly = np.meshgrid(lx, ly, indexing='xy')
     l_squared = Lx**2 + Ly**2
-    l_squared[l_squared == 0] = 1e-6  # Prevent division by zero
+    l_squared[l_squared == 0] = 1e-10  # avoid division by zero
 
-    if signal == 'flexion':
-        ft_conv = -1j * (Lx * ft_S1 + Ly * ft_S2) / l_squared
+    # Fourier-space inversion kernel
+    if signal in ['flexion', 'g_flexion']:
+        ft_kappa = -1j * (Lx * ft_S1 + Ly * ft_S2) / l_squared
     elif signal == 'shear':
-        ft_conv = ((Lx**2 - Ly**2) * ft_S1 + 2 * Lx * Ly * ft_S2) / l_squared
-    else:
-        raise NotImplementedError('Only flexion and shear supported.')
+        ft_kappa = ((Lx**2 - Ly**2) * ft_S1 + 2 * Lx * Ly * ft_S2) / l_squared
 
-    # Apply inverse FFT with shift correction
-    kappa = np.fft.ifft2(np.fft.ifftshift(ft_conv), norm='ortho').real 
-    
+    kappa = np.fft.ifft2(ft_kappa, norm='ortho').real * (2*np.pi)**2
+
+    # Output coordinates (pixel centers)
+    x = np.linspace(xmin + 0.5 * dx, xmax - 0.5 * dx, npixels)
+    y = np.linspace(ymin + 0.5 * dx, ymax - 0.5 * dx, npixels)
+    X, Y = np.meshgrid(x, y, indexing='xy')
+
     return X, Y, kappa

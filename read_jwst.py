@@ -101,6 +101,17 @@ class JWSTPipeline:
         table = Table.read(self.source_catalog_path)
         self.x_centroids = np.array(table['xcentroid'])
         self.y_centroids = np.array(table['ycentroid'])
+        self.labels = np.array(table['label'])
+
+    def read_flexion_catalog(self):
+        """
+        Reads the flexion catalog and filters out bad data.
+        """
+        # Read the flexion catalog
+        df = pd.read_pickle(self.flexion_catalog_path)
+        # Extract relevant columns
+        self.IDs = df['label'].to_numpy()
+        self.q = df['q'].to_numpy()
         self.phi = df['phi'].to_numpy()
         self.F1_fit = df['F1_fit'].to_numpy()
         self.F2_fit = df['F2_fit'].to_numpy() 
@@ -115,9 +126,11 @@ class JWSTPipeline:
         bad_rs = (rs > 10)
         bad_chi2 = self.chi2 > 1.5
         bad_a = (self.a < 0.01) | (self.a > 20) if self.cluster_name == 'EL_GORDO' else (self.a < 0.1) | (self.a > 10)
-        nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi)
-        
-        bad_indices = (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) # Combine all bad indices
+        bad_q = (self.q > 90) # This is a placeholder for bad q values
+        nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit)
+        # Remove NaN entries
+
+        bad_indices = (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) | bad_q # Combine all bad indices
         
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
@@ -160,7 +173,7 @@ class JWSTPipeline:
             sigs=dummy, sigf=dummy, sigg=dummy
         )
         
-        max_flexion = 0.5
+        max_flexion = 0.2
         if self.cluster_name == 'ABELL_2744':
             max_flexion = 0.2
         # Remove sources with flexion > max_flexion
@@ -235,6 +248,10 @@ class JWSTPipeline:
             0, img_data.shape[0] * self.CDELT
         ]
 
+        self.sources.x += self.centroid_x
+        self.sources.y += self.centroid_y
+        # Adjust source positions to match image coordinates
+
         # Load lens positions
         if self.lenses is None:
             self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
@@ -290,17 +307,16 @@ class JWSTPipeline:
         # Compare mass estimates
         # utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
-        
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
         X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion')
-        title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
+        title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_ks], title, save_title)
 
         # Do this for the shear as well
         X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear')
-        title = 'Kaiser-Squires Reconstruction of {} with JWST'.format(self.cluster_name)
+        title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
         
