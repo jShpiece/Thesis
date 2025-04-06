@@ -664,7 +664,7 @@ if __name__ == '__main__':
     true_lenses, sources, noisy = build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=False)
 
     # Run a kaiser squires reconstruction
-    X, Y, kappa = utils.perform_kaiser_squire_reconstruction(sources, [-xmax, xmax, -xmax, xmax], 'flexion')
+    X, Y, kappa = utils.perform_kaiser_squire_reconstruction(sources, [-xmax, xmax, -xmax, xmax], 'flexion', smoothing_sigma=5)
 
     X, Y, kappa_true = utils.calculate_kappa(true_lenses, [-xmax, xmax, -xmax, xmax], lens_type = 'NFW')
 

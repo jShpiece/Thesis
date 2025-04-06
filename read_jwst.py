@@ -122,15 +122,18 @@ class JWSTPipeline:
         rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
+        phi_correction = np.where(self.phi < 0, self.phi + 2*np.pi, self.phi)
+        # Apply the correction to phi
+        self.phi = phi_correction
+
         # Eliminate all entries with chi2 > 1.5, that are inappropriate sizes, or with rs > 10 - also remove NaNs
         bad_rs = (rs > 10)
         bad_chi2 = self.chi2 > 1.5
-        bad_a = (self.a < 0.01) | (self.a > 20) if self.cluster_name == 'EL_GORDO' else (self.a < 0.1) | (self.a > 10)
-        bad_q = (self.q > 90) # This is a placeholder for bad q values
+        bad_a = (self.a < 0.01) | (self.a > 20) #if self.cluster_name == 'EL_GORDO' else (self.a < 0.1) | (self.a > 10)
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit)
         # Remove NaN entries
 
-        bad_indices = (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) | bad_q # Combine all bad indices
+        bad_indices = (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) #| bad_q # Combine all bad indices
         
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
@@ -173,11 +176,11 @@ class JWSTPipeline:
             sigs=dummy, sigf=dummy, sigg=dummy
         )
         
-        max_flexion = 0.2
+        max_flexion = 0.15
         if self.cluster_name == 'ABELL_2744':
             max_flexion = 0.2
         # Remove sources with flexion > max_flexion
-        bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
+        bad_indices = self.sources.filter_sources(max_flexion=0.1)
         self.a = np.delete(self.a, bad_indices) # We also need to remove the bad indices from the a array (not part of the source object)
 
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
@@ -377,4 +380,4 @@ if __name__ == '__main__':
         # Print completion message
         '''
         print(f"Finished running pipeline for signal choice: {signal}")
-        raise SystemExit("Exiting after running for all signals. Remove this line to run for each signal separately.")
+        # raise SystemExit("Exiting after running for all signals. Remove this line to run for each signal separately.")
