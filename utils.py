@@ -213,20 +213,19 @@ def CIC_2d(fsize, npixels, xpos, ypos, signal_values):
     drow = row - irow
     dcol = col - icol
 
-    for dr in [0, 1]:
-        for dc in [0, 1]:
-            w = (
-                (1 - drow if dr == 0 else drow) *
-                (1 - dcol if dc == 0 else dcol)
-            )
-            r_idx = irow + dr
-            c_idx = icol + dc
+    index = np.vstack([irow, icol])
+    unique_indices, unique_inverse, counts = np.unique(index, axis=1, return_inverse=True, return_counts=True)
+    output = counts[np.searchsorted(unique_indices[0], index[0])]
+    signal_values /= output
 
-            # Filter valid indices
-            mask = (r_idx >= 0) & (r_idx < npixels) & (c_idx >= 0) & (c_idx < npixels)
-            np.add.at(grid, (r_idx[mask], c_idx[mask]), signal_values[mask] * w[mask])
+    # Perform accumulation using advanced indexing and broadcasting
+    grid[unique_indices[0] % npixels, unique_indices[1]% npixels] += np.bincount(unique_inverse, weights=(1 - drow) * (1 - dcol) * signal_values, minlength=len(unique_indices.T))
+    grid[(unique_indices[0] + 1)% npixels, unique_indices[1]% npixels] += np.bincount(unique_inverse, weights=(drow) * (1 - dcol) * signal_values, minlength=len(unique_indices.T))
+    grid[unique_indices[0]% npixels, (unique_indices[1] + 1)% npixels] += np.bincount(unique_inverse, weights=(1 - drow) * (dcol) * signal_values, minlength=len(unique_indices.T))
+    grid[(unique_indices[0] + 1)% npixels, (unique_indices[1] + 1)% npixels] += np.bincount(unique_inverse, weights=(drow) * (dcol) * signal_values, minlength=len(unique_indices.T))
 
     return grid
+
 
 def convolve_image(img, kernel):
     """
@@ -834,8 +833,8 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
     npixels = int(fsize)
     dx = fsize / npixels
 
-    x_s_rel = x_s - xmin
-    y_s_rel = y_s - ymin
+    x_s_rel = x_s - xmin - 0.5 * dx
+    y_s_rel = y_s - ymin - 0.5 * dx
 
     # Bin signal components
     S1_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S1)
@@ -850,11 +849,11 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
     ft_S1 = np.fft.fft2(S1_grid, norm='ortho')
     ft_S2 = np.fft.fft2(S2_grid, norm='ortho')
 
-    lx = np.fft.fftfreq(npixels, d=dx)
-    ly = np.fft.fftfreq(npixels, d=dx) 
+    lx = np.fft.fftfreq(npixels, d=dx) * 2 * np.pi
+    ly = np.fft.fftfreq(npixels, d=dx) * 2 * np.pi
     Lx, Ly = np.meshgrid(lx, ly, indexing='xy')
     l_squared = Lx**2 + Ly**2
-    l_squared[l_squared == 0] = 1e-10  # avoid division by zero
+    l_squared[0,0] = 0  # avoid division by zero
 
     # Fourier-space inversion kernel
     if signal in ['flexion', 'g_flexion']:
@@ -862,7 +861,8 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
     elif signal == 'shear':
         ft_kappa = ((Lx**2 - Ly**2) * ft_S1 + 2 * Lx * Ly * ft_S2) / l_squared
 
-    kappa = np.fft.ifft2(ft_kappa, norm='ortho').real * (2*np.pi)**2
+    ft_kappa[0, 0] = 0  # avoid division by zero
+    kappa = np.fft.ifft2(ft_kappa, norm='ortho').real 
 
     # Output coordinates (pixel centers)
     x = np.linspace(xmin + 0.5 * dx, xmax - 0.5 * dx, npixels)

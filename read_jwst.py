@@ -176,11 +176,9 @@ class JWSTPipeline:
             sigs=dummy, sigf=dummy, sigg=dummy
         )
         
-        max_flexion = 0.15
-        if self.cluster_name == 'ABELL_2744':
-            max_flexion = 0.2
+        max_flexion = 0.5
         # Remove sources with flexion > max_flexion
-        bad_indices = self.sources.filter_sources(max_flexion=0.1)
+        bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
         self.a = np.delete(self.a, bad_indices) # We also need to remove the bad indices from the a array (not part of the source object)
 
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
@@ -280,7 +278,7 @@ class JWSTPipeline:
             )
             
             # Overlay convergence contours
-            contour_levels = np.percentile(convergence[2], np.linspace(60, 100, 6))
+            contour_levels = np.linspace(0, 0.1, 10)
             contours = ax.contour(
                 convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
             )
@@ -311,14 +309,17 @@ class JWSTPipeline:
         # utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
+        avg_source_density = len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2)
+        smoothing_scale = 1 / (avg_source_density)**0.5
+
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
-        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion')
+        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_sigma=smoothing_scale)
         title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_ks], title, save_title)
 
         # Do this for the shear as well
-        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear')
+        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_sigma=smoothing_scale)
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
@@ -380,4 +381,4 @@ if __name__ == '__main__':
         # Print completion message
         '''
         print(f"Finished running pipeline for signal choice: {signal}")
-        # raise SystemExit("Exiting after running for all signals. Remove this line to run for each signal separately.")
+        raise SystemExit("Exiting after running for all signals. Remove this line to run for each signal separately.")
