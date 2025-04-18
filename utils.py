@@ -667,7 +667,6 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
 
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
-
 def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_2744'):
     """
     Compares our mass reconstruction to literature estimates for Abell 2744.
@@ -803,7 +802,7 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     halos.y += centroid[1]
 
 
-def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoothing_sigma=10):
+def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoothing_scale=10, resolution_scale=1):
     """
     Kaiser-Squires Fourier inversion to reconstruct convergence (kappa) from lensing signal.
 
@@ -817,6 +816,8 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
         X, Y: coordinate grid
         kappa: 2D convergence field
     """
+
+    
     x_s, y_s = sources.x, sources.y
 
     if signal == 'shear':
@@ -825,12 +826,15 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
         S1, S2 = sources.f1, sources.f2
     elif signal == 'g_flexion':
         S1, S2 = sources.g1, sources.g2
+        raise NotImplementedError("g_flexion not implemented yet.")
     else:
         raise ValueError("Invalid signal. Choose from 'shear', 'flexion', 'g_flexion'.")
+    
 
     xmin, xmax, ymin, ymax = extent
-    fsize = max(xmax - xmin, ymax - ymin)
-    npixels = int(fsize)
+    fsize = max(xmax - xmin, ymax - ymin) 
+    # npixels = int((len(x_s)))  # Assuming square grid
+    npixels = int(resolution_scale * fsize)  # Adjust resolution scale
     dx = fsize / npixels
 
     x_s_rel = x_s - xmin - 0.5 * dx
@@ -841,11 +845,13 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
     S2_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S2)
 
     # Optional smoothing
-    if smoothing_sigma > 0:
-        S1_grid = gaussian_filter(S1_grid, sigma=smoothing_sigma)
-        S2_grid = gaussian_filter(S2_grid, sigma=smoothing_sigma)
+    if smoothing_scale > 0:
+        S1_grid = gaussian_filter(S1_grid, sigma=smoothing_scale)
+        S2_grid = gaussian_filter(S2_grid, sigma=smoothing_scale)
 
     # FFT
+    #S1 = S1.reshape((npixels, npixels))
+    #S2 = S2.reshape((npixels, npixels))
     ft_S1 = np.fft.fft2(S1_grid, norm='ortho')
     ft_S2 = np.fft.fft2(S2_grid, norm='ortho')
 
@@ -853,20 +859,20 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
     ly = np.fft.fftfreq(npixels, d=dx) * 2 * np.pi
     Lx, Ly = np.meshgrid(lx, ly, indexing='xy')
     l_squared = Lx**2 + Ly**2
-    l_squared[0,0] = 0  # avoid division by zero
+    l_squared[0,0] = 1e-10  # avoid division by zero
 
     # Fourier-space inversion kernel
-    if signal in ['flexion', 'g_flexion']:
+    if signal in 'flexion':
         ft_kappa = -1j * (Lx * ft_S1 + Ly * ft_S2) / l_squared
     elif signal == 'shear':
         ft_kappa = ((Lx**2 - Ly**2) * ft_S1 + 2 * Lx * Ly * ft_S2) / l_squared
 
-    ft_kappa[0, 0] = 0  # avoid division by zero
-    kappa = np.fft.ifft2(ft_kappa, norm='ortho').real 
+    ft_kappa[0, 0] = 1e-10  # avoid division by zero
+    kappa = np.fft.ifft2(ft_kappa, norm='ortho').real #* npixels**2 / fsize**2
 
     # Output coordinates (pixel centers)
-    x = np.linspace(xmin + 0.5 * dx, xmax - 0.5 * dx, npixels)
-    y = np.linspace(ymin + 0.5 * dx, ymax - 0.5 * dx, npixels)
+    x = np.linspace(xmin - 0.5 * dx, xmax - 0.5 * dx, npixels)
+    y = np.linspace(ymin - 0.5 * dx, ymax - 0.5 * dx, npixels)
     X, Y = np.meshgrid(x, y, indexing='xy')
 
     return X, Y, kappa

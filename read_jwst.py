@@ -122,19 +122,17 @@ class JWSTPipeline:
         rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
-        phi_correction = np.where(self.phi < 0, self.phi + 2*np.pi, self.phi)
-        # Apply the correction to phi
-        self.phi = phi_correction
 
-        # Eliminate all entries with chi2 > 1.5, that are inappropriate sizes, or with rs > 10 - also remove NaNs
+        # Make cuts in the data based on flexion value, rs, chi2, and a
+        max_flexion = 0.5
+        bad_flexion = (np.abs(self.F1_fit) > max_flexion) | (np.abs(self.F2_fit) > max_flexion)
         bad_rs = (rs > 10)
         bad_chi2 = self.chi2 > 1.5
-        bad_a = (self.a < 0.01) | (self.a > 20) #if self.cluster_name == 'EL_GORDO' else (self.a < 0.1) | (self.a > 10)
+        bad_a = (self.a > 1000)
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit)
-        # Remove NaN entries
 
-        bad_indices = (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) #| bad_q # Combine all bad indices
-        
+        bad_indices = (bad_flexion) | (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) # Combine all bad indices
+
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
         self.phi = self.phi[~bad_indices]
@@ -158,11 +156,11 @@ class JWSTPipeline:
         e1 = shear_magnitude * np.cos(2 * self.phi)
         e2 = shear_magnitude * np.sin(2 * self.phi)
 
-        # Center coordinates
+        # Center coordinates (necessary for pipeline)
         self.centroid_x = np.mean(self.xc) # Store centroid for later use
         self.centroid_y = np.mean(self.yc)
-        self.xc -= self.centroid_x
-        self.yc -= self.centroid_y
+        #self.xc -= self.centroid_x
+        #self.yc -= self.centroid_y
 
         # Use dummy values for uncertainties to initialize Source object
         dummy = np.ones_like(e1) 
@@ -176,15 +174,10 @@ class JWSTPipeline:
             sigs=dummy, sigf=dummy, sigg=dummy
         )
         
-        max_flexion = 0.5
-        # Remove sources with flexion > max_flexion
-        bad_indices = self.sources.filter_sources(max_flexion=max_flexion)
-        self.a = np.delete(self.a, bad_indices) # We also need to remove the bad indices from the a array (not part of the source object)
-
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)])
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
-        sigf, sigg = sigaf / (self.a + 1e-10), sigag / (self.a + 1e-10)
+        sigf, sigg = sigaf / self.a, sigag / self.a
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
@@ -249,8 +242,8 @@ class JWSTPipeline:
             0, img_data.shape[0] * self.CDELT
         ]
 
-        self.sources.x += self.centroid_x
-        self.sources.y += self.centroid_y
+        #self.sources.x += self.centroid_x
+        #self.sources.y += self.centroid_y
         # Adjust source positions to match image coordinates
 
         # Load lens positions
@@ -278,7 +271,7 @@ class JWSTPipeline:
             )
             
             # Overlay convergence contours
-            contour_levels = np.linspace(0, 0.1, 10)
+            contour_levels = np.percentile(convergence[2], np.linspace(70, 99, 5))
             contours = ax.contour(
                 convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
             )
@@ -294,7 +287,7 @@ class JWSTPipeline:
             ax.set_ylabel('Dec Offset (arcsec)')
             ax.set_title(title)
             # Save and display
-            plt.legend()
+            #plt.legend()
             plt.tight_layout()
             plt.savefig(save_name, dpi=300)
 
@@ -311,19 +304,19 @@ class JWSTPipeline:
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         avg_source_density = len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2)
         smoothing_scale = 1 / (avg_source_density)**0.5
-
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
-        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_sigma=smoothing_scale)
+
+        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=1.0)
         title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_ks], title, save_title)
 
         # Do this for the shear as well
-        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_sigma=smoothing_scale)
+        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale, resolution_scale=1.0)
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
-        
+
 
     def get_image_data(self):
         """
@@ -338,9 +331,11 @@ if __name__ == '__main__':
     signals = ['all', 'shear_f', 'f_g', 'shear_g']
 
     # Create an output file to store all the results
+    '''
     output_file = Path('Output/JWST/ABELL/combined_results.csv')
     with open(output_file, 'w') as f:
         f.write("Signal\tCluster\tX\tY\tMass\n")
+    '''
 
     for signal in signals:
         abell_config = {
