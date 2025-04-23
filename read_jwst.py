@@ -89,9 +89,9 @@ class JWSTPipeline:
         self.read_source_catalog()
         self.match_sources()
         self.initialize_sources()
-        # self.run_lens_fitting()
+        self.run_lens_fitting()
         # self.save_results()
-        self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
+        # self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
         self.plot_results()
 
     def read_source_catalog(self):
@@ -122,13 +122,20 @@ class JWSTPipeline:
         rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
+        '''
+        self.a *= self.CDELT # Convert to arcseconds
+        self.F1_fit /= self.CDELT
+        self.F2_fit /= self.CDELT
+        self.G1_fit /= self.CDELT
+        self.G2_fit /= self.CDELT
+        '''
 
         # Make cuts in the data based on flexion value, rs, chi2, and a
-        max_flexion = 0.5
+        max_flexion = 0.1
         bad_flexion = (np.abs(self.F1_fit) > max_flexion) | (np.abs(self.F2_fit) > max_flexion)
         bad_rs = (rs > 10)
         bad_chi2 = self.chi2 > 1.5
-        bad_a = (self.a > 1000)
+        bad_a = (self.a < 0.01)
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit)
 
         bad_indices = (bad_flexion) | (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) # Combine all bad indices
@@ -148,7 +155,7 @@ class JWSTPipeline:
         Prepares the Source object with calculated lensing signals and uncertainties.
         """
         # Convert positions to arcseconds
-        self.xc *= self.CDELT
+        self.xc *= self.CDELT # Convert to arcseconds, invert x-axis (RA)
         self.yc *= self.CDELT
 
         # Calculate shear components
@@ -159,8 +166,8 @@ class JWSTPipeline:
         # Center coordinates (necessary for pipeline)
         self.centroid_x = np.mean(self.xc) # Store centroid for later use
         self.centroid_y = np.mean(self.yc)
-        #self.xc -= self.centroid_x
-        #self.yc -= self.centroid_y
+        self.xc -= self.centroid_x
+        self.yc -= self.centroid_y
 
         # Use dummy values for uncertainties to initialize Source object
         dummy = np.ones_like(e1) 
@@ -242,10 +249,6 @@ class JWSTPipeline:
             0, img_data.shape[0] * self.CDELT
         ]
 
-        #self.sources.x += self.centroid_x
-        #self.sources.y += self.centroid_y
-        # Adjust source positions to match image coordinates
-
         # Load lens positions
         if self.lenses is None:
             self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
@@ -287,13 +290,15 @@ class JWSTPipeline:
             ax.set_ylabel('Dec Offset (arcsec)')
             ax.set_title(title)
             # Save and display
-            #plt.legend()
+            # Only create a legend if there are labels to display
+            if len(ax.get_legend_handles_labels()[0]) > 0:
+                ax.legend()
             plt.tight_layout()
             plt.savefig(save_name, dpi=300)
 
         # Plot the cluster
         title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
-        # plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
+        plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
         
         plot_name = self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice)
         plot_title = 'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice)
@@ -302,20 +307,22 @@ class JWSTPipeline:
         # utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
-        avg_source_density = len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2)
-        smoothing_scale = 1 / (avg_source_density)**0.5
-        kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
+        # only do this for all signals (there's no point in doing it for shear_f or flexion_g)
+        if self.signal_choice == 'all':
+            avg_source_density = len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2)
+            smoothing_scale = 1 / (avg_source_density)**0.5
+            kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
 
-        X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=1.0)
-        title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
-        save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
-        plot_cluster([X,Y,kappa_ks], title, save_title)
+            X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=0.5)
+            title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
+            save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
+            plot_cluster([X,Y,kappa_ks], title, save_title)
 
-        # Do this for the shear as well
-        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale, resolution_scale=1.0)
-        title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
-        save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
-        plot_cluster([X,Y,kappa_shear], title, save_title)
+            # Do this for the shear as well
+            X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale, resolution_scale=1.0)
+            title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
+            save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
+            plot_cluster([X,Y,kappa_shear], title, save_title)
 
 
     def get_image_data(self):
@@ -329,7 +336,7 @@ class JWSTPipeline:
 if __name__ == '__main__':
     # Configuration dictionary
     signals = ['all', 'shear_f', 'f_g', 'shear_g']
-
+    # signals = ['all']
     # Create an output file to store all the results
     '''
     output_file = Path('Output/JWST/ABELL/combined_results.csv')
@@ -339,7 +346,7 @@ if __name__ == '__main__':
 
     for signal in signals:
         abell_config = {
-            'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
+            'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/og_flexion.pkl',
             'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
             'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
             'output_dir': 'Output/JWST/ABELL/',
@@ -364,7 +371,7 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        pipeline_el_gordo.run()
+        # pipeline_el_gordo.run()
         pipeline_abell.run()
         # Save results to the output file
         '''
@@ -376,4 +383,3 @@ if __name__ == '__main__':
         # Print completion message
         '''
         print(f"Finished running pipeline for signal choice: {signal}")
-        raise SystemExit("Exiting after running for all signals. Remove this line to run for each signal separately.")

@@ -868,7 +868,7 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
         ft_kappa = ((Lx**2 - Ly**2) * ft_S1 + 2 * Lx * Ly * ft_S2) / l_squared
 
     ft_kappa[0, 0] = 1e-10  # avoid division by zero
-    kappa = np.fft.ifft2(ft_kappa, norm='ortho').real #* npixels**2 / fsize**2
+    kappa = np.fft.ifft2(ft_kappa, norm='ortho').real 
 
     # Output coordinates (pixel centers)
     x = np.linspace(xmin - 0.5 * dx, xmax - 0.5 * dx, npixels)
