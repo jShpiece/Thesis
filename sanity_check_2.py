@@ -120,17 +120,20 @@ class JWSTPipeline:
         rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
-        '''
+    
         self.F1_fit /= self.CDELT
         self.F2_fit /= self.CDELT
         self.G1_fit /= self.CDELT
         self.G2_fit /= self.CDELT
         self.a *= self.CDELT
-        '''
         
-        # Make cuts in the data based on flexion value, rs, chi2, and a
-        max_flexion = 0.2
-        bad_flexion = (np.abs(self.F1_fit) > max_flexion) | (np.abs(self.F2_fit) > max_flexion)
+        
+        # Make cuts in the data based on aF, rs, chi2, and a
+        F = np.sqrt(self.F1_fit**2 + self.F2_fit**2)
+        aF = self.a * F # Dimensionless flexion
+        # Set thresholds for bad data
+        max_flexion = 0.5
+        bad_flexion = (aF > max_flexion) # Flexion should be less than 0.2
         bad_rs = (rs > 10)
         bad_chi2 = self.chi2 > 2
         bad_a = (self.a > 100) | (self.a < 0.1) # a should be between 0.1 and 20

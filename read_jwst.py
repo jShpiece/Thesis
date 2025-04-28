@@ -91,7 +91,6 @@ class JWSTPipeline:
         self.initialize_sources()
         self.run_lens_fitting()
         # self.save_results()
-        # self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
         self.plot_results()
 
     def read_source_catalog(self):
@@ -122,24 +121,27 @@ class JWSTPipeline:
         rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
-        '''
         self.a *= self.CDELT # Convert to arcseconds
         self.F1_fit /= self.CDELT
         self.F2_fit /= self.CDELT
         self.G1_fit /= self.CDELT
         self.G2_fit /= self.CDELT
-        '''
+        
+        # Make cuts in the data based on aF, rs, chi2, and a
+        F = np.sqrt(self.F1_fit**2 + self.F2_fit**2)
+        aF = self.a * F # Dimensionless flexion
 
-        # Make cuts in the data based on flexion value, rs, chi2, and a
-        max_flexion = 0.1
-        bad_flexion = (np.abs(self.F1_fit) > max_flexion) | (np.abs(self.F2_fit) > max_flexion)
+        # Set thresholds for bad data
+        max_flexion = 0.5
+        bad_flexion = (aF > max_flexion) 
         bad_rs = (rs > 10)
         bad_chi2 = self.chi2 > 1.5
-        bad_a = (self.a < 0.01)
+        bad_a = (self.a > 20) | (self.a < 0.1) # a should be between 0.1 and 20
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit)
-
-        bad_indices = (bad_flexion) | (bad_chi2) | (bad_a) | (bad_rs) | (nan_indices) # Combine all bad indices
-
+        # Combine all bad data indices
+        bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices
+        
+        # Remove bad data
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
         self.phi = self.phi[~bad_indices]
@@ -154,10 +156,6 @@ class JWSTPipeline:
         """
         Prepares the Source object with calculated lensing signals and uncertainties.
         """
-        # Convert positions to arcseconds
-        self.xc *= self.CDELT # Convert to arcseconds, invert x-axis (RA)
-        self.yc *= self.CDELT
-
         # Calculate shear components
         shear_magnitude = (self.q - 1) / (self.q + 1)
         e1 = shear_magnitude * np.cos(2 * self.phi)
@@ -216,6 +214,10 @@ class JWSTPipeline:
             for idx in matched_indices
         ])
 
+        # Convert positions to arcseconds
+        self.xc *= self.CDELT 
+        self.yc *= self.CDELT
+
     def run_lens_fitting(self):
         """
         Runs the lens fitting pipeline.
@@ -248,7 +250,7 @@ class JWSTPipeline:
             0, img_data.shape[1] * self.CDELT,
             0, img_data.shape[0] * self.CDELT
         ]
-
+        
         # Load lens positions
         if self.lenses is None:
             self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
@@ -262,7 +264,7 @@ class JWSTPipeline:
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
         )
-
+        
         # Plot settings
         def plot_cluster(convergence, title, save_name):
             fig, ax = plt.subplots(figsize=(10, 10))
@@ -299,12 +301,10 @@ class JWSTPipeline:
         # Plot the cluster
         title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
         plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
-        
-        plot_name = self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice)
-        plot_title = 'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice)
 
         # Compare mass estimates
-        # utils.compare_mass_estimates(self.lenses, plot_name, plot_title, self.cluster_name)
+        # utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
+        #       'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         # only do this for all signals (there's no point in doing it for shear_f or flexion_g)
@@ -323,7 +323,6 @@ class JWSTPipeline:
             title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
             save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
             plot_cluster([X,Y,kappa_shear], title, save_title)
-
 
     def get_image_data(self):
         """
