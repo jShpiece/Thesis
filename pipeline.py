@@ -55,12 +55,6 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
         return halo_obj.SIS_Lens(xl, yl, te, np.empty_like(sources.x))
     
     if lens_type == 'NFW':
-
-        # Calculate angle phi and magnitudes of shear and flexion
-        phi = np.arctan2(sources.f2, sources.f1)
-        gamma = np.hypot(sources.e1, sources.e2)
-        flexion = np.hypot(sources.f1, sources.f2)
-
         # Avoid division by zero in flexion
         flexion = np.where(flexion == 0, 1e-10, flexion)
 
@@ -85,12 +79,12 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
                     x=xl[i],
                     y=yl[i],
                     z=0.0,
-                    concentration=5.0,  # Or use mass-concentration relation
+                    concentration=0.0,  # Placeholder, will be calculated later
                     mass=mass,
                     redshift=z_l,
                     chi2=0.0
                 )
-                # Calculate concentration if necessary
+                # Calculate concentration
                 lens.calculate_concentration()
 
                 # Create a single-source object

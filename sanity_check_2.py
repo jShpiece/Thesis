@@ -8,10 +8,8 @@ from pathlib import Path
 import warnings
 
 # Import custom modules (ensure these are in your Python path)
-import main
 import source_obj
 import halo_obj
-import utils
 
 # Set matplotlib style
 plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
@@ -35,7 +33,6 @@ class JWSTPipeline:
         """
         self.config = config
         self.CDELT = 8.54006306703281e-6 * 3600  # degrees/pixel converted to arcsec/pixel
-        print(self.CDELT)
 
         # Paths
         self.flexion_catalog_path = Path(config['flexion_catalog_path'])
@@ -120,19 +117,17 @@ class JWSTPipeline:
         rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
-    
         self.F1_fit /= self.CDELT
         self.F2_fit /= self.CDELT
         self.G1_fit /= self.CDELT
         self.G2_fit /= self.CDELT
         self.a *= self.CDELT
         
-        
         # Make cuts in the data based on aF, rs, chi2, and a
         F = np.sqrt(self.F1_fit**2 + self.F2_fit**2)
         aF = self.a * F # Dimensionless flexion
         # Set thresholds for bad data
-        max_flexion = 0.5
+        max_flexion = 0.2
         bad_flexion = (aF > max_flexion) # Flexion should be less than 0.2
         bad_rs = (rs > 10)
         bad_chi2 = self.chi2 > 2
@@ -192,6 +187,14 @@ class JWSTPipeline:
         self.sources.sigf = sigf
         self.sources.sigg = sigg
 
+        # Create some lenses
+        xl = [80, 60, 100]
+        yl = [40, 30, 55]
+        mass = [1e14, 1e14, 1e14]
+        self.lenses = halo_obj.NFW_Lens(np.array(xl), np.array(yl), np.array(xl), np.array(mass), np.array(mass), z_cluster, np.empty(3))
+        self.sources.zero_lensing_signals() 
+        self.sources.apply_lensing(self.lenses, lens_type='NFW', z_source=z_source)
+
     def match_sources(self):
         """
         Matches flexion data with source positions based on IDs.
@@ -227,7 +230,7 @@ class JWSTPipeline:
             0, img_data.shape[0] * self.CDELT
         ]
 
-
+        print('check')
         # Plot settings
         def plot_cluster(title, save_name):
             fig, ax = plt.subplots(figsize=(10, 10))
@@ -256,8 +259,8 @@ class JWSTPipeline:
             plt.savefig(save_name, dpi=300)
             plt.close()
 
-        plot_cluster('Flexion in Abell 2744', 'Flexion_Abell_2744.png')
-
+        # plot_cluster('Flexion in Abell 2744', 'Flexion_Abell_2744.png')
+        print('made it')
         # Define a center of 2744
         center_x = 80
         center_y = 40
@@ -323,9 +326,8 @@ if __name__ == '__main__':
     # Configuration dictionary
     signals = ['all']
 
-
     abell_config = {
-        'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/og_flexion.pkl',
+        'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/F356W_flexion_wht.pkl',
         'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
         'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
         'output_dir': 'Output/JWST/ABELL/',
@@ -336,5 +338,4 @@ if __name__ == '__main__':
     }
 
     pipeline_abell = JWSTPipeline(abell_config)
-
     pipeline_abell.run()

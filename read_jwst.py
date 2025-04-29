@@ -121,26 +121,27 @@ class JWSTPipeline:
         rs = df['rs'].to_numpy() # We don't need to carry this past this function
         print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
-        self.a *= self.CDELT # Convert to arcseconds
+        # Make cuts in the data based on aF, rs, chi2, and a
+        F = np.hypot(self.F1_fit, self.F2_fit) 
+        aF = self.a * F # Dimensionless flexion
+
+        # Convert to arcseconds
+        self.a *= self.CDELT
         self.F1_fit /= self.CDELT
         self.F2_fit /= self.CDELT
         self.G1_fit /= self.CDELT
         self.G2_fit /= self.CDELT
-        
-        # Make cuts in the data based on aF, rs, chi2, and a
-        F = np.sqrt(self.F1_fit**2 + self.F2_fit**2)
-        aF = self.a * F # Dimensionless flexion
+        rs *= self.CDELT
 
         # Set thresholds for bad data
-        max_flexion = 0.5
-        bad_flexion = (aF > max_flexion) 
-        bad_rs = (rs > 10)
-        bad_chi2 = self.chi2 > 1.5
-        bad_a = (self.a > 20) | (self.a < 0.1) # a should be between 0.1 and 20
+        max_flexion = 0.1
+        bad_flexion = (aF > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
+        #bad_rs = (rs > 10)
+        #bad_chi2 = self.chi2 > 1.5
+        #bad_a = (self.a > 100) | (self.a < 0.1) 
         nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit)
-        # Combine all bad data indices
-        bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices
-        
+        bad_indices = bad_flexion | nan_indices # Combine all bad data indices
+
         # Remove bad data
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
@@ -176,7 +177,8 @@ class JWSTPipeline:
             e1=e1, e2=e2,
             f1=self.F1_fit, f2=self.F2_fit,
             g1=self.G1_fit, g2=self.G2_fit,  
-            sigs=dummy, sigf=dummy, sigg=dummy
+            sigs=dummy, sigf=dummy, sigg=dummy, 
+            pixels_per_arcsec=self.CDELT
         )
         
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
@@ -245,6 +247,7 @@ class JWSTPipeline:
         """
         Plots the convergence map overlaid on the JWST image.
         """
+        
         img_data = self.get_image_data()
         img_extent = [
             0, img_data.shape[1] * self.CDELT,
@@ -345,7 +348,7 @@ if __name__ == '__main__':
 
     for signal in signals:
         abell_config = {
-            'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/og_flexion.pkl',
+            'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
             'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
             'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
             'output_dir': 'Output/JWST/ABELL/',

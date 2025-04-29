@@ -22,7 +22,7 @@ class Source:
         sigg (np.ndarray): Standard deviations of the g-flexion components.
     """
 
-    def __init__(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
+    def __init__(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, pixels_per_arcsec=1.0):
         # Ensure all inputs are numpy arrays
         self.x = np.atleast_1d(x)
         self.y = np.atleast_1d(y)
@@ -35,6 +35,7 @@ class Source:
         self.sigs = np.atleast_1d(sigs)
         self.sigf = np.atleast_1d(sigf)
         self.sigg = np.atleast_1d(sigg)
+        self.pixels_per_arcsec = pixels_per_arcsec
 
     def copy(self):
         """
@@ -166,7 +167,7 @@ class Source:
         # Update lensing properties by adding the calculated signals
         for attr, delta in zip(
             ['e1', 'e2', 'f1', 'f2', 'g1', 'g2'],
-            [shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2]
+            [shear_1, shear_2, flex_1 / self.pixels_per_arcsec, flex_2 / self.pixels_per_arcsec, gflex_1 / self.pixels_per_arcsec, gflex_2 / self.pixels_per_arcsec]
         ):
             setattr(self, attr, getattr(self, attr) + delta)
 
