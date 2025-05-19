@@ -112,7 +112,7 @@ def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], 
     y -= centroid[1]
 
     # Create source object and perform the lensing fit
-    sources = source_obj.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg)
+    sources = source_obj.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, pixels_per_arcsec=arcsec_per_pixel)
     recovered_lenses, reducedchi2 = main.fit_lensing_field(sources, xmax=xmax, flags=flags, use_flags=use_flags, lens_type=lens_type, z_lens=z_cluster, z_source=z_source)
 
     # Move our sourecs and lenses back to the original centroid
@@ -144,7 +144,7 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         img_data = [img_data]
 
     # Define some file paths
-    dir = 'Output//abel//'
+    dir = 'Output//JWST//ABELL//abel//'
     file_name = 'A2744'
     file_name += '_par' if field == 'parallel' else '_clu'
 
