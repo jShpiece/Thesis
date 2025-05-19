@@ -38,8 +38,6 @@ def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, lege
 
     if lenses is not None:
         ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
-        for i, eR in enumerate(lenses.te):
-            ax.annotate(np.round(eR, 2), (lenses.x[i], lenses.y[i]))
     if sources is not None:
         ax.scatter(sources.x, sources.y, marker='.', color='blue', alpha=0.5, label='Sources')
 
@@ -107,7 +105,7 @@ def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], 
     # Compute noise parameters
     sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
     sigf = np.full_like(f1, np.mean([np.std(a*f1), np.std(a*f2)]) / a)
-    sigg = np.full_like(g1, np.mean([np.std(g1), np.std(g2)]))
+    sigg = np.full_like(g1, np.mean([np.std(a*g1), np.std(a*g2)]) / a)
 
     # Set the centroid to be the origin
     x -= centroid[0]
@@ -183,10 +181,9 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         print('Loaded in data')
 
     # Generate a convergence map that spans the same area as the image
-    # I'd like the kappa scale to be 1 arcsecond per pixel. This means each kappa pixel is 20 image pixels
     extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
 
-    X, Y, kappa = utils.calculate_kappa(lenses, extent, smoothing_scale=1, lens_type=lens_type)
+    X, Y, kappa = utils.calculate_kappa(lenses, extent, lens_type=lens_type, source_redshift=z_source)
     print('Calculated kappa')
     
     if lens_type=='SIS':
@@ -211,19 +208,35 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         title += '\n All Signals Used'
     
     # Create the figure 
-    '''
+    
     fig = plt.figure(figsize=(8, 10))
     ax = fig.add_subplot(111)
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
     ax.set_title(title)
     plt.savefig(dir + file_name + '.png')
-    '''
-    # Now compare the mass estimates - for now, only do this for all signals
-    plot_name = dir + file_name + '_mass.png'
-    title = 'Abell 2744 Mass Estimates - ' + 'All Signals Used' if use_flags == [True, True, True] else 'Abell 2744 Mass Estimates - ' + ' '.join(signals)
-    utils.compare_mass_estimates_a2744(lenses, plot_name, title)
-    plt.close()
-    print('Plotted and saved')
+
+    # If signal choice is all, also do a kaiser squires reconstruction
+    if use_flags == [True, True, True]:
+        X, Y, kappa_f = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'flexion')
+        X, Y, kappa_g = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'shear')
+
+        # Plot the flexion and shear maps
+        fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+        fig.suptitle('Kaiser-Squires Reconstruction with HST Data')
+        ax[0].set_title('Flexion Map')
+        ax[0].contour(X, Y, kappa_f, levels=np.percentile(kappa_f, np.linspace(70, 99, 5)), cmap='plasma', linewidths=1.5)
+        ax[1].set_title('Shear Map')
+        ax[1].contour(X, Y, kappa_g, levels=np.percentile(kappa_g, np.linspace(70, 99, 5)), cmap='plasma', linewidths=1.5)
+        
+        for img in img_data:
+            # Allow for multiple images to be overlayed - allows for band or epoch stacking
+            norm = ImageNormalize(img, vmin=0, vmax=vmax, stretch=LogStretch())
+            ax[0].imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
+            ax[1].imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
+        plt.savefig(dir + file_name + '_ks_reconstruction.png')
+        raise ValueError('Kaiser-Squires reconstruction complete')
+
+    
 
 if __name__ == '__main__':
 
@@ -235,4 +248,4 @@ if __name__ == '__main__':
         
     for field in ['cluster']:
         for use_flags in signal_choices:
-            reconstruct_a2744(field=field, full_reconstruction=False, use_flags=use_flags, lens_type='NFW')
+            reconstruct_a2744(field=field, full_reconstruction=True, use_flags=use_flags, lens_type='NFW')
