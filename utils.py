@@ -848,10 +848,8 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
     if smoothing_scale > 0:
         S1_grid = gaussian_filter(S1_grid, sigma=smoothing_scale)
         S2_grid = gaussian_filter(S2_grid, sigma=smoothing_scale)
-
+    
     # FFT
-    #S1 = S1.reshape((npixels, npixels))
-    #S2 = S2.reshape((npixels, npixels))
     ft_S1 = np.fft.fft2(S1_grid, norm='ortho')
     ft_S2 = np.fft.fft2(S2_grid, norm='ortho')
 

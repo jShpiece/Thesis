@@ -125,7 +125,7 @@ class JWSTPipeline:
         F = np.hypot(self.F1_fit, self.F2_fit) 
         aF = self.a * F # Dimensionless flexion
 
-        # Convert to arcseconds
+        # Convert to arcseconds / inverse arcseconds
         self.a *= self.CDELT
         self.F1_fit /= self.CDELT
         self.F2_fit /= self.CDELT
@@ -134,13 +134,13 @@ class JWSTPipeline:
         rs *= self.CDELT
 
         # Set thresholds for bad data
-        max_flexion = 0.1
+        max_flexion = 0.2 # Maximum flexion threshold (dimensionless)
         bad_flexion = (aF > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
-        #bad_rs = (rs > 10)
-        #bad_chi2 = self.chi2 > 1.5
-        #bad_a = (self.a > 100) | (self.a < 0.1) 
-        nan_indices = np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.a) | np.isnan(self.chi2) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit)
-        bad_indices = bad_flexion | nan_indices # Combine all bad data indices
+        bad_rs = (rs > 10) # Maximum sersic radius threshold (in arcseconds)
+        bad_chi2 = self.chi2 > 1.5 # Maximum reduced chi2 threshold - this is a goodness of fit indicator
+        bad_a = (self.a > 100) | (self.a < 0.1) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
+        nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | np.isnan(self.a) | np.isnan(self.chi2)
+        bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices
 
         # Remove bad data
         self.IDs = self.IDs[~bad_indices]
@@ -152,6 +152,45 @@ class JWSTPipeline:
         self.G2_fit = self.G2_fit[~bad_indices]
         self.a = self.a[~bad_indices]
         self.chi2 = self.chi2[~bad_indices]
+
+    def match_sources(self):
+        """
+        Matches each object in self.IDs to a position in the source catalog
+        defined by self.labels, self.x_centroids, and self.y_centroids.
+
+        Populates:
+            self.xc: array of x-centroid positions for matched IDs
+            self.yc: array of y-centroid positions for matched IDs
+
+        Notes:
+            - If an ID is not found in the source catalog, its position is set to NaN.
+        """
+        # Build a mapping from label → index
+        label_to_index = {label: idx for idx, label in enumerate(self.labels)}
+
+        # Match IDs and extract centroids
+        xc_list = []
+        yc_list = []
+
+        for ID in self.IDs:
+            idx = label_to_index.get(ID)
+            if idx is not None:
+                xc_list.append(self.x_centroids[idx])
+                yc_list.append(self.y_centroids[idx])
+            else:
+                # Necessary to assign NaN if ID not found - otherwise, xc_list and yc_list will be of different lengths
+                # This is a warning, not an error, as we want to continue processing
+                warnings.warn(f"ID '{ID}' not found in source catalog. Assigning NaN.")
+                xc_list.append(np.nan)
+                yc_list.append(np.nan)
+
+        # Assign results to attributes
+        self.xc = np.array(xc_list)
+        self.yc = np.array(yc_list)
+
+        # Convert positions to arcseconds
+        self.xc *= self.CDELT 
+        self.yc *= self.CDELT
 
     def initialize_sources(self):
         """
@@ -191,35 +230,6 @@ class JWSTPipeline:
         self.sources.sigf = sigf
         self.sources.sigg = sigg
 
-    def match_sources(self):
-        """
-        Matches flexion data with source positions based on IDs.
-        This is necessary to get the positions of the sources on the image.
-        """
-        label_to_index = {label: idx for idx, label in enumerate(self.labels)}
-        matched_indices = []
-        for ID in self.IDs:
-            idx = label_to_index.get(ID)
-            if idx is not None:
-                matched_indices.append(idx)
-            else:
-                warnings.warn(f"ID {ID} not found in source catalog.")
-                matched_indices.append(None)
-
-        # Extract matched positions
-        self.xc = np.array([
-            self.x_centroids[idx] if idx is not None else np.nan
-            for idx in matched_indices
-        ])
-        self.yc = np.array([
-            self.y_centroids[idx] if idx is not None else np.nan
-            for idx in matched_indices
-        ])
-
-        # Convert positions to arcseconds
-        self.xc *= self.CDELT 
-        self.yc *= self.CDELT
-
     def run_lens_fitting(self):
         """
         Runs the lens fitting pipeline.
@@ -236,13 +246,6 @@ class JWSTPipeline:
         self.sources.x += self.centroid_x # Move sources back to original coordinates
         self.sources.y += self.centroid_y
 
-    def save_results(self):
-        """
-        Saves the lenses and sources to files.
-        """
-        self.lenses.export_to_csv(self.output_dir / 'lenses.csv')
-        self.sources.export_to_csv(self.output_dir / 'sources.csv')
-
     def plot_results(self):
         """
         Plots the convergence map overlaid on the JWST image.
@@ -254,15 +257,6 @@ class JWSTPipeline:
             0, img_data.shape[0] * self.CDELT
         ]
         
-        # Load lens positions
-        if self.lenses is None:
-            self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], [0], [0])
-            self.lenses.import_from_csv(self.output_dir / 'lenses.csv')
-        # Load source positions
-        if self.sources is None:
-            self.sources = source_obj.Source([0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0])
-            self.sources.import_from_csv(self.output_dir / 'sources.csv')
-
         # Calculate convergence map
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
@@ -309,17 +303,17 @@ class JWSTPipeline:
         # utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
         #       'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
 
-        # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
-        # only do this for all signals (there's no point in doing it for shear_f or flexion_g)
         if self.signal_choice == 'all':
+            # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
+            # only do this for all signals (there's no point in doing it for shear_f or flexion_g)
             avg_source_density = len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2)
             smoothing_scale = 1 / (avg_source_density)**0.5
             kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
 
-            X, Y, kappa_ks = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=0.5)
+            X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=10, resolution_scale=1.0)
             title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
             save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
-            plot_cluster([X,Y,kappa_ks], title, save_title)
+            plot_cluster([X,Y,kappa_flexion], title, save_title)
 
             # Do this for the shear as well
             X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale, resolution_scale=1.0)
@@ -354,7 +348,7 @@ if __name__ == '__main__':
             'output_dir': 'Output/JWST/ABELL/',
             'cluster_name': 'ABELL_2744',
             'cluster_redshift': 0.308,
-            'source_redshift': 1,
+            'source_redshift': 0.8,
             'signal_choice': signal
         }
 
