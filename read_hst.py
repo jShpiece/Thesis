@@ -71,10 +71,8 @@ def get_file_paths(cluster='a2744', field='cluster'):
     return fits_file_path, csv_file_path, vmax, dx, dy
 
 
-def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], lens_type='NFW'):
-    # Take in a file of sources and reconstruct the lensing system
-
-    # Read in the data (csv)
+def get_catalog_data(file):
+    # Get the catalog data from the csv file
     data = np.genfromtxt(file, delimiter=',')
     # Read the header to get the column names
     with open(file, 'r') as f:
@@ -90,6 +88,15 @@ def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], 
     f1, f2 = data[1:, f1col], data[1:, f2col]
     g1, g2 = data[1:, g1col], data[1:, g2col]
 
+    return x, y, a, q, phi, f1, f2, g1, g2
+
+
+def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], lens_type='NFW'):
+    # Take in a file of sources and reconstruct the lensing system
+
+    # Get the catalog data
+    x, y, a, q, phi, f1, f2, g1, g2 = get_catalog_data(file)
+
     # Apply offsets to the x and y coordinates - this corrects for miscommunication between the pipeline and image
     x += dx 
     y += dy 
@@ -104,15 +111,16 @@ def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], 
 
     # Compute noise parameters
     sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
-    sigf = np.full_like(f1, np.mean([np.std(a*f1), np.std(a*f2)]) / a)
-    sigg = np.full_like(g1, np.mean([np.std(a*g1), np.std(a*g2)]) / a)
+    sigaf = np.mean([np.std(a * f1), np.std(a * f2)])
+    sigag = np.mean([np.std(a * g1), np.std(a * g2)])
+    sigf, sigg = sigaf / a, sigag / a
 
     # Set the centroid to be the origin
     x -= centroid[0]
     y -= centroid[1]
 
     # Create source object and perform the lensing fit
-    sources = source_obj.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, pixels_per_arcsec=arcsec_per_pixel)
+    sources = source_obj.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg)
     recovered_lenses, reducedchi2 = main.fit_lensing_field(sources, xmax=xmax, flags=flags, use_flags=use_flags, lens_type=lens_type, z_lens=z_cluster, z_source=z_source)
 
     # Move our sourecs and lenses back to the original centroid
@@ -120,6 +128,7 @@ def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], 
     sources.y += centroid[1]
     recovered_lenses.x += centroid[0]
     recovered_lenses.y += centroid[1]
+    recovered_lenses.mass *= hubble_param # Convert the mass to h^-1 solar masses
 
     return recovered_lenses, sources, xmax, reducedchi2
 
@@ -143,26 +152,19 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
     elif field == 'parallel':
         img_data = [img_data]
 
-    # Define some file paths
+    # Define output directory and file name
     dir = 'Output//JWST//ABELL//abel//'
-    file_name = 'A2744'
-    file_name += '_par' if field == 'parallel' else '_clu'
+    file_name = f"A2744{'_par' if field == 'parallel' else '_clu'}"
 
+    # Append signal flags to file name
+    signals = ['_gamma', '_F', '_G']
     if use_flags == [True, True, True]:
         file_name += '_all'
     else:
-        signals = []
-        if use_flags[0]:
-            signals.append('_gamma')
-        if use_flags[1]:
-            signals.append('_F')
-        if use_flags[2]:
-            signals.append('_G')
-        file_name += ''.join(signals)
+        file_name += ''.join(sig for flag, sig in zip(use_flags, signals) if flag)
 
     if full_reconstruction:
         lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, use_flags=use_flags, lens_type=lens_type)
-        lenses.mass *= hubble_param # Convert the mass to h^-1 solar masses
         print('Completed reconstruction')
 
         lenses.export_to_csv(dir + file_name + '_lenses.csv')
@@ -208,7 +210,6 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         title += '\n All Signals Used'
     
     # Create the figure 
-    
     fig = plt.figure(figsize=(8, 10))
     ax = fig.add_subplot(111)
     plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
@@ -217,16 +218,22 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
 
     # If signal choice is all, also do a kaiser squires reconstruction
     if use_flags == [True, True, True]:
-        X, Y, kappa_f = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'flexion')
-        X, Y, kappa_g = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'shear')
+
+        lenses = halo_obj.NFW_Lens([130], [130], [0], [10], [1e14], z_cluster, [0])
+        sources.zero_lensing_signals()
+        sources.apply_lensing(lenses, lens_type=lens_type, z_source=z_source)
+
+        X1, Y1, kappa_f = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'flexion')
+        X2, Y2, kappa_g = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'shear')
 
         # Plot the flexion and shear maps
+        plt.close('all')
         fig, ax = plt.subplots(1, 2, figsize=(12, 6))
         fig.suptitle('Kaiser-Squires Reconstruction with HST Data')
         ax[0].set_title('Flexion Map')
-        ax[0].contour(X, Y, kappa_f, levels=np.percentile(kappa_f, np.linspace(70, 99, 5)), cmap='plasma', linewidths=1.5)
+        ax[0].contour(X1, Y1, kappa_f, levels=np.percentile(kappa_f, np.linspace(70, 99, 5)), cmap='plasma', linewidths=1.5)
         ax[1].set_title('Shear Map')
-        ax[1].contour(X, Y, kappa_g, levels=np.percentile(kappa_g, np.linspace(70, 99, 5)), cmap='plasma', linewidths=1.5)
+        ax[1].contour(X2, Y2, kappa_g, levels=np.percentile(kappa_g, np.linspace(70, 99, 5)), cmap='plasma', linewidths=1.5)
         
         for img in img_data:
             # Allow for multiple images to be overlayed - allows for band or epoch stacking
@@ -234,18 +241,16 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
             ax[0].imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
             ax[1].imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
         plt.savefig(dir + file_name + '_ks_reconstruction.png')
+        plt.show()
         raise ValueError('Kaiser-Squires reconstruction complete')
 
-    
-
 if __name__ == '__main__':
-
     use_all_signals = [True, True, True] # Use all signals
     shear_flex = [True, True, False] # Use shear and flexion
     all_flex = [False, True, True] # Use flexion and g-flexion
     global_signals = [True, False, True] # Use shear and g-flexion (global signals)
     signal_choices = [use_all_signals, shear_flex, all_flex, global_signals]
-        
+    
     for field in ['cluster']:
         for use_flags in signal_choices:
-            reconstruct_a2744(field=field, full_reconstruction=True, use_flags=use_flags, lens_type='NFW')
+            reconstruct_a2744(field=field, full_reconstruction=False, use_flags=use_flags, lens_type='NFW')

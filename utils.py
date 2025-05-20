@@ -811,6 +811,7 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
         extent: tuple (xmin, xmax, ymin, ymax)
         signal: one of 'shear', 'flexion', 'g_flexion'
         smoothing_sigma: Gaussian filter width in pixels
+        resolution_scale: scale factor for grid resolution
 
     Returns:
         X, Y: coordinate grid
@@ -830,10 +831,8 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
     else:
         raise ValueError("Invalid signal. Choose from 'shear', 'flexion', 'g_flexion'.")
     
-
     xmin, xmax, ymin, ymax = extent
     fsize = max(xmax - xmin, ymax - ymin) 
-    # npixels = int((len(x_s)))  # Assuming square grid
     npixels = int(resolution_scale * fsize)  # Adjust resolution scale
     dx = fsize / npixels
 
@@ -843,6 +842,12 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
     # Bin signal components
     S1_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S1)
     S2_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S2)
+
+    # Handle edges
+    S1_grid = np.pad(S1_grid, ((0, 1), (0, 1)), mode='wrap')
+    S2_grid = np.pad(S2_grid, ((0, 1), (0, 1)), mode='wrap')
+    # Update npixels to account for padding
+    npixels += 1
 
     # Optional smoothing
     if smoothing_scale > 0:
@@ -864,9 +869,15 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoo
         ft_kappa = -1j * (Lx * ft_S1 + Ly * ft_S2) / l_squared
     elif signal == 'shear':
         ft_kappa = ((Lx**2 - Ly**2) * ft_S1 + 2 * Lx * Ly * ft_S2) / l_squared
+    else:
+        raise ValueError("Invalid signal. Choose from 'shear', 'flexion'.")
 
     ft_kappa[0, 0] = 1e-10  # avoid division by zero
     kappa = np.fft.ifft2(ft_kappa, norm='ortho').real 
+
+    # Rescale kappa to the original grid size
+    npixels -= 1  # Adjust npixels back to original size
+    kappa = kappa[:npixels, :npixels]  # Remove padding
 
     # Output coordinates (pixel centers)
     x = np.linspace(xmin - 0.5 * dx, xmax - 0.5 * dx, npixels)
