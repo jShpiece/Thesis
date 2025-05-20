@@ -216,7 +216,7 @@ def CIC_2d(fsize, npixels, xpos, ypos, signal_values):
     index = np.vstack([irow, icol])
     unique_indices, unique_inverse, counts = np.unique(index, axis=1, return_inverse=True, return_counts=True)
     output = counts[np.searchsorted(unique_indices[0], index[0])]
-    signal_values /= output
+    # signal_values /= output
 
     # Perform accumulation using advanced indexing and broadcasting
     grid[unique_indices[0] % npixels, unique_indices[1]% npixels] += np.bincount(unique_inverse, weights=(1 - drow) * (1 - dcol) * signal_values, minlength=len(unique_indices.T))
@@ -666,6 +666,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     g_flexion_2 = np.sum(g_flexion_mag * sin3phi, axis=0)
 
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
+
 
 def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_2744'):
     """

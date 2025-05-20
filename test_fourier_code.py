@@ -93,10 +93,10 @@ if __name__ == '__main__':
         xmax = 120  # size of the grid
 
         # create a grid
-        resolution = 1
         x = np.linspace(-xmax, xmax, 2*xmax) 
         y = np.linspace(-xmax, xmax, 2*xmax) 
         X, Y = np.meshgrid(x, y)
+        phi = np.arctan2(Y, X)
 
         # Create a softened isothermal sphere 
         # Place at the origin
@@ -108,8 +108,8 @@ if __name__ == '__main__':
         R = np.sqrt((X - x_offset)**2 + (Y - y_offset)**2)
         x = R / r_einstein
         kappa = (x**2 + r_core**2) / (2 * x**2 + r_core**2) ** (3/2)
-        gamma1 = - (x**2 / (2 * (x**2 + r_core**2) ** (3/2))) * np.cos(2 * np.arctan2(Y, X))
-        gamma2 = - (x**2 / (2 * (x**2 + r_core**2) ** (3/2))) * np.sin(2 * np.arctan2(Y, X))
+        gamma1 = - (x**2 / (2 * (x**2 + r_core**2) ** (3/2))) * np.cos(2 * phi)
+        gamma2 = - (x**2 / (2 * (x**2 + r_core**2) ** (3/2))) * np.sin(2 * phi)
 
         # From the convergence, determine the flexion
         flexion1, flexion2 = flexion_from_kappa(kappa)
@@ -117,8 +117,8 @@ if __name__ == '__main__':
         # Turn into source objects
         sources = source_obj.Source(X.flatten(), Y.flatten(), gamma1.flatten(), gamma2.flatten(), flexion1.flatten(), flexion2.flatten(), 
                                         np.zeros(X.flatten().shape), np.zeros(X.flatten().shape), np.zeros(X.flatten().shape), np.zeros(X.flatten().shape), np.zeros(X.flatten().shape))
-        X1,Y1,kappa_f = utils.perform_kaiser_squire_reconstruction(sources, [-xmax, xmax, -xmax, xmax], 'flexion', smoothing_scale = 0, resolution_scale=1/resolution)
-        X2,Y2,kappa_s = utils.perform_kaiser_squire_reconstruction(sources, [-xmax, xmax, -xmax, xmax], 'shear', smoothing_scale = 0, resolution_scale=1/resolution)
+        X1,Y1,kappa_f = utils.perform_kaiser_squire_reconstruction(sources, [-xmax, xmax, -xmax, xmax], 'flexion', smoothing_scale = 10)
+        X2,Y2,kappa_s = utils.perform_kaiser_squire_reconstruction(sources, [-xmax, xmax, -xmax, xmax], 'shear', smoothing_scale = 10)
 
         # Determine common color limits across all relevant arrays
         vmin = min(np.min(kappa_f), np.min(kappa), np.min(kappa_f - kappa),
