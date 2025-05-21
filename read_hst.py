@@ -225,23 +225,6 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
         sources.apply_noise()
         '''
 
-        # Remove all sources more than 30 arcsec from the center
-        x_c, y_c = 130, 130
-        r = np.sqrt((sources.x - x_c)**2 + (sources.y - y_c)**2)
-        max_r = 30
-        sources.x = sources.x[r < max_r]
-        print(len(sources.x))
-        sources.y = sources.y[r < max_r]
-        sources.f1 = sources.f1[r < max_r]
-        sources.f2 = sources.f2[r < max_r]
-        sources.g1 = sources.g1[r < max_r]
-        sources.g2 = sources.g2[r < max_r]
-        sources.sigf = sources.sigf[r < max_r]
-        sources.sigs = sources.sigs[r < max_r]
-        sources.sigg = sources.sigg[r < max_r]
-        sources.e1 = sources.e1[r < max_r]
-        sources.e2 = sources.e2[r < max_r]
-
         X1, Y1, kappa_f = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'flexion')
         X2, Y2, kappa_g = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'shear')
 
