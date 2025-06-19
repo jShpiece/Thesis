@@ -89,7 +89,7 @@ class JWSTPipeline:
         self.read_source_catalog()
         self.match_sources()
         self.initialize_sources()
-        self.run_lens_fitting()
+        # self.run_lens_fitting()
         # self.save_results()
         self.plot_results()
 
@@ -204,8 +204,8 @@ class JWSTPipeline:
         # Center coordinates (necessary for pipeline)
         self.centroid_x = np.mean(self.xc) # Store centroid for later use
         self.centroid_y = np.mean(self.yc)
-        self.xc -= self.centroid_x
-        self.yc -= self.centroid_y
+        #self.xc -= self.centroid_x
+        #self.yc -= self.centroid_y
 
         # Use dummy values for uncertainties to initialize Source object
         dummy = np.ones_like(e1) 
@@ -221,7 +221,7 @@ class JWSTPipeline:
         )
         
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
-        sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)])
+        sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
         sigf, sigg = sigaf / self.a, sigag / self.a
 
@@ -258,9 +258,11 @@ class JWSTPipeline:
         ]
         
         # Calculate convergence map
+        '''
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
         )
+        '''
         
         # Plot settings
         def plot_cluster(convergence, title, save_name):
@@ -296,8 +298,8 @@ class JWSTPipeline:
             plt.savefig(save_name, dpi=300)
 
         # Plot the cluster
-        title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
-        plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
+        # title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
+        # plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
 
         # Compare mass estimates
         # utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
@@ -309,6 +311,22 @@ class JWSTPipeline:
             avg_source_density = len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2)
             smoothing_scale = 1 / (avg_source_density)**0.5
             kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
+
+            '''
+            # Override the sources with a custom set of lenses, to see if the reconstruction works with known mass
+            xl = [60,80,100]
+            yl = [30,40,50]
+            ml = [1e13, 1e14, 1e13] # Masses in M_sun h^-1
+            self.lenses = halo_obj.NFW_Lens(
+                x=np.array(xl), y=np.array(yl), z=np.zeros(len(xl)),
+                concentration=np.ones(len(xl)), mass=np.array(ml),
+                redshift=z_cluster, chi2=np.zeros(len(xl))
+            )
+            self.lenses.calculate_concentration()
+            self.sources.zero_lensing_signals()  # Reset lensing signals to zero for reconstruction
+            self.sources.apply_noise()  # Apply noise to the sources
+            self.sources.apply_lensing(self.lenses, lens_type='NFW', z_source=z_source)
+            '''
 
             X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=10, resolution_scale=1.0)
             title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
