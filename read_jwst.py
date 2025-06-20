@@ -88,10 +88,11 @@ class JWSTPipeline:
         self.read_flexion_catalog()
         self.read_source_catalog()
         self.match_sources()
-        self.initialize_sources()
+        self.find_outliers()
+        # self.initialize_sources()
         # self.run_lens_fitting()
         # self.save_results()
-        self.plot_results()
+        # self.plot_results()
 
     def read_source_catalog(self):
         """
@@ -134,7 +135,7 @@ class JWSTPipeline:
         rs *= self.CDELT
 
         # Set thresholds for bad data
-        max_flexion = 0.2 # Maximum flexion threshold (dimensionless)
+        max_flexion = 1.0 # Maximum flexion threshold (dimensionless)
         bad_flexion = (aF > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
         bad_rs = (rs > 10) # Maximum sersic radius threshold (in arcseconds)
         bad_chi2 = self.chi2 > 1.5 # Maximum reduced chi2 threshold - this is a goodness of fit indicator
@@ -224,6 +225,8 @@ class JWSTPipeline:
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
         sigf, sigg = sigaf / self.a, sigag / self.a
+        #print(f"Using uncertainties: sigs = {np.mean(sigs)}, sigf = {np.mean(sigf)}, sigg = {np.mean(sigg)}")
+        #print(f"Sigaf = {sigaf}, Sigag = {sigag}")
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
@@ -266,7 +269,9 @@ class JWSTPipeline:
         
         # Plot settings
         def plot_cluster(convergence, title, save_name):
+            
             fig, ax = plt.subplots(figsize=(10, 10))
+            
             norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
 
             # Display image
@@ -281,7 +286,7 @@ class JWSTPipeline:
             )
             # Add colorbar for contours
             ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
-            cbar = plt.colorbar(contours, ax=ax)
+            # cbar = plt.colorbar(contours, ax=ax)
 
             # Plot lens positions
             # ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
@@ -294,6 +299,7 @@ class JWSTPipeline:
             # Only create a legend if there are labels to display
             if len(ax.get_legend_handles_labels()[0]) > 0:
                 ax.legend()
+            
             plt.tight_layout()
             plt.savefig(save_name, dpi=300)
 
@@ -314,9 +320,10 @@ class JWSTPipeline:
 
             '''
             # Override the sources with a custom set of lenses, to see if the reconstruction works with known mass
+            # Do this for a range of noise choices
             xl = [60,80,100]
             yl = [30,40,50]
-            ml = [1e13, 1e14, 1e13] # Masses in M_sun h^-1
+            ml = [1e14, 1e15, 1e14] # Masses in M_sun h^-1
             self.lenses = halo_obj.NFW_Lens(
                 x=np.array(xl), y=np.array(yl), z=np.zeros(len(xl)),
                 concentration=np.ones(len(xl)), mass=np.array(ml),
@@ -324,10 +331,10 @@ class JWSTPipeline:
             )
             self.lenses.calculate_concentration()
             self.sources.zero_lensing_signals()  # Reset lensing signals to zero for reconstruction
+
             self.sources.apply_noise()  # Apply noise to the sources
             self.sources.apply_lensing(self.lenses, lens_type='NFW', z_source=z_source)
             '''
-
             X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=10, resolution_scale=1.0)
             title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
             save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
@@ -347,10 +354,39 @@ class JWSTPipeline:
             img_data = hdul['SCI'].data
         return img_data
 
+    def find_outliers(self):
+        """
+        Identifies bad sources based on flexion and shear signals.
+        This method attempts to identify outliers that will not contribute to the lensing analysis, or that may skew the results.
+        """
+        F = np.hypot(self.F1_fit, self.F2_fit)
+        aF = self.a * F
+
+        # ...lets try evaluating an approximate signal to noise ratio
+        sigma_af = np.std(aF)  # Standard deviation of flexion
+        SNR = aF / sigma_af  # Signal to noise ratio
+        # Define a center for the cluster
+        cluster_center = [80, 40]  # Approx center for Abell 2744
+        # Calculate distance from cluster center
+        distances = np.hypot(self.xc - cluster_center[0], self.yc - cluster_center[1])
+
+        # Plot SNR vs distance
+        plt.figure(figsize=(10, 6))
+        plt.scatter(distances, SNR, alpha=0.5)
+        plt.xlabel('Distance from Cluster Center (arcsec)')
+        plt.ylabel('Signal to Noise Ratio (SNR)')
+        plt.title('SNR vs Distance from Cluster Center')
+        # plt.xscale('log')
+        plt.yscale('log')
+        plt.grid(True)
+        plt.savefig(self.output_dir / 'snr_vs_distance.png', dpi=300)
+        plt.close()
+
+
 if __name__ == '__main__':
     # Configuration dictionary
-    signals = ['all', 'shear_f', 'f_g', 'shear_g']
-    # signals = ['all']
+    # signals = ['all', 'shear_f', 'f_g', 'shear_g']
+    signals = ['all']
     # Create an output file to store all the results
     '''
     output_file = Path('Output/JWST/ABELL/combined_results.csv')
