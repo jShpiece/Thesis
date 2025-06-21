@@ -88,11 +88,11 @@ class JWSTPipeline:
         self.read_flexion_catalog()
         self.read_source_catalog()
         self.match_sources()
-        self.find_outliers()
-        # self.initialize_sources()
-        # self.run_lens_fitting()
+        # self.find_outliers()
+        self.initialize_sources()
+        self.run_lens_fitting()
         # self.save_results()
-        # self.plot_results()
+        self.plot_results()
 
     def read_source_catalog(self):
         """
@@ -141,7 +141,8 @@ class JWSTPipeline:
         bad_chi2 = self.chi2 > 1.5 # Maximum reduced chi2 threshold - this is a goodness of fit indicator
         bad_a = (self.a > 100) | (self.a < 0.1) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
         nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | np.isnan(self.a) | np.isnan(self.chi2)
-        bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices
+        # bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices
+        bad_indices = nan_indices | bad_flexion | bad_chi2
 
         # Remove bad data
         self.IDs = self.IDs[~bad_indices]
@@ -205,8 +206,8 @@ class JWSTPipeline:
         # Center coordinates (necessary for pipeline)
         self.centroid_x = np.mean(self.xc) # Store centroid for later use
         self.centroid_y = np.mean(self.yc)
-        #self.xc -= self.centroid_x
-        #self.yc -= self.centroid_y
+        self.xc -= self.centroid_x
+        self.yc -= self.centroid_y
 
         # Use dummy values for uncertainties to initialize Source object
         dummy = np.ones_like(e1) 
@@ -261,11 +262,11 @@ class JWSTPipeline:
         ]
         
         # Calculate convergence map
-        '''
+        
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
         )
-        '''
+        
         
         # Plot settings
         def plot_cluster(convergence, title, save_name):
@@ -304,12 +305,12 @@ class JWSTPipeline:
             plt.savefig(save_name, dpi=300)
 
         # Plot the cluster
-        # title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
-        # plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
+        title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
+        plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
 
         # Compare mass estimates
-        # utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
-        #       'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
+        utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
+               'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
 
         if self.signal_choice == 'all':
             # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
@@ -370,12 +371,24 @@ class JWSTPipeline:
         # Calculate distance from cluster center
         distances = np.hypot(self.xc - cluster_center[0], self.yc - cluster_center[1])
 
+        # Now let's do a little bit of filtering
+        bad_chi2 = self.chi2 > 1.5  # Bad chi2 values
+        bad_flexion = (aF > 1.0)  # Bad flexion values
+        bad_a = (self.a > 100) | (self.a < 0.1)  # Bad scale values
+        # Color the bad sources
+        bad_sources = bad_chi2 | bad_flexion | bad_a 
+
+        # Create a mask for good sources
+        good_sources = ~bad_sources
+
         # Plot SNR vs distance
         plt.figure(figsize=(10, 6))
-        plt.scatter(distances, SNR, alpha=0.5)
+        plt.scatter(distances[good_sources], SNR[good_sources], color='blue', label='Good Sources', alpha=0.5, s=10)
+        plt.scatter(distances[bad_sources], SNR[bad_sources], color='red', label='Bad Sources', alpha=0.5, s=10)
         plt.xlabel('Distance from Cluster Center (arcsec)')
         plt.ylabel('Signal to Noise Ratio (SNR)')
         plt.title('SNR vs Distance from Cluster Center')
+        plt.legend()
         # plt.xscale('log')
         plt.yscale('log')
         plt.grid(True)
@@ -385,8 +398,7 @@ class JWSTPipeline:
 
 if __name__ == '__main__':
     # Configuration dictionary
-    # signals = ['all', 'shear_f', 'f_g', 'shear_g']
-    signals = ['all']
+    signals = ['all', 'shear_f', 'f_g', 'shear_g']
     # Create an output file to store all the results
     '''
     output_file = Path('Output/JWST/ABELL/combined_results.csv')
