@@ -284,3 +284,17 @@ class NFW_Lens:
         """
         mass_corrected = self.mass + 1e-10 # Avoid division by zero
         self.concentration = (5.71 * (mass_corrected / 2e12) ** (-0.084) * (1 + self.redshift) ** (-0.47))
+
+    def check_for_nan_properties(self):
+        """
+        Checks for NaN values in the halo properties.
+
+        Returns:
+            bool: True if any property contains NaN values, False otherwise.
+            Let's also check for inf values while we're at it.
+        """
+        return (np.isnan(self.x).any() or np.isnan(self.y).any() or np.isnan(self.z).any() or
+                np.isnan(self.concentration).any() or np.isnan(self.mass).any() or
+                np.isnan(self.chi2).any() or np.isinf(self.x).any() or np.isinf(self.y).any() or
+                np.isinf(self.z).any() or np.isinf(self.concentration).any() or
+                np.isinf(self.mass).any() or np.isinf(self.chi2).any())

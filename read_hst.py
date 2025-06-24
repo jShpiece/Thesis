@@ -159,9 +159,11 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
     # Append signal flags to file name
     signals = ['_gamma', '_F', '_G']
     if use_flags == [True, True, True]:
-        file_name += '_all'
+        signals_used = '_all'
+        file_name += signals_used
     else:
-        file_name += ''.join(sig for flag, sig in zip(use_flags, signals) if flag)
+        signals_used = ''.join(sig for flag, sig in zip(use_flags, signals) if flag)
+        file_name += signals_used
 
     if full_reconstruction:
         lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, use_flags=use_flags, lens_type=lens_type)
@@ -216,6 +218,11 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
     ax.set_title(title)
     plt.savefig(dir + file_name + '.png')
 
+    if lens_type == 'NFW':
+        utils.compare_mass_estimates(lenses, dir + 'mass_A2744_' + signals_used + '.png',
+                                     'Mass Comparison of Abell 2744 with HST Data \n Signals Used: ' + ' '.join(signals),
+                                     'ABELL_2744')
+
     # If signal choice is all, also do a kaiser squires reconstruction
     if use_flags == [True, True, True]:
         '''
@@ -243,8 +250,7 @@ def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[Tru
             ax[0].imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
             ax[1].imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
         plt.savefig(dir + file_name + '_ks_reconstruction.png')
-        plt.show()
-        raise ValueError('Kaiser-Squires reconstruction complete')
+        plt.close()
 
 if __name__ == '__main__':
     use_all_signals = [True, True, True] # Use all signals

@@ -139,10 +139,9 @@ class JWSTPipeline:
         bad_flexion = (aF > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
         bad_rs = (rs > 10) # Maximum sersic radius threshold (in arcseconds)
         bad_chi2 = self.chi2 > 1.5 # Maximum reduced chi2 threshold - this is a goodness of fit indicator
-        bad_a = (self.a > 100) | (self.a < 0.1) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
+        bad_a = (self.a > 100) | (self.a < 0.175) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
         nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | np.isnan(self.a) | np.isnan(self.chi2)
-        # bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices
-        bad_indices = nan_indices | bad_flexion | bad_chi2
+        bad_indices = bad_flexion | bad_chi2 | bad_a | nan_indices | bad_rs
 
         # Remove bad data
         self.IDs = self.IDs[~bad_indices]
@@ -221,18 +220,26 @@ class JWSTPipeline:
             sigs=dummy, sigf=dummy, sigg=dummy, 
             arcsec_per_pixel=self.CDELT
         )
-        
+
+        if signal == 'all':
+            plt.figure()
+            plt.hist(self.a, bins=50, alpha=0.7, color='blue', edgecolor='black')
+            plt.xlabel('a (arcsec)')
+            plt.title('JWST Data')
+            plt.savefig(self.output_dir / 'a_distribution_{}.png'.format(self.cluster_name), dpi=300)
+            
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
         sigf, sigg = sigaf / self.a, sigag / self.a
-        #print(f"Using uncertainties: sigs = {np.mean(sigs)}, sigf = {np.mean(sigf)}, sigg = {np.mean(sigg)}")
-        #print(f"Sigaf = {sigaf}, Sigag = {sigag}")
+        print(f"Using uncertainties: sigs = {np.mean(sigs)}, sigf = {np.mean(sigf)}, sigg = {np.mean(sigg)}")
+        print(f"Sigaf = {sigaf}, Sigag = {sigag}")
+        # raise ValueError('Uncertainties not properly initialized')
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
         self.sources.sigf = sigf
-        self.sources.sigg = sigg
+        self.sources.sigg = sigf
 
     def run_lens_fitting(self):
         """
@@ -243,8 +250,12 @@ class JWSTPipeline:
         self.lenses, _ = main.fit_lensing_field(
             self.sources, xmax, flags=True, use_flags=self.use_flags, lens_type='NFW', z_lens=z_cluster, z_source=z_source
         )
-        
-        self.lenses.x += self.centroid_x    # Adjust lens positions back to original coordinates
+
+        check = self.lenses.check_for_nan_properties() # Ensure no NaN properties in lenses
+        if check:
+            print("Warning: Some lens properties are NaN or Inf. Check the lens fitting process.")
+
+        self.lenses.x += self.centroid_x # Adjust lens positions back to original coordinates
         self.lenses.y += self.centroid_y
         self.lenses.mass *= hubble_param # Convert mass to M_sun h^-1
         self.sources.x += self.centroid_x # Move sources back to original coordinates
@@ -310,7 +321,7 @@ class JWSTPipeline:
 
         # Compare mass estimates
         utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
-               'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
+                                     'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
 
         if self.signal_choice == 'all':
             # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion

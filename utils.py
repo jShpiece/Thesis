@@ -702,7 +702,7 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     # Take the minimum mass estimate and the maximum
     r_min = min([r for _, r in mass_estimates.values()])
     r_max = max([r for _, r in mass_estimates.values()])
-    r = np.linspace(r_min * 0, 1.25*r_max, 100)
+    r = np.linspace(r_min * 0.75, 1.25*r_max, 100)
     
     # Move the halos to be centered on the primary halo
     
@@ -710,8 +710,8 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     # Calculate the centroid as the center of mass of the halos
     centroid = np.array([np.sum(halos.x * halos.mass) / np.sum(halos.mass), np.sum(halos.y * halos.mass) / np.sum(halos.mass)])
     # centroid = [100,40] # hardcoding the centroid for now - this is where we expect the center of mass for el gordo
-    halos.x -= centroid[0]
-    halos.y -= centroid[1]
+    halos.x -= centroid[0] + 0.5
+    halos.y -= centroid[1] + 0.5
 
     # 2D grid setup (in kpc)
     x_range, y_range = (-r[-1], r[-1]), (-r[-1], r[-1])
@@ -737,6 +737,9 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
             y_center=halo.y,
             z_source=z_source
         )
+        if np.any(np.isinf(kappa)):
+            print(f'Warning: NaN values found in kappa for halo at ({halo.x}, {halo.y}) with mass {halo.mass}. Skipping this halo.')
+            continue
         kappa_total += kappa
     
     # Now find a way to break the mass sheet degeneracy
@@ -745,16 +748,6 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
         # k value taken from literature
         kappa_total = mass_sheet_transformation(kappa_total, k=2)
     elif cluster_name == 'EL_GORDO':
-        # Perform a transformation such that the convergence goes to zero at large radii
-        '''
-        top = kappa[0, :]
-        bottom = kappa[-1, :]
-        left = kappa[1:-1, 0]
-        right = kappa[1:-1, -1]
-        boundary_value = np.mean(np.concatenate([top, bottom, left, right]))
-        k = 1 / (1 - boundary_value)
-        print(k)
-        '''
         kappa_total = mass_sheet_transformation(kappa_total, k=2)
 
     # Then convert back to a 2D mass distribution
