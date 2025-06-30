@@ -135,11 +135,11 @@ class JWSTPipeline:
         rs *= self.CDELT
 
         # Set thresholds for bad data
-        max_flexion = 1.0 # Maximum flexion threshold (dimensionless)
+        max_flexion = 0.4 # Maximum flexion threshold (dimensionless)
         bad_flexion = (aF > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
         bad_rs = (rs > 10) # Maximum sersic radius threshold (in arcseconds)
         bad_chi2 = self.chi2 > 1.5 # Maximum reduced chi2 threshold - this is a goodness of fit indicator
-        bad_a = (self.a > 100) | (self.a < 0.175) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
+        bad_a = (self.a > 100) | (self.a < 0.1) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
         nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | np.isnan(self.a) | np.isnan(self.chi2)
         bad_indices = bad_flexion | bad_chi2 | bad_a | nan_indices | bad_rs
 
@@ -223,23 +223,23 @@ class JWSTPipeline:
 
         if signal == 'all':
             plt.figure()
-            plt.hist(self.a, bins=50, alpha=0.7, color='blue', edgecolor='black')
-            plt.xlabel('a (arcsec)')
+            plt.hist(self.a * np.sqrt(self.F1_fit**2 + self.F2_fit**2), bins=50, alpha=0.7, color='blue', edgecolor='black')
+            plt.xlabel('aF (dimensionless)')
             plt.title('JWST Data')
-            plt.savefig(self.output_dir / 'a_distribution_{}.png'.format(self.cluster_name), dpi=300)
+            plt.savefig(self.output_dir / 'aF_distribution_{}.png'.format(self.cluster_name), dpi=300)
             
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
         sigf, sigg = sigaf / self.a, sigag / self.a
-        print(f"Using uncertainties: sigs = {np.mean(sigs)}, sigf = {np.mean(sigf)}, sigg = {np.mean(sigg)}")
+        print(f"Using uncertainties: sigs = {np.mean(sigs)}, sigf = {np.median(sigf)}, sigg = {np.median(sigg)}")
         print(f"Sigaf = {sigaf}, Sigag = {sigag}")
         # raise ValueError('Uncertainties not properly initialized')
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
         self.sources.sigf = sigf
-        self.sources.sigg = sigf
+        self.sources.sigg = sigg
 
     def run_lens_fitting(self):
         """

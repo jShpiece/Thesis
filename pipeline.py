@@ -285,6 +285,10 @@ def filter_lens_positions(sources, lenses, xmax, threshold_distance=0.5, lens_ty
         lenses.chi2 = lenses.chi2[valid_indices]
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
+    
+    # Check if any lenses remain after filtering - if not, raise an error
+    if len(lenses.x) == 0:
+        raise ValueError('No valid lenses remain after filtering.')
 
     return lenses
 
