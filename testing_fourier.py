@@ -6,6 +6,8 @@ from astropy.table import Table
 from astropy.visualization import ImageNormalize, LogStretch
 from pathlib import Path
 import warnings
+from astropy.visualization import hist as fancy_hist
+
 
 # Import custom modules (ensure these are in your Python path)
 import main
@@ -89,7 +91,7 @@ class JWSTPipeline:
         self.read_source_catalog()
         self.cut_flexion_catalog()
         self.match_sources()
-        # self.find_outliers()
+        self.find_outliers()
         self.initialize_sources()
         self.plot_results()
 
@@ -135,11 +137,11 @@ class JWSTPipeline:
         aF = self.a * F # Dimensionless flexion
 
         # Set thresholds for bad data
-        max_flexion = 1.0 # Maximum flexion threshold (dimensionless)
-        bad_flexion = (aF > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
+        max_flexion = 1.5 # Maximum flexion threshold (dimensionless)
+        bad_flexion = (np.abs(F) > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
         bad_rs = (self.rs > 10) # Maximum sersic radius threshold (in arcseconds)
         bad_chi2 = self.chi2 > 1.5 # Maximum reduced chi2 threshold - this is a goodness of fit indicator
-        bad_a = (self.a > 100) | (self.a < 0.1) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
+        bad_a = (self.a > 1) | (self.a < 0.01) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
         nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | np.isnan(self.a) | np.isnan(self.chi2)
         bad_indices = bad_flexion | bad_chi2 | bad_a | nan_indices | bad_rs
 
@@ -300,6 +302,7 @@ class JWSTPipeline:
         '''
         
         # SIS version
+        # '''
         xl = [80]
         yl = [40]
         eR = [23]
@@ -315,6 +318,14 @@ class JWSTPipeline:
         aF_simulated = []
         sigma_aF_real = []
         sigma_aF_simulated = []
+        gamma_1_real = []
+        gamma_2_real = []
+        gamma_1_simulated = []
+        gamma_2_simulated = []
+        sigma_gamma_1_real = []
+        sigma_gamma_2_real = []
+        sigma_gamma_1_simulated = []
+        sigma_gamma_2_simulated = []
         r_edges = np.linspace(0, 120, 50)  # Annuli edges in arcseconds
         r_centers = 0.5 * (r_edges[:-1] + r_edges[1:])  # Midpoints of annuli
 
@@ -327,11 +338,16 @@ class JWSTPipeline:
             annulus_mask = (radii >= r_min) & (radii < r_max)
             aF_real.append(np.mean(aF_real_vals[annulus_mask]))
             sigma_aF_real.append(np.std(aF_real_vals[annulus_mask]))
+            gamma_1_real.append(np.mean(self.sources.g1[annulus_mask]))
+            gamma_2_real.append(np.mean(self.sources.g2[annulus_mask]))
+            sigma_gamma_1_real.append(np.std(self.sources.g1[annulus_mask]))
+            sigma_gamma_2_real.append(np.std(self.sources.g2[annulus_mask]))
+
 
         # Simulate data: apply noise and lensing model
         self.sources.zero_lensing_signals()  # Reset lensing signals to zero for reconstruction
         self.sources.apply_noise()
-        self.sources.apply_lensing(self.lenses, lens_type='SIS ', z_source=z_source)
+        self.sources.apply_lensing(self.lenses, lens_type='SIS', z_source=z_source)
 
         # Compute aF from simulated data
         aF_simulated_vals = self.a * np.hypot(self.sources.f1, self.sources.f2)
@@ -339,6 +355,10 @@ class JWSTPipeline:
             annulus_mask = (radii >= r_min) & (radii < r_max)
             aF_simulated.append(np.mean(aF_simulated_vals[annulus_mask]))
             sigma_aF_simulated.append(np.std(aF_simulated_vals[annulus_mask]))
+            gamma_1_simulated.append(np.mean(self.sources.g1[annulus_mask]))
+            gamma_2_simulated.append(np.mean(self.sources.g2[annulus_mask]))
+            sigma_gamma_1_simulated.append(np.std(self.sources.g1[annulus_mask]))
+            sigma_gamma_2_simulated.append(np.std(self.sources.g2[annulus_mask]))
         
         # Plot the scatter in aF as a function of distance from the cluster center
         plt.figure(figsize=(10, 6))
@@ -384,7 +404,45 @@ class JWSTPipeline:
         plt.grid(True)
         plt.savefig(self.output_dir / 'num_sources_vs_distance.png', dpi=300)
 
-        
+        # Plot the shear components as a function of distance from the cluster center
+        plt.figure(figsize=(10, 6))
+        plt.plot(r_centers, gamma_1_real, label='Gamma 1 (Real Data)', color='blue')
+        plt.plot(r_centers, gamma_1_simulated, label='Gamma 1 (Simulated Data)', color='green')
+        plt.xlabel('Distance from Cluster Center (arcsec)')
+        plt.ylabel('Shear Components')
+        plt.title('Shear Components as a Function of Distance from Cluster Center')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(self.output_dir / 'shear_vs_distance.png', dpi=300)
+
+        # Plot the shear noise as a function of distance from the cluster center
+        plt.figure(figsize=(10, 6))
+        plt.plot(r_centers, sigma_gamma_1_real, label='Sigma Gamma 1 (Real Data)', color='blue')
+        plt.plot(r_centers, sigma_gamma_1_simulated, label='Sigma Gamma 1 (Simulated Data)', color='green')
+        plt.xlabel('Distance from Cluster Center (arcsec)')
+        plt.ylabel('Shear Noise')
+        plt.title('Shear Noise as a Function of Distance from Cluster Center')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(self.output_dir / 'shear_noise_vs_distance.png', dpi=300)
+
+        gamma_SNR_real_1 = np.array(gamma_1_real) / np.array(sigma_gamma_1_real)
+        gamma_SNR_real_2 = np.array(gamma_2_real) / np.array(sigma_gamma_2_real)
+        gamma_SNR_simulated_1 = np.array(gamma_1_simulated) / np.array(sigma_gamma_1_simulated)
+        gamma_SNR_simulated_2 = np.array(gamma_2_simulated) / np.array(sigma_gamma_2_simulated)
+        # Plot the shear signal to noise ratio as a function of distance from the cluster center
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(r_centers, gamma_SNR_real_1, label='SNR Gamma 1 (Real Data)', color='blue')
+        plt.plot(r_centers, gamma_SNR_simulated_1, label='SNR Gamma 1 (Simulated Data)', color='green')
+        plt.xlabel('Distance from Cluster Center (arcsec)')
+        plt.ylabel('Shear Signal to Noise Ratio (SNR)')
+        plt.title('Shear Signal to Noise Ratio as a Function of Distance from Cluster Center')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(self.output_dir / 'shear_snr_vs_distance.png', dpi=300)
+        # '''
+
         X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=1.0)
         title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
@@ -404,61 +462,160 @@ class JWSTPipeline:
             img_data = hdul['SCI'].data
         return img_data
 
-    def find_outliers(self):
+    def find_outliers(self, cutoff_distance=120):
         """
         Identifies bad sources based on flexion and shear signals.
         This method attempts to identify outliers that will not contribute to the lensing analysis, or that may skew the results.
         """
-        F = np.hypot(self.F1_fit, self.F2_fit)
-        aF = self.a * F
-
-        # ...lets try evaluating an approximate signal to noise ratio
-        sigma_af = np.std(aF)  # Standard deviation of flexion
-        SNR = aF / sigma_af  # Signal to noise ratio
         # Define a center for the cluster
         cluster_center = [80, 40]  # Approx center for Abell 2744
         # Calculate distance from cluster center
         distances = np.hypot(self.xc - cluster_center[0], self.yc - cluster_center[1])
 
-        # Now let's do a little bit of filtering
-        bad_chi2 = self.chi2 > 1.5  # Bad chi2 values
-        bad_flexion = (aF > 1.0)  # Bad flexion values
-        bad_a = (self.a > 100) | (self.a < 0.1)  # Bad scale values
-        # Color the bad sources
-        bad_sources = bad_chi2 | bad_flexion | bad_a 
+        # Throw out sources more than cutoff_distance arcseconds from the cluster center
+        outlier_mask = distances > cutoff_distance
+        self.IDs = self.IDs[~outlier_mask]
+        self.q = self.q[~outlier_mask]
+        self.phi = self.phi[~outlier_mask]
+        self.F1_fit = self.F1_fit[~outlier_mask]
+        self.F2_fit = self.F2_fit[~outlier_mask]
+        self.G1_fit = self.G1_fit[~outlier_mask]
+        self.G2_fit = self.G2_fit[~outlier_mask]
+        self.a = self.a[~outlier_mask]
+        self.chi2 = self.chi2[~outlier_mask]
+        self.xc = self.xc[~outlier_mask]
+        self.yc = self.yc[~outlier_mask]
+        distances = distances[~outlier_mask]
 
-        # Create a mask for good sources
-        good_sources = ~bad_sources
+        F = np.hypot(self.F1_fit, self.F2_fit)
+        aF = self.a * F
 
-        # Plot SNR vs distance
-        plt.figure(figsize=(10, 6))
-        plt.scatter(distances[good_sources], SNR[good_sources], color='blue', label='Good Sources', alpha=0.5, s=10)
-        plt.scatter(distances[bad_sources], SNR[bad_sources], color='red', label='Bad Sources', alpha=0.5, s=10)
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Signal to Noise Ratio (SNR)')
-        plt.title('SNR vs Distance from Cluster Center')
-        plt.legend()
-        # plt.xscale('log')
-        plt.yscale('log')
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'snr_vs_distance.png', dpi=300)
+        # Change the output directory to the cutoff distance
+        #self.output_dir = self.output_dir / f'cutoff_{cutoff_distance}'
+        # Create the output directory if it doesn't exist
+        #self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Look at the properties of the remaining sources
+        # Histogram of flexion, shear, size, and distance from cluster center
+        fig, axs = plt.subplots(2, 2, figsize=(12, 10))
+        axs = axs.flatten()
+        fancy_hist(aF, bins='freedman', ax=axs[0], color='blue', alpha=0.7)
+        axs[0].set_title('aF Distribution')
+        axs[0].set_xlabel('aF')
+        axs[0].set_ylabel('Count')
+        fancy_hist(F, bins='freedman', ax=axs[1], color='orange', alpha=0.7)
+        axs[1].set_title('F Distribution')
+        axs[1].set_xlabel('F')
+        axs[1].set_ylabel('Count')
+        fancy_hist(self.a, bins='freedman', ax=axs[2], color='green', alpha=0.7)
+        axs[2].set_title('Size (a) Distribution')
+        axs[2].set_xlabel('a (arcsec)')
+        axs[2].set_ylabel('Count')
+        fancy_hist(distances, bins='freedman', ax=axs[3], color='red', alpha=0.7)
+        axs[3].set_title('Distance from Cluster Center Distribution')
+        axs[3].set_xlabel('Distance (arcsec)')
+        axs[3].set_ylabel('Count')
+        plt.tight_layout()
+        plt.savefig(self.output_dir / 'outlier_analysis.png', dpi=300)
         plt.close()
+        print("Outlier analysis complete. Plots saved to output directory.")
+
+
+    def drastic_test(self):
+        '''
+        Since I haven't been able to find the issue otherwise, let's try a drastic test.
+        My hypothesis is that there is a single source that is dramatically affecting the results.
+        Let's try removing sources one by one, performing the reconstruction each time, and seeing if the results change.
+        '''
+
+        # Get the catalog
+        self.read_flexion_catalog()
+        self.read_source_catalog()
+        self.cut_flexion_catalog()
+        self.match_sources()
+        self.initialize_sources()
+
+        n_sources = len(self.sources.x)
+        print(f"Starting drastic test with {n_sources} sources.")
+        kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
+        smoothing_scale = 1 / (len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2))**0.5
+
+        # Get the image data and extent
+        # This is necessary to plot the image over the convergence map
+        img_data = self.get_image_data()
+        img_extent = [
+            0, img_data.shape[1] * self.CDELT,
+            0, img_data.shape[0] * self.CDELT
+        ]
+
+        def plot_cluster(convergence, title, save_name):
+            
+            fig, ax = plt.subplots(figsize=(10, 10))
+            
+            norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+
+            # Display image
+            ax.imshow(
+                img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
+            )
+            
+            # Overlay convergence contours
+            contour_levels = np.percentile(convergence[2], np.linspace(70, 99, 5))
+            contours = ax.contour(
+                convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
+            )
+            # Add colorbar for contours
+            ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
+
+            # Labels and title
+            ax.set_xlabel('RA Offset (arcsec)')
+            ax.set_ylabel('Dec Offset (arcsec)')
+            ax.set_title(title)
+            # Save and display
+            # Only create a legend if there are labels to display
+            if len(ax.get_legend_handles_labels()[0]) > 0:
+                ax.legend()
+            
+            plt.tight_layout()
+            plt.savefig(save_name, dpi=300)
+
+        # Initialize progress bar
+        utils.print_progress_bar(0, n_sources, prefix='Drastic Test Progress:', suffix='Complete', length=50)
+
+        for i in range(n_sources):
+            new_sources = self.sources.copy()
+            new_sources.remove(i)
+            # Perform the reconstruction
+            X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=1.0)
+            title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST \n Removed Source {}'.format(self.cluster_name, i)
+            save_title = self.output_dir / 'flex_{}.png'.format(i)
+            plot_cluster([X,Y,kappa_flexion], title, save_title)
+
+            # Do this for the shear as well
+            X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale, resolution_scale=1.0)
+            title = 'Kaiser-Squires Shear Reconstruction of {} with JWST \n Removed Source {}'.format(self.cluster_name, i)
+            save_title = self.output_dir / 'shear_{}.png'.format(i)
+            plot_cluster([X,Y,kappa_shear], title, save_title)
+            plt.close() 
+            # Update progress bar
+            utils.print_progress_bar(i + 1, n_sources, prefix='Drastic Test Progress:', suffix='Complete', length=50)
 
 if __name__ == '__main__':
     signals = ['all']
 
     for signal in signals:
+
         abell_config = {
-            'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
-            'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
-            'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
-            'output_dir': 'Output/JWST/ABELL/',
-            'cluster_name': 'ABELL_2744',
-            'cluster_redshift': 0.308,
-            'source_redshift': 0.8,
-            'signal_choice': signal
+        'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
+        'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
+        'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
+        'output_dir': 'Output/JWST/ABELL/drastic_test/',
+        'cluster_name': 'ABELL_2744',
+        'cluster_redshift': 0.308,
+        'source_redshift': 0.8,
+        'signal_choice': signal
         }
 
         # Initialize and run the pipeline
         pipeline_abell = JWSTPipeline(abell_config)
-        pipeline_abell.run()
+        pipeline_abell.drastic_test()
