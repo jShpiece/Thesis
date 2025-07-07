@@ -16,7 +16,7 @@ from scipy.integrate import quad
 import matplotlib.pyplot as plt
 import halo_obj
 from scipy.ndimage import gaussian_filter
-# lets use scipy's fft library
+from scipy.signal.windows import tukey
 
 
 # ------------------------
@@ -796,86 +796,113 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     halos.y += centroid[1]
 
 
-def perform_kaiser_squire_reconstruction(sources, extent, signal='flexion', smoothing_scale=10, resolution_scale=1):
+def perform_kaiser_squire_reconstruction(sources, extent, signal='shear',
+                                         smoothing_scale=5.0, resolution_scale=1.0,
+                                         weights=None, apodize=False):
     """
     Kaiser-Squires Fourier inversion to reconstruct convergence (kappa) from lensing signal.
 
     Parameters:
-        sources: object with attributes .x, .y, .e1, .e2, .f1, .f2, .g1, .g2 (1D arrays)
-        extent: tuple (xmin, xmax, ymin, ymax)
-        signal: one of 'shear', 'flexion', 'g_flexion'
-        smoothing_sigma: Gaussian filter width in pixels
-        resolution_scale: scale factor for grid resolution
+        sources: object with .x, .y, and lensing signal attributes ('e1','e2' or 'f1','f2')
+        extent: (xmin, xmax, ymin, ymax) in arcseconds
+        signal: 'shear' or 'flexion'
+        smoothing_scale: real-space Gaussian smoothing (pixels)
+        resolution_scale: pixels per arcsecond
+        weights: 1D array of per-object weights (e.g., SNR^2), optional
+        apodize: whether to apply a Tukey window to suppress edge effects
 
     Returns:
-        X, Y: coordinate grid
-        kappa: 2D convergence field
+        X, Y: coordinate grids (2D)
+        kappa: reconstructed convergence field (2D)
     """
 
-    
+    # Extract positions
     x_s, y_s = sources.x, sources.y
 
     if signal == 'shear':
         S1, S2 = sources.e1, sources.e2
     elif signal == 'flexion':
         S1, S2 = sources.f1, sources.f2
-    elif signal == 'g_flexion':
-        S1, S2 = sources.g1, sources.g2
-        raise NotImplementedError("g_flexion not implemented yet.")
     else:
-        raise ValueError("Invalid signal. Choose from 'shear', 'flexion', 'g_flexion'.")
-    
+        raise ValueError("Signal must be 'shear' or 'flexion'.")
+
+    # Default weights = 1
+    if weights is None:
+        weights = np.ones_like(x_s)
+
+    # Grid settings
     xmin, xmax, ymin, ymax = extent
-    fsize = max(xmax - xmin, ymax - ymin) 
-    npixels = int(resolution_scale * fsize)  # Adjust resolution scale
+    fsize = max(xmax - xmin, ymax - ymin)
+    npixels = int(resolution_scale * fsize)
     dx = fsize / npixels
 
+    # Shift positions relative to grid
     x_s_rel = x_s - xmin - 0.5 * dx
     y_s_rel = y_s - ymin - 0.5 * dx
 
-    # Bin signal components
-    S1_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S1)
-    S2_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S2)
+    # Weighted signal binning via CIC
+    S1w = S1 * weights
+    S2w = S2 * weights
 
-    # Handle edges
-    S1_grid = np.pad(S1_grid, ((0, 1), (0, 1)), mode='wrap')
-    S2_grid = np.pad(S2_grid, ((0, 1), (0, 1)), mode='wrap')
-    # Update npixels to account for padding
-    npixels += 1
+    S1_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S1w)
+    S2_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S2w)
+    W_grid  = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=weights)
 
-    # Optional smoothing
+    # Normalize fields by weights to get weighted average
+    S1_grid /= (W_grid + 1e-10)
+    S2_grid /= (W_grid + 1e-10)
+
+    # Optional real-space smoothing
     if smoothing_scale > 0:
         S1_grid = gaussian_filter(S1_grid, sigma=smoothing_scale)
         S2_grid = gaussian_filter(S2_grid, sigma=smoothing_scale)
-    
-    # FFT
-    ft_S1 = np.fft.fft2(S1_grid, norm='ortho')
-    ft_S2 = np.fft.fft2(S2_grid, norm='ortho')
 
-    lx = np.fft.fftfreq(npixels, d=dx) * 2 * np.pi
-    ly = np.fft.fftfreq(npixels, d=dx) * 2 * np.pi
+    # Optional apodization
+    if apodize:
+        window = tukey(npixels, alpha=0.5)
+        apod_window = np.outer(window, window)
+        S1_grid *= apod_window
+        S2_grid *= apod_window
+
+    # Zero-padding for FFT
+    pad = npixels // 2
+    padded_shape = (npixels + 2 * pad, npixels + 2 * pad)
+    S1_padded = np.zeros(padded_shape)
+    S2_padded = np.zeros(padded_shape)
+    S1_padded[pad:-pad, pad:-pad] = S1_grid
+    S2_padded[pad:-pad, pad:-pad] = S2_grid
+
+    # FFT
+    ft_S1 = np.fft.fft2(S1_padded, norm='ortho')
+    ft_S2 = np.fft.fft2(S2_padded, norm='ortho')
+
+    # Fourier-space coordinates
+    lx = np.fft.fftfreq(padded_shape[1], d=dx) * 2 * np.pi
+    ly = np.fft.fftfreq(padded_shape[0], d=dx) * 2 * np.pi
     Lx, Ly = np.meshgrid(lx, ly, indexing='xy')
     l_squared = Lx**2 + Ly**2
-    l_squared[0,0] = 1e-10  # avoid division by zero
+    l_squared[0, 0] = 1e-10  # prevent div by zero
 
-    # Fourier-space inversion kernel
-    if signal in 'flexion':
-        ft_kappa = -1j * (Lx * ft_S1 + Ly * ft_S2) / l_squared
-    elif signal == 'shear':
+    # Kaiser-Squires inversion kernel
+    if signal == 'shear':
         ft_kappa = ((Lx**2 - Ly**2) * ft_S1 + 2 * Lx * Ly * ft_S2) / l_squared
-    else:
-        raise ValueError("Invalid signal. Choose from 'shear', 'flexion'.")
+    elif signal == 'flexion':
+        ft_kappa = -1j * (Lx * ft_S1 + Ly * ft_S2) / l_squared
 
-    ft_kappa[0, 0] = 1e-10  # avoid division by zero
-    kappa = np.fft.ifft2(ft_kappa, norm='ortho').real 
+    # Optional Gaussian low-pass filter in Fourier space
+    if smoothing_scale > 0:
+        sigma_k = 1.0 / (smoothing_scale * dx)
+        gaussian_k = np.exp(-0.5 * l_squared / sigma_k**2)
+        ft_kappa *= gaussian_k
 
-    # Rescale kappa to the original grid size
-    npixels -= 1  # Adjust npixels back to original size
-    kappa = kappa[:npixels, :npixels]  # Remove padding
+    # Inverse FFT to real space
+    kappa_padded = np.fft.ifft2(ft_kappa, norm='ortho').real
+    kappa = kappa_padded[pad:-pad, pad:-pad]
 
-    # Output coordinates (pixel centers)
-    x = np.linspace(xmin - 0.5 * dx, xmax - 0.5 * dx, npixels)
-    y = np.linspace(ymin - 0.5 * dx, ymax - 0.5 * dx, npixels)
+    # Grid coordinates
+    x = np.linspace(xmin + 0.5 * dx, xmax - 0.5 * dx, npixels)
+    y = np.linspace(ymin + 0.5 * dx, ymax - 0.5 * dx, npixels)
     X, Y = np.meshgrid(x, y, indexing='xy')
 
     return X, Y, kappa
+

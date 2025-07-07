@@ -91,9 +91,10 @@ class JWSTPipeline:
         self.read_source_catalog()
         self.cut_flexion_catalog()
         self.match_sources()
-        self.find_outliers()
+        # self.find_outliers()
         self.initialize_sources()
         self.plot_results()
+        self.validate_flexion_sign_convention()
 
     def read_source_catalog(self):
         """
@@ -105,47 +106,56 @@ class JWSTPipeline:
         self.labels = np.array(table['label'])
 
     def read_flexion_catalog(self):
-        """
-        Reads the flexion catalog and filters out bad data.
-        """
-        # Read the flexion catalog
-        df = pd.read_pickle(self.flexion_catalog_path)
-        # Extract relevant columns
-        self.IDs = df['label'].to_numpy()
-        self.q = df['q'].to_numpy()
-        self.phi = df['phi'].to_numpy()
-        self.F1_fit = df['F1_fit'].to_numpy()
-        self.F2_fit = df['F2_fit'].to_numpy() 
-        self.G1_fit = df['G1_fit'].to_numpy() 
-        self.G2_fit = df['G2_fit'].to_numpy()
-        self.a = df['a'].to_numpy()
-        self.chi2 = df['rchi2'].to_numpy()
-        self.rs = df['rs'].to_numpy() # We don't need to carry this past this function
+            """
+            Reads the flexion catalog and filters out bad data.
+            """
+            # Read the flexion catalog
+            df = pd.read_pickle(self.flexion_catalog_path)
+            # Extract relevant columns
+            self.IDs = df['label'].to_numpy()
+            self.q = df['q'].to_numpy()
+            self.phi = df['phi'].to_numpy()
+            self.F1_fit = df['F1_fit'].to_numpy()
+            self.F2_fit = df['F2_fit'].to_numpy() 
+            self.G1_fit = df['G1_fit'].to_numpy() 
+            self.G2_fit = df['G2_fit'].to_numpy()
+            self.a = df['a'].to_numpy()
+            self.chi2 = df['rchi2'].to_numpy()
+            self.rs = df['rs'].to_numpy() # We don't need to carry this past this function
 
-        # Convert to arcseconds / inverse arcseconds - do this step *immediately*, there are no circumstances where we want to keep the data in pixels
-        self.a *= self.CDELT
-        self.F1_fit /= self.CDELT
-        self.F2_fit /= self.CDELT
-        self.G1_fit /= self.CDELT
-        self.G2_fit /= self.CDELT
-        self.rs *= self.CDELT
-        print(f"Read {len(self.IDs)} entries from flexion catalog.")
+            # Convert to arcseconds / inverse arcseconds - do this step *immediately*, there are no circumstances where we want to keep the data in pixels
+            self.a *= self.CDELT
+            self.F1_fit /= self.CDELT
+            self.F2_fit /= self.CDELT
+            self.G1_fit /= self.CDELT
+            self.G2_fit /= self.CDELT
+            self.rs *= self.CDELT
+            print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
     def cut_flexion_catalog(self):
-        # Make cuts in the data based on aF, rs, chi2, and a
-        F = np.hypot(self.F1_fit, self.F2_fit) 
-        aF = self.a * F # Dimensionless flexion
+        # Compute flexion magnitude and dimensionless flexion
+        F = np.hypot(self.F1_fit, self.F2_fit)
+        aF = self.a * F  # Dimensionless flexion
 
-        # Set thresholds for bad data
-        max_flexion = 1.5 # Maximum flexion threshold (dimensionless)
-        bad_flexion = (np.abs(F) > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
-        bad_rs = (self.rs > 10) # Maximum sersic radius threshold (in arcseconds)
-        bad_chi2 = self.chi2 > 1.5 # Maximum reduced chi2 threshold - this is a goodness of fit indicator
-        bad_a = (self.a > 1) | (self.a < 0.01) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
-        nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | np.isnan(self.a) | np.isnan(self.chi2)
-        bad_indices = bad_flexion | bad_chi2 | bad_a | nan_indices | bad_rs
+        # Updated thresholds
+        max_aF = 0.5                 # More conservative flexion threshold
+        max_rs = 5.0                 # Tighter Sérsic radius cutoff
+        max_chi2 = 1.5               # Chi2 fit quality
+        min_a, max_a = 0.01, 2.0     # Size range
 
-        # Remove bad data
+        # Boolean masks for bad data
+        bad_flexion = aF > max_aF
+        bad_rs = self.rs > max_rs
+        bad_chi2 = self.chi2 > max_chi2
+        bad_a = (self.a < min_a) | (self.a > max_a)
+        nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | \
+                    np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | \
+                    np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | \
+                    np.isnan(self.a) | np.isnan(self.rs) | np.isnan(self.chi2)
+
+        bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices
+
+        # Apply cuts
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
         self.phi = self.phi[~bad_indices]
@@ -154,9 +164,11 @@ class JWSTPipeline:
         self.G1_fit = self.G1_fit[~bad_indices]
         self.G2_fit = self.G2_fit[~bad_indices]
         self.a = self.a[~bad_indices]
+        self.rs = self.rs[~bad_indices]
         self.chi2 = self.chi2[~bad_indices]
 
-        print(f"Filtered flexion catalog to {len(self.IDs)} entries after applying cuts.")
+        print(f"Filtered flexion catalog to {len(self.IDs)} entries after applying updated cuts.")
+
 
     def match_sources(self):
         """
@@ -520,85 +532,39 @@ class JWSTPipeline:
         plt.close()
         print("Outlier analysis complete. Plots saved to output directory.")
 
+    def validate_flexion_sign_convention(self):
+        """
+        Tests if flipping the sign of the flexion changes the reconstructed κ map significantly.
+        Used to check if a flexion sign convention error is present.
+        """
+        flipped_sources = self.sources.copy()
+        flipped_sources.f1 *= -1
+        flipped_sources.f2 *= -1
 
-    def drastic_test(self):
-        '''
-        Since I haven't been able to find the issue otherwise, let's try a drastic test.
-        My hypothesis is that there is a single source that is dramatically affecting the results.
-        Let's try removing sources one by one, performing the reconstruction each time, and seeing if the results change.
-        '''
-
-        # Get the catalog
-        self.read_flexion_catalog()
-        self.read_source_catalog()
-        self.cut_flexion_catalog()
-        self.match_sources()
-        self.initialize_sources()
-
-        n_sources = len(self.sources.x)
-        print(f"Starting drastic test with {n_sources} sources.")
-        kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
+        extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
         smoothing_scale = 1 / (len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2))**0.5
 
-        # Get the image data and extent
-        # This is necessary to plot the image over the convergence map
+        X, Y, kappa_flipped = utils.perform_kaiser_squire_reconstruction(
+            flipped_sources, extent=extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=1.0
+        )
+
         img_data = self.get_image_data()
-        img_extent = [
-            0, img_data.shape[1] * self.CDELT,
-            0, img_data.shape[0] * self.CDELT
-        ]
+        img_extent = [0, img_data.shape[1] * self.CDELT, 0, img_data.shape[0] * self.CDELT]
 
-        def plot_cluster(convergence, title, save_name):
-            
-            fig, ax = plt.subplots(figsize=(10, 10))
-            
-            norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+        fig, ax = plt.subplots(figsize=(10, 10))
+        norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+        ax.imshow(img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm)
 
-            # Display image
-            ax.imshow(
-                img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
-            )
-            
-            # Overlay convergence contours
-            contour_levels = np.percentile(convergence[2], np.linspace(70, 99, 5))
-            contours = ax.contour(
-                convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
-            )
-            # Add colorbar for contours
-            ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
-
-            # Labels and title
-            ax.set_xlabel('RA Offset (arcsec)')
-            ax.set_ylabel('Dec Offset (arcsec)')
-            ax.set_title(title)
-            # Save and display
-            # Only create a legend if there are labels to display
-            if len(ax.get_legend_handles_labels()[0]) > 0:
-                ax.legend()
-            
-            plt.tight_layout()
-            plt.savefig(save_name, dpi=300)
-
-        # Initialize progress bar
-        utils.print_progress_bar(0, n_sources, prefix='Drastic Test Progress:', suffix='Complete', length=50)
-
-        for i in range(n_sources):
-            new_sources = self.sources.copy()
-            new_sources.remove(i)
-            # Perform the reconstruction
-            X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=1.0)
-            title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST \n Removed Source {}'.format(self.cluster_name, i)
-            save_title = self.output_dir / 'flex_{}.png'.format(i)
-            plot_cluster([X,Y,kappa_flexion], title, save_title)
-
-            # Do this for the shear as well
-            X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale, resolution_scale=1.0)
-            title = 'Kaiser-Squires Shear Reconstruction of {} with JWST \n Removed Source {}'.format(self.cluster_name, i)
-            save_title = self.output_dir / 'shear_{}.png'.format(i)
-            plot_cluster([X,Y,kappa_shear], title, save_title)
-            plt.close() 
-            # Update progress bar
-            utils.print_progress_bar(i + 1, n_sources, prefix='Drastic Test Progress:', suffix='Complete', length=50)
+        contour_levels = np.percentile(kappa_flipped, np.linspace(70, 99, 5))
+        contours = ax.contour(X, Y, kappa_flipped, levels=contour_levels, cmap='coolwarm', linewidths=1.5)
+        ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
+        ax.set_xlabel('RA Offset (arcsec)')
+        ax.set_ylabel('Dec Offset (arcsec)')
+        ax.set_title(f'κ from Flipped Flexion: {self.cluster_name}')
+        plt.tight_layout()
+        plt.savefig(self.output_dir / f'ks_flex_flipped_{self.cluster_name}.png', dpi=300)
+        plt.close()
+        print("Saved flipped-flexion κ map.")
 
 if __name__ == '__main__':
     signals = ['all']
@@ -618,4 +584,4 @@ if __name__ == '__main__':
 
         # Initialize and run the pipeline
         pipeline_abell = JWSTPipeline(abell_config)
-        pipeline_abell.drastic_test()
+        pipeline_abell.run()
