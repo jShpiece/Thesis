@@ -857,28 +857,29 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='shear',
         S1_grid = gaussian_filter(S1_grid, sigma=smoothing_scale)
         S2_grid = gaussian_filter(S2_grid, sigma=smoothing_scale)
 
-    # Optional apodization
-    if apodize:
-        window = tukey(npixels, alpha=0.5)
-        apod_window = np.outer(window, window)
-        S1_grid *= apod_window
-        S2_grid *= apod_window
+    npixels = S1_grid.shape[0]
 
-    # Zero-padding for FFT
-    pad = npixels // 2
-    padded_shape = (npixels + 2 * pad, npixels + 2 * pad)
-    S1_padded = np.zeros(padded_shape)
-    S2_padded = np.zeros(padded_shape)
-    S1_padded[pad:-pad, pad:-pad] = S1_grid
-    S2_padded[pad:-pad, pad:-pad] = S2_grid
+    # --- Apodization ---
+    from scipy.signal.windows import hann
+    if apodize:
+        window = hann(npixels)
+        apod_window = np.outer(window, window)
+        S1_grid = S1_grid * apod_window
+        S2_grid = S2_grid * apod_window
+
+    # --- Padding (reflection to reduce discontinuities) ---
+    pad_fraction = 0.2
+    pad = int(npixels * pad_fraction)
+    S1_padded = np.pad(S1_grid, pad_width=pad, mode='reflect')
+    S2_padded = np.pad(S2_grid, pad_width=pad, mode='reflect')
 
     # FFT
     ft_S1 = np.fft.fft2(S1_padded, norm='ortho')
     ft_S2 = np.fft.fft2(S2_padded, norm='ortho')
 
     # Fourier-space coordinates
-    lx = np.fft.fftfreq(padded_shape[1], d=dx) * 2 * np.pi
-    ly = np.fft.fftfreq(padded_shape[0], d=dx) * 2 * np.pi
+    lx = np.fft.fftfreq(S1_padded.shape[1], d=dx) * 2 * np.pi
+    ly = np.fft.fftfreq(S1_padded.shape[0], d=dx) * 2 * np.pi
     Lx, Ly = np.meshgrid(lx, ly, indexing='xy')
     l_squared = Lx**2 + Ly**2
     l_squared[0, 0] = 1e-10  # prevent div by zero
@@ -905,4 +906,3 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='shear',
     X, Y = np.meshgrid(x, y, indexing='xy')
 
     return X, Y, kappa
-

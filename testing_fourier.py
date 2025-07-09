@@ -94,7 +94,6 @@ class JWSTPipeline:
         # self.find_outliers()
         self.initialize_sources()
         self.plot_results()
-        self.validate_flexion_sign_convention()
 
     def read_source_catalog(self):
         """
@@ -153,8 +152,7 @@ class JWSTPipeline:
                     np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | \
                     np.isnan(self.a) | np.isnan(self.rs) | np.isnan(self.chi2)
 
-        bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices
-
+        bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices 
         # Apply cuts
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
@@ -168,7 +166,6 @@ class JWSTPipeline:
         self.chi2 = self.chi2[~bad_indices]
 
         print(f"Filtered flexion catalog to {len(self.IDs)} entries after applying updated cuts.")
-
 
     def match_sources(self):
         """
@@ -198,6 +195,7 @@ class JWSTPipeline:
             else:
                 # Necessary to assign NaN if ID not found - otherwise, xc_list and yc_list will be of different lengths
                 # This is a warning, not an error, as we want to continue processing
+                # Also this has never happened in the use of this script - it's unlikely to happen in practice
                 warnings.warn(f"ID '{ID}' not found in source catalog. Assigning NaN.")
                 xc_list.append(np.nan)
                 yc_list.append(np.nan)
@@ -296,12 +294,8 @@ class JWSTPipeline:
         smoothing_scale = 1 / (avg_source_density)**0.5
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
 
-        
         # Override the sources with a custom set of lenses, to see if the reconstruction works with known mass
-        # Do this for a range of noise choices
-        
         # NFW version
-        '''        
         xl = [60,80,100]
         yl = [30,40,50]
         ml = [1e14, 1e15, 1e14] # Masses in M_sun h^-1
@@ -311,10 +305,8 @@ class JWSTPipeline:
             redshift=z_cluster, chi2=np.zeros(len(xl))
         )
         self.lenses.calculate_concentration()
-        '''
         
         # SIS version
-        # '''
         xl = [80]
         yl = [40]
         eR = [23]
@@ -322,146 +314,21 @@ class JWSTPipeline:
             x=np.array(xl), y=np.array(yl),
             te=np.array(eR), chi2=np.zeros(len(xl))
         )
-
-        # Question: What is the scatter in aF as a function of distance from the cluster center?
-        # Compare real vs simulated data in radial annuli
-
-        aF_real = []
-        aF_simulated = []
-        sigma_aF_real = []
-        sigma_aF_simulated = []
-        gamma_1_real = []
-        gamma_2_real = []
-        gamma_1_simulated = []
-        gamma_2_simulated = []
-        sigma_gamma_1_real = []
-        sigma_gamma_2_real = []
-        sigma_gamma_1_simulated = []
-        sigma_gamma_2_simulated = []
-        r_edges = np.linspace(0, 120, 50)  # Annuli edges in arcseconds
-        r_centers = 0.5 * (r_edges[:-1] + r_edges[1:])  # Midpoints of annuli
-
-        # Compute radial distances from cluster center
-        radii = np.hypot(self.xc - self.centroid_x, self.yc - self.centroid_y)
-
-        # Compute aF from real data
-        aF_real_vals = self.a * np.hypot(self.sources.f1, self.sources.f2)
-        for r_min, r_max in zip(r_edges[:-1], r_edges[1:]):
-            annulus_mask = (radii >= r_min) & (radii < r_max)
-            aF_real.append(np.mean(aF_real_vals[annulus_mask]))
-            sigma_aF_real.append(np.std(aF_real_vals[annulus_mask]))
-            gamma_1_real.append(np.mean(self.sources.g1[annulus_mask]))
-            gamma_2_real.append(np.mean(self.sources.g2[annulus_mask]))
-            sigma_gamma_1_real.append(np.std(self.sources.g1[annulus_mask]))
-            sigma_gamma_2_real.append(np.std(self.sources.g2[annulus_mask]))
-
-
+    
         # Simulate data: apply noise and lensing model
-        self.sources.zero_lensing_signals()  # Reset lensing signals to zero for reconstruction
-        self.sources.apply_noise()
-        self.sources.apply_lensing(self.lenses, lens_type='SIS', z_source=z_source)
+        # simulated_sources = self.sources.copy()
+        # simulated_sources.zero_lensing_signals()  # Reset lensing signals to zero for reconstruction
+        # simulated_sources.apply_noise()
+        # simulated_sources.apply_lensing(self.lenses, lens_type='NFW', z_source=z_source)
 
-        # Compute aF from simulated data
-        aF_simulated_vals = self.a * np.hypot(self.sources.f1, self.sources.f2)
-        for r_min, r_max in zip(r_edges[:-1], r_edges[1:]):
-            annulus_mask = (radii >= r_min) & (radii < r_max)
-            aF_simulated.append(np.mean(aF_simulated_vals[annulus_mask]))
-            sigma_aF_simulated.append(np.std(aF_simulated_vals[annulus_mask]))
-            gamma_1_simulated.append(np.mean(self.sources.g1[annulus_mask]))
-            gamma_2_simulated.append(np.mean(self.sources.g2[annulus_mask]))
-            sigma_gamma_1_simulated.append(np.std(self.sources.g1[annulus_mask]))
-            sigma_gamma_2_simulated.append(np.std(self.sources.g2[annulus_mask]))
-        
-        # Plot the scatter in aF as a function of distance from the cluster center
-        plt.figure(figsize=(10, 6))
-        plt.plot(r_centers, sigma_aF_real, label='Real Data', color='blue')
-        plt.plot(r_centers, sigma_aF_simulated, label='Simulated Data', color='orange')
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Scatter in aF')
-        plt.title('Scatter in aF as a Function of Distance from Cluster Center')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'scatter_aF_vs_distance.png', dpi=300)
-
-        # Plot the mean of aF as a function of distance from the cluster center
-        plt.figure(figsize=(10, 6))
-        plt.plot(r_centers, aF_real, label='Mean aF (Real Data)', color='blue')
-        plt.plot(r_centers, aF_simulated, label='Mean aF (Simulated Data)', color='orange')
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Mean aF')
-        plt.title('Mean aF as a Function of Distance from Cluster Center')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'mean_aF_vs_distance.png', dpi=300)
-
-        real_signal_to_noise = aF_real / np.array(sigma_aF_real)
-        simulated_signal_to_noise = aF_simulated / np.array(sigma_aF_simulated)
-        # Plot the signal to noise ratio as a function of distance from the cluster center
-        plt.figure(figsize=(10, 6))
-        plt.plot(r_centers, real_signal_to_noise, label='SNR (Real Data)', color='blue')
-        plt.plot(r_centers, simulated_signal_to_noise, label='SNR (Simulated Data)', color='orange')
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Signal to Noise Ratio (SNR)')
-        plt.title('Signal to Noise Ratio as a Function of Distance from Cluster Center')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'snr_vs_distance.png', dpi=300)
-
-        # Also plot number of sources as a function of distance from the cluster center
-        plt.figure(figsize=(10, 6))
-        plt.hist(radii, bins=r_edges, color='gray', alpha=0.7, edgecolor='black')
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Number of Sources')
-        plt.title('Number of Sources as a Function of Distance from Cluster Center')
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'num_sources_vs_distance.png', dpi=300)
-
-        # Plot the shear components as a function of distance from the cluster center
-        plt.figure(figsize=(10, 6))
-        plt.plot(r_centers, gamma_1_real, label='Gamma 1 (Real Data)', color='blue')
-        plt.plot(r_centers, gamma_1_simulated, label='Gamma 1 (Simulated Data)', color='green')
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Shear Components')
-        plt.title('Shear Components as a Function of Distance from Cluster Center')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'shear_vs_distance.png', dpi=300)
-
-        # Plot the shear noise as a function of distance from the cluster center
-        plt.figure(figsize=(10, 6))
-        plt.plot(r_centers, sigma_gamma_1_real, label='Sigma Gamma 1 (Real Data)', color='blue')
-        plt.plot(r_centers, sigma_gamma_1_simulated, label='Sigma Gamma 1 (Simulated Data)', color='green')
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Shear Noise')
-        plt.title('Shear Noise as a Function of Distance from Cluster Center')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'shear_noise_vs_distance.png', dpi=300)
-
-        gamma_SNR_real_1 = np.array(gamma_1_real) / np.array(sigma_gamma_1_real)
-        gamma_SNR_real_2 = np.array(gamma_2_real) / np.array(sigma_gamma_2_real)
-        gamma_SNR_simulated_1 = np.array(gamma_1_simulated) / np.array(sigma_gamma_1_simulated)
-        gamma_SNR_simulated_2 = np.array(gamma_2_simulated) / np.array(sigma_gamma_2_simulated)
-        # Plot the shear signal to noise ratio as a function of distance from the cluster center
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(r_centers, gamma_SNR_real_1, label='SNR Gamma 1 (Real Data)', color='blue')
-        plt.plot(r_centers, gamma_SNR_simulated_1, label='SNR Gamma 1 (Simulated Data)', color='green')
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Shear Signal to Noise Ratio (SNR)')
-        plt.title('Shear Signal to Noise Ratio as a Function of Distance from Cluster Center')
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'shear_snr_vs_distance.png', dpi=300)
-        # '''
-
-        X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=1.0)
+        weights_flexion = self.sources.sigf**-2
+        X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, weights=weights_flexion, apodize=True)
         title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_flexion], title, save_title)
 
         # Do this for the shear as well
-        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale, resolution_scale=1.0)
+        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale)
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title)
@@ -532,40 +399,6 @@ class JWSTPipeline:
         plt.close()
         print("Outlier analysis complete. Plots saved to output directory.")
 
-    def validate_flexion_sign_convention(self):
-        """
-        Tests if flipping the sign of the flexion changes the reconstructed κ map significantly.
-        Used to check if a flexion sign convention error is present.
-        """
-        flipped_sources = self.sources.copy()
-        flipped_sources.f1 *= -1
-        flipped_sources.f2 *= -1
-
-        extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
-        smoothing_scale = 1 / (len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2))**0.5
-
-        X, Y, kappa_flipped = utils.perform_kaiser_squire_reconstruction(
-            flipped_sources, extent=extent, signal='flexion', smoothing_scale=smoothing_scale, resolution_scale=1.0
-        )
-
-        img_data = self.get_image_data()
-        img_extent = [0, img_data.shape[1] * self.CDELT, 0, img_data.shape[0] * self.CDELT]
-
-        fig, ax = plt.subplots(figsize=(10, 10))
-        norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
-        ax.imshow(img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm)
-
-        contour_levels = np.percentile(kappa_flipped, np.linspace(70, 99, 5))
-        contours = ax.contour(X, Y, kappa_flipped, levels=contour_levels, cmap='coolwarm', linewidths=1.5)
-        ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
-        ax.set_xlabel('RA Offset (arcsec)')
-        ax.set_ylabel('Dec Offset (arcsec)')
-        ax.set_title(f'κ from Flipped Flexion: {self.cluster_name}')
-        plt.tight_layout()
-        plt.savefig(self.output_dir / f'ks_flex_flipped_{self.cluster_name}.png', dpi=300)
-        plt.close()
-        print("Saved flipped-flexion κ map.")
-
 if __name__ == '__main__':
     signals = ['all']
 
@@ -575,7 +408,7 @@ if __name__ == '__main__':
         'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
         'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
         'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
-        'output_dir': 'Output/JWST/ABELL/drastic_test/',
+        'output_dir': 'Output/JWST/ABELL/',
         'cluster_name': 'ABELL_2744',
         'cluster_redshift': 0.308,
         'source_redshift': 0.8,
