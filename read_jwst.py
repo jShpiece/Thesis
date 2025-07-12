@@ -87,11 +87,10 @@ class JWSTPipeline:
         """
         self.read_flexion_catalog()
         self.read_source_catalog()
+        self.cut_flexion_catalog()
         self.match_sources()
-        # self.find_outliers()
         self.initialize_sources()
         self.run_lens_fitting()
-        # self.save_results()
         self.plot_results()
 
     def read_source_catalog(self):
@@ -104,46 +103,55 @@ class JWSTPipeline:
         self.labels = np.array(table['label'])
 
     def read_flexion_catalog(self):
-        """
-        Reads the flexion catalog and filters out bad data.
-        """
-        # Read the flexion catalog
-        df = pd.read_pickle(self.flexion_catalog_path)
-        # Extract relevant columns
-        self.IDs = df['label'].to_numpy()
-        self.q = df['q'].to_numpy()
-        self.phi = df['phi'].to_numpy()
-        self.F1_fit = df['F1_fit'].to_numpy()
-        self.F2_fit = df['F2_fit'].to_numpy() 
-        self.G1_fit = df['G1_fit'].to_numpy() 
-        self.G2_fit = df['G2_fit'].to_numpy()
-        self.a = df['a'].to_numpy()
-        self.chi2 = df['rchi2'].to_numpy()
-        rs = df['rs'].to_numpy() # We don't need to carry this past this function
-        print(f"Read {len(self.IDs)} entries from flexion catalog.")
+            """
+            Reads the flexion catalog and filters out bad data.
+            """
+            # Read the flexion catalog
+            df = pd.read_pickle(self.flexion_catalog_path)
+            # Extract relevant columns
+            self.IDs = df['label'].to_numpy()
+            self.q = df['q'].to_numpy()
+            self.phi = df['phi'].to_numpy()
+            self.F1_fit = df['F1_fit'].to_numpy()
+            self.F2_fit = df['F2_fit'].to_numpy() 
+            self.G1_fit = df['G1_fit'].to_numpy() 
+            self.G2_fit = df['G2_fit'].to_numpy()
+            self.a = df['a'].to_numpy()
+            self.chi2 = df['rchi2'].to_numpy()
+            self.rs = df['rs'].to_numpy() # We don't need to carry this past this function
 
-        # Make cuts in the data based on aF, rs, chi2, and a
-        F = np.hypot(self.F1_fit, self.F2_fit) 
-        aF = self.a * F # Dimensionless flexion
+            # Convert to arcseconds / inverse arcseconds - do this step *immediately*, there are no circumstances where we want to keep the data in pixels
+            self.a *= self.CDELT
+            self.F1_fit /= self.CDELT
+            self.F2_fit /= self.CDELT
+            self.G1_fit /= self.CDELT
+            self.G2_fit /= self.CDELT
+            self.rs *= self.CDELT
+            print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
-        # Convert to arcseconds / inverse arcseconds
-        self.a *= self.CDELT
-        self.F1_fit /= self.CDELT
-        self.F2_fit /= self.CDELT
-        self.G1_fit /= self.CDELT
-        self.G2_fit /= self.CDELT
-        rs *= self.CDELT
+    def cut_flexion_catalog(self):
+        # Compute flexion magnitude and dimensionless flexion
+        F = np.hypot(self.F1_fit, self.F2_fit)
+        aF = self.a * F  # Dimensionless flexion
 
-        # Set thresholds for bad data
-        max_flexion = 0.4 # Maximum flexion threshold (dimensionless)
-        bad_flexion = (aF > max_flexion) # Flexion threshold (no need for absolute value, aF must be positive)
-        bad_rs = (rs > 10) # Maximum sersic radius threshold (in arcseconds)
-        bad_chi2 = self.chi2 > 1.5 # Maximum reduced chi2 threshold - this is a goodness of fit indicator
-        bad_a = (self.a > 100) | (self.a < 0.1) # Maximum and minimum scale (in arcseconds) - this is a measure of the size of the source
-        nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | np.isnan(self.a) | np.isnan(self.chi2)
-        bad_indices = bad_flexion | bad_chi2 | bad_a | nan_indices | bad_rs
+        # Updated thresholds
+        max_aF = 0.5                 # More conservative flexion threshold
+        max_rs = 5.0                 # Tighter Sérsic radius cutoff
+        max_chi2 = 1.5               # Chi2 fit quality
+        min_a, max_a = 0.01, 2.0     # Size range
 
-        # Remove bad data
+        # Boolean masks for bad data
+        bad_flexion = aF > max_aF
+        bad_rs = self.rs > max_rs
+        bad_chi2 = self.chi2 > max_chi2
+        bad_a = (self.a < min_a) | (self.a > max_a)
+        nan_indices = np.isnan(self.IDs) | np.isnan(self.q) | np.isnan(self.phi) | \
+                    np.isnan(self.F1_fit) | np.isnan(self.F2_fit) | \
+                    np.isnan(self.G1_fit) | np.isnan(self.G2_fit) | \
+                    np.isnan(self.a) | np.isnan(self.rs) | np.isnan(self.chi2)
+
+        bad_indices = bad_flexion | bad_rs | bad_chi2 | bad_a | nan_indices 
+        # Apply cuts
         self.IDs = self.IDs[~bad_indices]
         self.q = self.q[~bad_indices]
         self.phi = self.phi[~bad_indices]
@@ -152,7 +160,10 @@ class JWSTPipeline:
         self.G1_fit = self.G1_fit[~bad_indices]
         self.G2_fit = self.G2_fit[~bad_indices]
         self.a = self.a[~bad_indices]
+        self.rs = self.rs[~bad_indices]
         self.chi2 = self.chi2[~bad_indices]
+
+        print(f"Filtered flexion catalog to {len(self.IDs)} entries after applying updated cuts.")
 
     def match_sources(self):
         """
@@ -165,6 +176,7 @@ class JWSTPipeline:
 
         Notes:
             - If an ID is not found in the source catalog, its position is set to NaN.
+            - Note to self - this functions to make the cuts in the source catalog that we made in the flexion catalog.
         """
         # Build a mapping from label → index
         label_to_index = {label: idx for idx, label in enumerate(self.labels)}
@@ -181,6 +193,7 @@ class JWSTPipeline:
             else:
                 # Necessary to assign NaN if ID not found - otherwise, xc_list and yc_list will be of different lengths
                 # This is a warning, not an error, as we want to continue processing
+                # Also this has never happened in the use of this script - it's unlikely to happen in practice
                 warnings.warn(f"ID '{ID}' not found in source catalog. Assigning NaN.")
                 xc_list.append(np.nan)
                 yc_list.append(np.nan)
@@ -205,8 +218,6 @@ class JWSTPipeline:
         # Center coordinates (necessary for pipeline)
         self.centroid_x = np.mean(self.xc) # Store centroid for later use
         self.centroid_y = np.mean(self.yc)
-        self.xc -= self.centroid_x
-        self.yc -= self.centroid_y
 
         # Use dummy values for uncertainties to initialize Source object
         dummy = np.ones_like(e1) 
@@ -221,25 +232,21 @@ class JWSTPipeline:
             arcsec_per_pixel=self.CDELT
         )
 
-        if signal == 'all':
-            plt.figure()
-            plt.hist(self.a * np.sqrt(self.F1_fit**2 + self.F2_fit**2), bins=50, alpha=0.7, color='blue', edgecolor='black')
-            plt.xlabel('aF (dimensionless)')
-            plt.title('JWST Data')
-            plt.savefig(self.output_dir / 'aF_distribution_{}.png'.format(self.cluster_name), dpi=300)
-            
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
         sigf, sigg = sigaf / self.a, sigag / self.a
         print(f"Using uncertainties: sigs = {np.mean(sigs)}, sigf = {np.median(sigf)}, sigg = {np.median(sigg)}")
         print(f"Sigaf = {sigaf}, Sigag = {sigag}")
-        # raise ValueError('Uncertainties not properly initialized')
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
         self.sources.sigf = sigf
         self.sources.sigg = sigg
+
+        self.sources.x -= self.centroid_x # Center sources around (0, 0)
+        self.sources.y -= self.centroid_y
+
 
     def run_lens_fitting(self):
         """
@@ -265,7 +272,6 @@ class JWSTPipeline:
         """
         Plots the convergence map overlaid on the JWST image.
         """
-        
         img_data = self.get_image_data()
         img_extent = [
             0, img_data.shape[1] * self.CDELT,
@@ -277,8 +283,7 @@ class JWSTPipeline:
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
         )
-        
-        
+
         # Plot settings
         def plot_cluster(convergence, title, save_name):
             
@@ -321,42 +326,29 @@ class JWSTPipeline:
 
         # Compare mass estimates
         utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
-                                     'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
+                                    'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
 
-        if self.signal_choice == 'all':
-            # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
-            # only do this for all signals (there's no point in doing it for shear_f or flexion_g)
-            avg_source_density = len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2)
-            smoothing_scale = 1 / (avg_source_density)**0.5
-            kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
+        # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
+        # only do this for all signals - it won't vary with the signal choice
+        if self.signal_choice != 'all':
+            print("Skipping Kaiser-Squires reconstruction for non-'all' signal choices.")
+            return
 
-            '''
-            # Override the sources with a custom set of lenses, to see if the reconstruction works with known mass
-            # Do this for a range of noise choices
-            xl = [60,80,100]
-            yl = [30,40,50]
-            ml = [1e14, 1e15, 1e14] # Masses in M_sun h^-1
-            self.lenses = halo_obj.NFW_Lens(
-                x=np.array(xl), y=np.array(yl), z=np.zeros(len(xl)),
-                concentration=np.ones(len(xl)), mass=np.array(ml),
-                redshift=z_cluster, chi2=np.zeros(len(xl))
-            )
-            self.lenses.calculate_concentration()
-            self.sources.zero_lensing_signals()  # Reset lensing signals to zero for reconstruction
+        avg_source_density = len(self.sources.x) / (np.pi/4 * np.max(np.hypot(self.sources.x, self.sources.y))**2)
+        smoothing_scale = 1 / (avg_source_density)**0.5
+        kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
 
-            self.sources.apply_noise()  # Apply noise to the sources
-            self.sources.apply_lensing(self.lenses, lens_type='NFW', z_source=z_source)
-            '''
-            X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=10, resolution_scale=1.0)
-            title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
-            save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
-            plot_cluster([X,Y,kappa_flexion], title, save_title)
+        weights_flexion = self.sources.sigf**-2
+        X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, weights=weights_flexion, apodize=True)
+        title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
+        save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
+        plot_cluster([X,Y,kappa_flexion], title, save_title)
 
-            # Do this for the shear as well
-            X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale, resolution_scale=1.0)
-            title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
-            save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
-            plot_cluster([X,Y,kappa_shear], title, save_title)
+        # Do this for the shear as well
+        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale)
+        title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
+        save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
+        plot_cluster([X,Y,kappa_shear], title, save_title)
 
     def get_image_data(self):
         """
@@ -365,46 +357,6 @@ class JWSTPipeline:
         with fits.open(self.image_path) as hdul:
             img_data = hdul['SCI'].data
         return img_data
-
-    def find_outliers(self):
-        """
-        Identifies bad sources based on flexion and shear signals.
-        This method attempts to identify outliers that will not contribute to the lensing analysis, or that may skew the results.
-        """
-        F = np.hypot(self.F1_fit, self.F2_fit)
-        aF = self.a * F
-
-        # ...lets try evaluating an approximate signal to noise ratio
-        sigma_af = np.std(aF)  # Standard deviation of flexion
-        SNR = aF / sigma_af  # Signal to noise ratio
-        # Define a center for the cluster
-        cluster_center = [80, 40]  # Approx center for Abell 2744
-        # Calculate distance from cluster center
-        distances = np.hypot(self.xc - cluster_center[0], self.yc - cluster_center[1])
-
-        # Now let's do a little bit of filtering
-        bad_chi2 = self.chi2 > 1.5  # Bad chi2 values
-        bad_flexion = (aF > 1.0)  # Bad flexion values
-        bad_a = (self.a > 100) | (self.a < 0.1)  # Bad scale values
-        # Color the bad sources
-        bad_sources = bad_chi2 | bad_flexion | bad_a 
-
-        # Create a mask for good sources
-        good_sources = ~bad_sources
-
-        # Plot SNR vs distance
-        plt.figure(figsize=(10, 6))
-        plt.scatter(distances[good_sources], SNR[good_sources], color='blue', label='Good Sources', alpha=0.5, s=10)
-        plt.scatter(distances[bad_sources], SNR[bad_sources], color='red', label='Bad Sources', alpha=0.5, s=10)
-        plt.xlabel('Distance from Cluster Center (arcsec)')
-        plt.ylabel('Signal to Noise Ratio (SNR)')
-        plt.title('SNR vs Distance from Cluster Center')
-        plt.legend()
-        # plt.xscale('log')
-        plt.yscale('log')
-        plt.grid(True)
-        plt.savefig(self.output_dir / 'snr_vs_distance.png', dpi=300)
-        plt.close()
 
 
 if __name__ == '__main__':
@@ -444,7 +396,7 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        # pipeline_el_gordo.run()
+        pipeline_el_gordo.run()
         pipeline_abell.run()
         # Save results to the output file
         '''
