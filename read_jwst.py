@@ -82,7 +82,7 @@ class JWSTPipeline:
         self.centroid_y = None
 
     def run(self):
-        """                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+        """    
         Runs the entire pipeline.
         """
         self.read_flexion_catalog()
@@ -247,7 +247,6 @@ class JWSTPipeline:
         self.sources.x -= self.centroid_x # Center sources around (0, 0)
         self.sources.y -= self.centroid_y
 
-
     def run_lens_fitting(self):
         """
         Runs the lens fitting pipeline.
@@ -278,20 +277,13 @@ class JWSTPipeline:
             0, img_data.shape[0] * self.CDELT
         ]
         
-        # Calculate convergence map
-        
-        X, Y, kappa = utils.calculate_kappa(
-            self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
-        )
-
         # Plot settings
-        def plot_cluster(convergence, title, save_name):
-            
+        def plot_cluster(convergence, title, save_name, peaks=None, masses=None):
             fig, ax = plt.subplots(figsize=(10, 10))
             
             norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
 
-            # Display image
+            # Display JWST image
             ax.imshow(
                 img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
             )
@@ -299,30 +291,45 @@ class JWSTPipeline:
             # Overlay convergence contours
             contour_levels = np.percentile(convergence[2], np.linspace(70, 99, 5))
             contours = ax.contour(
-                convergence[0], convergence[1], convergence[2], levels=contour_levels, cmap='plasma', linewidths=1.5
+                convergence[0], convergence[1], convergence[2], levels=contour_levels,
+                cmap='plasma', linewidths=1.5
             )
-            # Add colorbar for contours
             ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
-            # cbar = plt.colorbar(contours, ax=ax)
 
-            # Plot lens positions
-            # ax.scatter(self.lenses.x, self.lenses.y, s=50, facecolors='none', edgecolors='red', label='Lenses')
+            # Overlay mass peaks if provided
+            if peaks is not None and masses is not None:
+                for i, ((ra_offset, dec_offset), mass) in enumerate(zip(peaks, masses)):
+                    ax.plot(ra_offset, dec_offset, 'ro', markersize=5, label='Mass Peak' if i == 0 else "")
+                    ax.text(
+                        ra_offset + 1, dec_offset + 1,
+                        r"$%.2f \times 10^{13}\ M_\odot$" % (mass / 1e13),
+                        color='black', fontsize=10, weight='bold', ha='left', va='bottom'
+                    )
 
-            # Labels and title
+            # Axes, title, legend
             ax.set_xlabel('RA Offset (arcsec)')
             ax.set_ylabel('Dec Offset (arcsec)')
             ax.set_title(title)
-            # Save and display
-            # Only create a legend if there are labels to display
             if len(ax.get_legend_handles_labels()[0]) > 0:
                 ax.legend()
             
             plt.tight_layout()
             plt.savefig(save_name, dpi=300)
-
+        
         # Plot the cluster
+        # Calculate convergence map
+        
+        X, Y, kappa = utils.calculate_kappa(
+            self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
+        )
+        peaks, masses = utils.find_peaks_and_masses(
+            kappa, 
+            z_lens=z_cluster, z_source=z_source,
+            radius_kpc=200
+        )
+
         title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
-        plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice))
+        plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), peaks=peaks, masses=masses)
 
         # Compare mass estimates
         utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
@@ -340,15 +347,25 @@ class JWSTPipeline:
 
         weights_flexion = self.sources.sigf**-2
         X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, weights=weights_flexion, apodize=True)
+        peaks, masses = utils.find_peaks_and_masses(
+            kappa_flexion,
+            z_lens=z_cluster, z_source=z_source,
+            radius_kpc=200
+        )
         title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
-        plot_cluster([X,Y,kappa_flexion], title, save_title)
+        plot_cluster([X,Y,kappa_flexion], title, save_title, peaks=peaks, masses=masses)
 
         # Do this for the shear as well
         X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale)
+        peaks, masses = utils.find_peaks_and_masses(
+            kappa_shear,
+            z_lens=z_cluster, z_source=z_source,
+            radius_kpc=200
+        )
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
-        plot_cluster([X,Y,kappa_shear], title, save_title)
+        plot_cluster([X,Y,kappa_shear], title, save_title, peaks=peaks, masses=masses)
 
     def get_image_data(self):
         """

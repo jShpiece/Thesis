@@ -15,7 +15,7 @@ from itertools import combinations
 from scipy.integrate import quad
 import matplotlib.pyplot as plt
 import halo_obj
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, maximum_filter
 from scipy.signal.windows import tukey
 
 
@@ -358,6 +358,65 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     term1 = eR * np.sqrt(np.pi * n) / sigma
     term2 = (1 - rmin / rmax) / np.sqrt(1 - (rmin / rmax) ** 2)
     return term1 * term2
+
+
+def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200, threshold=0.05):
+    """
+    Identify mass peaks and compute enclosed mass within a fixed radius.
+    Assumes the kappa map is gridded in arcseconds (not pixels).
+
+    Parameters:
+    - kappa_map: 2D convergence map, gridded in arcseconds
+    - z_lens: lens redshift
+    - z_source: source redshift
+    - radius_kpc: physical radius around each peak to sum kappa over
+    - threshold: minimum convergence value to consider as a peak
+
+    Returns:
+    - peaks_arcsec: list of (RA_offset, Dec_offset) coordinates in arcsec
+    - masses: corresponding mass values in M_sun
+    """
+    from scipy.ndimage import gaussian_filter, maximum_filter
+    from astropy.cosmology import Planck18 as cosmo
+    import astropy.units as u
+    import numpy as np
+
+    # Smooth the convergence map
+    kappa_smooth = gaussian_filter(kappa_map, sigma=2)
+    local_max = maximum_filter(kappa_smooth, size=5)
+    peaks_mask = (kappa_smooth == local_max) & (kappa_smooth > threshold)
+    peak_indices = np.argwhere(peaks_mask)  # (y_arcsec, x_arcsec) integers
+
+    # Conversion: arcsec → kpc
+    arcsec_to_kpc = cosmo.angular_diameter_distance(z_lens).to(u.kpc).value * (np.pi / (180. * 3600.))
+    radius_arcsec = radius_kpc / arcsec_to_kpc  # circular aperture radius
+
+    # Critical surface density
+    sigma_c = critical_surface_density(z_lens, z_source)
+    # Convert to M_sun / kpc^2 from kg / m^2 (sigma_c is just a number)
+    sigma_c = (sigma_c * u.kg / u.m**2).to(u.M_sun / u.kpc**2).value
+
+    Ny, Nx = kappa_map.shape
+    y_coords, x_coords = np.arange(Ny), np.arange(Nx)
+    Y_grid, X_grid = np.meshgrid(y_coords, x_coords, indexing='ij')  # in arcsec
+
+    peaks_arcsec = []
+    masses = []
+
+    for y0, x0 in peak_indices:
+        ra_offset = x0  # x-axis = RA in arcsec
+        dec_offset = y0  # flip y-axis to match Dec increasing upward
+        peaks_arcsec.append((ra_offset, dec_offset))
+
+        dist = np.sqrt((X_grid - x0)**2 + (Y_grid - y0)**2)
+        mask = dist <= radius_arcsec
+        enclosed_kappa = np.sum(kappa_map[mask])
+        area_kpc2 = np.sum(mask) * arcsec_to_kpc**2
+        mass = sigma_c * enclosed_kappa * arcsec_to_kpc**2  # M_sun
+        masses.append(np.abs(mass))
+
+    return peaks_arcsec, masses
+
 
 
 def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8):
