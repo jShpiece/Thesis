@@ -292,7 +292,7 @@ class JWSTPipeline:
             contour_levels = np.percentile(convergence[2], np.linspace(70, 99, 5))
             contours = ax.contour(
                 convergence[0], convergence[1], convergence[2], levels=contour_levels,
-                cmap='plasma', linewidths=1.5
+                cmap='plasma', linewidths=1.5, alpha=0.8
             )
             ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
 
@@ -302,7 +302,7 @@ class JWSTPipeline:
                     ax.plot(ra_offset, dec_offset, 'ro', markersize=5, label='Mass Peak' if i == 0 else "")
                     ax.text(
                         ra_offset + 1, dec_offset + 1,
-                        r"$%.2f \times 10^{13}\ M_\odot$" % (mass / 1e13),
+                        r"$M_{<250 kpc} = %.2f \times 10^{13}\ M_\odot$" % (mass / 1e13),
                         color='black', fontsize=10, weight='bold', ha='left', va='bottom'
                     )
 
@@ -325,7 +325,7 @@ class JWSTPipeline:
         peaks, masses = utils.find_peaks_and_masses(
             kappa, 
             z_lens=z_cluster, z_source=z_source,
-            radius_kpc=200
+            radius_kpc=250
         )
 
         title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
@@ -350,7 +350,7 @@ class JWSTPipeline:
         peaks, masses = utils.find_peaks_and_masses(
             kappa_flexion,
             z_lens=z_cluster, z_source=z_source,
-            radius_kpc=200
+            radius_kpc=250
         )
         title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
@@ -361,7 +361,7 @@ class JWSTPipeline:
         peaks, masses = utils.find_peaks_and_masses(
             kappa_shear,
             z_lens=z_cluster, z_source=z_source,
-            radius_kpc=200
+            radius_kpc=250
         )
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
