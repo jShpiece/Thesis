@@ -322,6 +322,8 @@ class JWSTPipeline:
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
         )
+        k_val = 0.75 # Mass sheet transformation parameter
+        kappa = utils.mass_sheet_transformation(kappa, k=k_val)
         peaks, masses = utils.find_peaks_and_masses(
             kappa, 
             z_lens=z_cluster, z_source=z_source,
@@ -347,6 +349,7 @@ class JWSTPipeline:
 
         weights_flexion = self.sources.sigf**-2
         X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, weights=weights_flexion, apodize=True)
+        kappa_flexion = utils.mass_sheet_transformation(kappa_flexion, k=k_val)
         peaks, masses = utils.find_peaks_and_masses(
             kappa_flexion,
             z_lens=z_cluster, z_source=z_source,
@@ -358,6 +361,7 @@ class JWSTPipeline:
 
         # Do this for the shear as well
         X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale)
+        kappa_shear = utils.mass_sheet_transformation(kappa_shear, k=k_val)
         peaks, masses = utils.find_peaks_and_masses(
             kappa_shear,
             z_lens=z_cluster, z_source=z_source,
@@ -413,7 +417,7 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        pipeline_el_gordo.run()
+        # pipeline_el_gordo.run()
         pipeline_abell.run()
         # Save results to the output file
         '''
