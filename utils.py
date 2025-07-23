@@ -524,6 +524,32 @@ def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
     return total_mass_solar
 
 
+def estimate_mass_sheet_factor(kappa):
+    """
+    Estimates the mass-sheet factor k such that the transformed convergence
+    goes to zero at the boundary.
+
+    Parameters:
+        kappa (np.ndarray): Original convergence map.
+
+    Returns:
+        float: Estimated mass-sheet transformation factor k.
+    """
+    # Extract boundary values
+    top = kappa[0, :]
+    bottom = kappa[-1, :]
+    left = kappa[:, 0]
+    right = kappa[:, -1]
+
+    # Combine edge values and compute mean
+    edge_values = np.concatenate([top, bottom, left[1:-1], right[1:-1]])
+    mean_edge_kappa = np.mean(edge_values)
+
+    # Estimate k using the constraint: mean_edge_kappa_transformed = 0
+    k = 1 / (1 - mean_edge_kappa)
+    return k
+
+
 def mass_sheet_transformation(kappa, k):
     """
     Applies the mass-sheet transformation to a convergence map.
