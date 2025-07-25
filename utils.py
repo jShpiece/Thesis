@@ -418,7 +418,6 @@ def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200, threshold
     return peaks_arcsec, masses
 
 
-
 def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8):
     """
     Calculates the convergence (kappa) map for a given set of lenses.
@@ -627,6 +626,7 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     rho_s = rho_c * delta_c
     kappa_s = rho_s * rs / sigma_crit  # Dimensionless surface density
     flexion_s = (kappa_s * Dl) / (rs * u.radian.to(u.arcsecond))  # In inverse arcseconds
+
 
     # Distances between sources and halos
     dx = sources.x - halos.x[:, np.newaxis]

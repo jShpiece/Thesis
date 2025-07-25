@@ -8,257 +8,162 @@ import source_obj
 import halo_obj
 import utils
 
+plt.style.use('scientific_presentation.mplstyle')
 
-plt.style.use('scientific_presentation.mplstyle') # Use the scientific presentation style sheet for all plots
+class HST_Pipeline:
+    arcsec_per_pixel = 0.03
+    hubble_param = 0.67
 
-# Define some constants
-arcsec_per_pixel = 0.03 # From the instrumentation documentation
-hubble_param = 0.67 # Hubble constant
-z_cluster = 0.308 # Redshift of the cluster
-z_source = 0.52 # Mean redshift of the sources
+    def __init__(self, config):
+        """Initialize the pipeline with a configuration dictionary."""
+        self.config = config
+        self.field = config['field']
+        self.full = config['full']
+        self.use_flags = config['use_flags']
+        self.lens_type = config['lens_type']
+        self.z_cluster = config['cluster_redshift']
+        self.z_source = config['source_redshift']
 
-def plot_cluster(ax, img_data, X, Y, conv, lenses, sources, extent, vmax=1, legend=True):
-    # Plotting function to overlay lensing reconstruction - in the form of lenses or convergence contours, 
-    # ontop of an optical image of the cluster
-    ax.set_xlabel('x (arcsec)')
-    ax.set_ylabel('y (arcsec)')
-    for img in img_data:
-        # Allow for multiple images to be overlayed - allows for band or epoch stacking
-        norm = ImageNormalize(img, vmin=0, vmax=vmax, stretch=LogStretch())
-        ax.imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
+        self.img_path = config['image_path']
+        self.cat_path = config['catalog_path']
+        self.vmax = config['vmax']
+        self.dx = config['dx'] * self.arcsec_per_pixel
+        self.dy = config['dy'] * self.arcsec_per_pixel
+        self.out_dir = config['output_dir']
 
-    if conv is not None:
-        # Adjusted contour levels for better feature representation.
-        contour_levels = np.percentile(conv, np.linspace(60, 100, 5))
-
-        # Only overlay the contours of the convergence map - the color map will be too busy
-        # Overlay the contours of the convergence map.
-        contour = ax.contour(X, Y, conv, levels=contour_levels, cmap='plasma', linewidths=1.5)
-        ax.clabel(contour, inline=True, fontsize=8, fmt='%.2f')
-
-    if lenses is not None:
-        ax.scatter(lenses.x, lenses.y, color='red', label='Recovered Lenses')
-    if sources is not None:
-        ax.scatter(sources.x, sources.y, marker='.', color='blue', alpha=0.5, label='Sources')
-
-    if legend:
-        ax.legend()
-
-
-def get_img_data(fits_file_path) -> np.ndarray:
-    # Get the image data from the fits file
-    fits_file = fits.open(fits_file_path)
-    img_data = fits_file[0].data
-    header = fits_file[0].header
-    return img_data, header
-
-
-def get_file_paths(cluster='a2744', field='cluster'):
-    if cluster == 'a2744':
-        if field == 'cluster':
-            fits_file_path = 'JWST_Data/HST/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits'
-            csv_file_path = 'JWST_Data/HST/a2744_clu_lenser.csv'
-            vmax = 1 # Set the maximum value for the image normalization
-            dx = 115
-            dy = 55
-        elif field == 'parallel':
-            fits_file_path = 'JWST_Data/HST/hlsp_frontier_hst_acs-30mas-selfcal_abell2744-hffpar_f435w_v1.0_drz.fits'
-            csv_file_path = 'JWST_Data/HST/a2744_par_lenser.csv'
-            vmax = 0.1 # Set the maximum value for the image normalization
-            dx = 865
-            dy = 400
-    
-    return fits_file_path, csv_file_path, vmax, dx, dy
-
-
-def get_catalog_data(file):
-    # Get the catalog data from the csv file
-    data = np.genfromtxt(file, delimiter=',')
-    # Read the header to get the column names
-    with open(file, 'r') as f:
-        header = f.readline().strip().split(',')
-    # Get the column indices
-    xcol, ycol, acol = header.index('xs'), header.index('ys'), header.index('a') # Position terms
-    qcol, phicol = header.index('q'), header.index('phi') # Shape terms
-    f1col, f2col = header.index('f1'), header.index('f2') # Flexion terms
-    g1col, g2col = header.index('g1'), header.index('g2') # Shear terms
-    # Extract the data - omit the header
-    x, y, a = data[1:, xcol], data[1:, ycol], data[1:, acol]
-    q, phi = data[1:, qcol], data[1:, phicol]
-    f1, f2 = data[1:, f1col], data[1:, f2col]
-    g1, g2 = data[1:, g1col], data[1:, g2col]
-
-    return x, y, a, q, phi, f1, f2, g1, g2
-
-
-def reconstruct_system(file, dx, dy, flags=False, use_flags=[True, True, True], lens_type='NFW'):
-    # Take in a file of sources and reconstruct the lensing system
-
-    # Get the catalog data
-    x, y, a, q, phi, f1, f2, g1, g2 = get_catalog_data(file)
-
-    # Apply offsets to the x and y coordinates - this corrects for miscommunication between the pipeline and image
-    x += dx 
-    y += dy 
-
-    # Set xmax to be the largest distance from the center
-    centroid = np.mean(x), np.mean(y)
-    xmax = np.max(np.sqrt((x - centroid[0])**2 + (y - centroid[1])**2))
-
-    # Calculate the shear from the shape parameters
-    shear_mag = (q-1)/(q+1)
-    e1, e2 = shear_mag * np.cos(2*phi), shear_mag * np.sin(2*phi)
-
-    # Compute noise parameters
-    sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
-    sigaf = np.mean([np.std(a * f1), np.std(a * f2)])
-    sigag = np.mean([np.std(a * g1), np.std(a * g2)])
-    sigf, sigg = sigaf / a, sigag / a
-
-    # Set the centroid to be the origin
-    x -= centroid[0]
-    y -= centroid[1]
-
-    # Create source object and perform the lensing fit
-    sources = source_obj.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg)
-    recovered_lenses, reducedchi2 = main.fit_lensing_field(sources, xmax=xmax, flags=flags, use_flags=use_flags, lens_type=lens_type, z_lens=z_cluster, z_source=z_source)
-
-    # Move our sourecs and lenses back to the original centroid
-    sources.x += centroid[0]
-    sources.y += centroid[1]
-    recovered_lenses.x += centroid[0]
-    recovered_lenses.y += centroid[1]
-    recovered_lenses.mass *= hubble_param # Convert the mass to h^-1 solar masses
-
-    return recovered_lenses, sources, xmax, reducedchi2
-
-
-def reconstruct_a2744(field='cluster', full_reconstruction=False, use_flags=[True, True, True], lens_type='SIS'):
-    '''
-    A handler function to plot the lensing field of Abell 2744 - either the cluster or parallel field.
-    --------------------
-    Parameters:
-        field: 'cluster' or 'parallel' - which field to plot
-        full_reconstruction: whether or not to perform a full reconstruction of the lensing field, or to load in a precomputed one
-    '''
-
-    warnings.filterwarnings("ignore", category=RuntimeWarning) # Beginning of pipeline will generate expected RuntimeWarnings
-
-    fits_file_path, csv_file_path, vmax, dx, dy = get_file_paths(field=field)
-
-    img_data, _ = get_img_data(fits_file_path)
-    if field == 'cluster':
-        img_data = [img_data[0], img_data[1]] # Stack the two epochs
-    elif field == 'parallel':
-        img_data = [img_data]
-
-    # Define output directory and file name
-    dir = 'Output//JWST//ABELL//abel//'
-    file_name = f"A2744{'_par' if field == 'parallel' else '_clu'}"
-
-    # Append signal flags to file name
-    signals = ['_gamma', '_F', '_G']
-    if use_flags == [True, True, True]:
-        signals_used = '_all'
-        file_name += signals_used
-    else:
-        signals_used = ''.join(sig for flag, sig in zip(use_flags, signals) if flag)
-        file_name += signals_used
-
-    if full_reconstruction:
-        lenses, sources, _, _ = reconstruct_system(csv_file_path, dx * arcsec_per_pixel, dy * arcsec_per_pixel, flags=True, use_flags=use_flags, lens_type=lens_type)
-        print('Completed reconstruction')
-
-        lenses.export_to_csv(dir + file_name + '_lenses.csv')
-        sources.export_to_csv(dir + file_name + '_sources.csv')
-    else:
-        # If we're not doing a full reconstruction, we need to load in the data
-        if lens_type == 'SIS':
-            lenses = halo_obj.SIS_Lens.load_from_csv(dir + file_name + '_lenses.csv')
+        self.img_data, _ = self.get_image_data()
+        if self.field == 'cluster':
+            self.img_data = [self.img_data[0], self.img_data[1]]
         else:
-            # lenses = halo_obj.NFW_Lens.load_from_csv(dir + file_name + '_lenses.csv')
-            lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], 0, [0])
-            lenses.redshift = z_cluster
-            lenses.import_from_csv(dir + file_name + '_lenses.csv')
-        sources = source_obj.Source([0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0])
-        sources.import_from_csv(dir + file_name + '_sources.csv')
-        print('Loaded in data')
+            self.img_data = [self.img_data]
 
-    # Generate a convergence map that spans the same area as the image
-    extent = [0, img_data[0].shape[1] * arcsec_per_pixel, 0, img_data[0].shape[0] * arcsec_per_pixel]
+        self.file_stub = f"{config['cluster_name']}_{'par' if self.field == 'parallel' else 'clu'}" + self.get_signal_tag()
+        self.sources = None
+        self.lenses = None
+        self.centroid = None
+        self.xmax = None
 
-    X, Y, kappa = utils.calculate_kappa(lenses, extent, lens_type=lens_type, source_redshift=z_source)
-    print('Calculated kappa')
-    
-    if lens_type=='SIS':
-        mass = utils.calculate_mass(kappa, z_cluster, z_source, 1) # Calculate the mass within the convergence map
-    else:
-        mass = np.sum(lenses.mass) # Calculate the mass of the NFW lenses
-    
-    # Build the title
-    title = 'Abell 2744 Convergence Map - ' + 'Parallel Field' if field == 'parallel' else 'Cluster Field' + '\n' + f'M = {mass:.3e} $h^{{-1}} M_\\odot$'
+    def get_signal_tag(self):
+        """Generate a tag to append to filenames based on which signals are used."""
+        labels = ['_gamma', '_F', '_G']
+        return ''.join(sig for flag, sig in zip(self.use_flags, labels) if flag) or '_all'
 
-    if use_flags != [True, True, True]:
-        title += '\n Signals Used: '
-        signals = []
-        if use_flags[0]:
-            signals.append(r'$\gamma$')
-        if use_flags[1]:
-            signals.append('F')
-        if use_flags[2]:
-            signals.append('G')
-        title += ' '.join(signals)
-    else:
-        title += '\n All Signals Used'
-    
-    # Create the figure 
-    fig = plt.figure(figsize=(8, 10))
-    ax = fig.add_subplot(111)
-    plot_cluster(ax, img_data, X, Y, kappa, None, None, extent, vmax, legend=False)
-    ax.set_title(title)
-    plt.savefig(dir + file_name + '.png')
+    def get_image_data(self):
+        """Load image data from a FITS file and return data and header."""
+        return fits.getdata(self.img_path, header=True)
 
-    if lens_type == 'NFW':
-        utils.compare_mass_estimates(lenses, dir + 'mass_A2744_' + signals_used + '.png',
-                                     'Mass Comparison of Abell 2744 with HST Data \n Signals Used: ' + ' '.join(signals),
-                                     'ABELL_2744')
+    def get_catalog(self):
+        """Read the lensing source catalog CSV and extract required columns."""
+        data = np.genfromtxt(self.cat_path, delimiter=',')
+        with open(self.cat_path, 'r') as f:
+            header = f.readline().strip().split(',')
+        idx = {key: header.index(key) for key in ['xs','ys','a','q','phi','f1','f2','g1','g2']}
+        cols = [data[1:, idx[key]] for key in idx]
+        return cols
 
-    # If signal choice is all, also do a kaiser squires reconstruction
-    if use_flags == [True, True, True]:
-        '''
-        lenses = halo_obj.NFW_Lens([130], [130], [0], [10], [1e14], z_cluster, [0])
-        sources.zero_lensing_signals()
-        sources.apply_lensing(lenses, lens_type=lens_type, z_source=z_source)
-        sources.apply_noise()
-        '''
+    def init_sources(self):
+        """Initialize the Source object with coordinates, ellipticities, and uncertainties."""
+        x, y, a, q, phi, f1, f2, g1, g2 = self.get_catalog()
+        x += self.dx; y += self.dy
+        self.centroid = np.mean(x), np.mean(y)
+        self.xmax = np.max(np.hypot(x - self.centroid[0], y - self.centroid[1]))
+        e1 = (q - 1)/(q + 1) * np.cos(2 * phi)
+        e2 = (q - 1)/(q + 1) * np.sin(2 * phi)
+        sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
+        sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
+        sigag = np.mean([np.std(a*g1), np.std(a*g2)])
+        sigf, sigg = sigaf / a, sigag / a
+        x -= self.centroid[0]; y -= self.centroid[1]
+        self.sources = source_obj.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg)
 
-        X1, Y1, kappa_f = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'flexion')
-        X2, Y2, kappa_g = utils.perform_kaiser_squire_reconstruction(sources, extent, signal = 'shear')
+    def fit_lenses(self):
+        """Fit lens model to the source catalog using specified flags and model."""
+        self.lenses, _ = main.fit_lensing_field(self.sources, self.xmax, flags=True, use_flags=self.use_flags,
+                                                lens_type=self.lens_type, z_lens=self.z_cluster, z_source=self.z_source)
+        self.sources.x += self.centroid[0]; self.sources.y += self.centroid[1]
+        self.lenses.x += self.centroid[0]; self.lenses.y += self.centroid[1]
+        self.lenses.mass *= self.hubble_param
 
-        # Plot the flexion and shear maps
-        plt.close('all')
-        fig, ax = plt.subplots(1, 2, figsize=(12, 6))
-        fig.suptitle('Kaiser-Squires Reconstruction with HST Data')
-        ax[0].set_title('Flexion Map')
-        ax[0].contour(X1, Y1, kappa_f, levels=np.percentile(kappa_f, np.linspace(70, 99, 5)), cmap='plasma', linewidths=1.5)
-        ax[1].set_title('Shear Map')
-        ax[1].contour(X2, Y2, kappa_g, levels=np.percentile(kappa_g, np.linspace(70, 99, 5)), cmap='plasma', linewidths=1.5)
-        
-        for img in img_data:
-            # Allow for multiple images to be overlayed - allows for band or epoch stacking
-            norm = ImageNormalize(img, vmin=0, vmax=vmax, stretch=LogStretch())
-            ax[0].imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
-            ax[1].imshow(img, origin='lower', extent=extent, norm=norm, cmap='gray_r')
-        plt.savefig(dir + file_name + '_ks_reconstruction.png')
-        plt.close()
+    def plot_overlay(self, ax, X, Y, kappa, lenses=None, sources=None, peaks=None, masses=None):
+        """Overlay image data with optional convergence contours, lens, and source positions."""
+        ax.set_xlabel('x (arcsec)'); ax.set_ylabel('y (arcsec)')
+        for img in self.img_data:
+            norm = ImageNormalize(img, vmin=0, vmax=self.vmax, stretch=LogStretch())
+            ax.imshow(img, origin='lower', extent=self.extent, norm=norm, cmap='gray_r')
+        if kappa is not None:
+            levels = np.percentile(kappa, np.linspace(60, 100, 5))
+            contour = ax.contour(X, Y, kappa, levels=levels, cmap='plasma', linewidths=1.5)
+            ax.clabel(contour, inline=True, fontsize=8, fmt='%.2f')
+        if lenses is not None:
+            ax.scatter(lenses.x, lenses.y, c='red', label='Lenses')
+        if sources is not None:
+            ax.scatter(sources.x, sources.y, c='blue', alpha=0.5, s=2, label='Sources')
+        if peaks is not None and masses is not None:
+            for i, ((px, py), mass) in enumerate(zip(peaks, masses)):
+                ax.plot(px, py, 'ro', markersize=5, label='Mass Peak' if i == 0 else '')
+                ax.text(px + 1, py + 1, f"{mass/1e13:.2f}e13 $M_\\odot$", color='black', fontsize=8, weight='bold')
+
+    def run(self):
+        """Run the full pipeline: load data, fit lenses, plot and save output."""
+        if self.full:
+            self.init_sources()
+            self.fit_lenses()
+            self.lenses.export_to_csv(self.out_dir + self.file_stub + '_lenses.csv')
+            self.sources.export_to_csv(self.out_dir + self.file_stub + '_sources.csv')
+        else:
+            if self.lens_type == 'SIS':
+                self.lenses = halo_obj.SIS_Lens.load_from_csv(self.out_dir + self.file_stub + '_lenses.csv')
+            else:
+                self.lenses = halo_obj.NFW_Lens([0], [0], [0], [0], [0], self.z_cluster, [0])
+                self.lenses.import_from_csv(self.out_dir + self.file_stub + '_lenses.csv')
+            self.sources = source_obj.Source([0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0])
+            self.sources.import_from_csv(self.out_dir + self.file_stub + '_sources.csv')
+
+        self.extent = [0, self.img_data[0].shape[1]*self.arcsec_per_pixel,
+                          0, self.img_data[0].shape[0]*self.arcsec_per_pixel]
+        X, Y, kappa = utils.calculate_kappa(self.lenses, self.extent, lens_type=self.lens_type, source_redshift=self.z_source)
+        k_val = utils.estimate_mass_sheet_factor(kappa)
+        kappa_shear = utils.mass_sheet_transformation(kappa, k=k_val)
+        peaks, masses = utils.find_peaks_and_masses(kappa_shear, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=250)
+
+        fig, ax = plt.subplots(figsize=(8, 10))
+        self.plot_overlay(ax, X, Y, kappa, peaks=peaks, masses=masses)
+        ax.set_title(f"{self.config['cluster_name']} Convergence Map - {'Parallel' if self.field=='parallel' else 'Cluster'} Field\nM = {np.sum(self.lenses.mass):.3e} $h^{{-1}} M_\\odot$")
+        plt.savefig(self.out_dir + self.file_stub + '.png')
+
+        if self.use_flags == [True]*3:
+            for sig in ['flexion', 'shear']:
+                Xk, Yk, kappak = utils.perform_kaiser_squire_reconstruction(self.sources, self.extent, signal=sig)
+                k_val = utils.estimate_mass_sheet_factor(kappak)
+                kappak = utils.mass_sheet_transformation(kappak, k=k_val)
+                peaks_ks, masses_ks = utils.find_peaks_and_masses(kappak, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=250)
+                fig, ax = plt.subplots()
+                self.plot_overlay(ax, Xk, Yk, kappak, peaks=peaks_ks, masses=masses_ks)
+                ax.set_title(f"Kaiser-Squires {sig.capitalize()} Map")
+                plt.savefig(self.out_dir + self.file_stub + f'_ks_{sig}.png')
 
 if __name__ == '__main__':
-    use_all_signals = [True, True, True] # Use all signals
-    shear_flex = [True, True, False] # Use shear and flexion
-    all_flex = [False, True, True] # Use flexion and g-flexion
-    global_signals = [True, False, True] # Use shear and g-flexion (global signals)
-    signal_choices = [use_all_signals, shear_flex, all_flex, global_signals]
-    
-    for field in ['cluster']:
-        for use_flags in signal_choices:
-            reconstruct_a2744(field=field, full_reconstruction=False, use_flags=use_flags, lens_type='NFW')
+    signal_sets = [
+        [True, True, True],
+        [True, True, False],
+        [False, True, True],
+        [True, False, True]
+    ]
+    for use_flags in signal_sets:
+        config = {
+            'field': 'cluster',
+            'full': False,
+            'use_flags': use_flags,
+            'lens_type': 'NFW',
+            'cluster_redshift': 0.308,
+            'source_redshift': 0.52,
+            'image_path': 'JWST_Data/HST/color_hlsp_frontier_hst_acs-30mas_abell2744_f814w_v1.0-epoch2_f606w_v1.0_f435w_v1.0_drz_sci.fits',
+            'catalog_path': 'JWST_Data/HST/a2744_clu_lenser.csv',
+            'vmax': 1,
+            'dx': 115,
+            'dy': 55,
+            'output_dir': 'Output/JWST/ABELL/abel/',
+            'cluster_name': 'ABELL_2744'
+        }
+        pipeline = HST_Pipeline(config)
+        pipeline.run()
