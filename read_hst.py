@@ -45,8 +45,8 @@ class HST_Pipeline:
 
     def get_signal_tag(self):
         """Generate a tag to append to filenames based on which signals are used."""
-        labels = ['_gamma', '_F', '_G']
-        return ''.join(sig for flag, sig in zip(self.use_flags, labels) if flag) or '_all'
+        labels = ['_shear', '_F', '_G']
+        return 'all' if all(self.use_flags) else ''.join(sig for flag, sig in zip(self.use_flags, labels) if flag)
 
     def get_image_data(self):
         """Load image data from a FITS file and return data and header."""
@@ -64,16 +64,16 @@ class HST_Pipeline:
     def init_sources(self):
         """Initialize the Source object with coordinates, ellipticities, and uncertainties."""
         x, y, a, q, phi, f1, f2, g1, g2 = self.get_catalog()
-        x += self.dx; y += self.dy
+        x += self.dx; y += self.dy # Adjust coordinates to match the image center
         self.centroid = np.mean(x), np.mean(y)
-        self.xmax = np.max(np.hypot(x - self.centroid[0], y - self.centroid[1]))
+        self.xmax = np.max(np.hypot(x,y))
         e1 = (q - 1)/(q + 1) * np.cos(2 * phi)
         e2 = (q - 1)/(q + 1) * np.sin(2 * phi)
         sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
         sigaf = np.mean([np.std(a*f1), np.std(a*f2)])
         sigag = np.mean([np.std(a*g1), np.std(a*g2)])
         sigf, sigg = sigaf / a, sigag / a
-        x -= self.centroid[0]; y -= self.centroid[1]
+        x -= self.centroid[0]; y -= self.centroid[1] # Center the coordinates
         self.sources = source_obj.Source(x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg)
 
     def fit_lenses(self):
@@ -120,27 +120,41 @@ class HST_Pipeline:
             self.sources.import_from_csv(self.out_dir + self.file_stub + '_sources.csv')
 
         self.extent = [0, self.img_data[0].shape[1]*self.arcsec_per_pixel,
-                          0, self.img_data[0].shape[0]*self.arcsec_per_pixel]
+                        0, self.img_data[0].shape[0]*self.arcsec_per_pixel]
         X, Y, kappa = utils.calculate_kappa(self.lenses, self.extent, lens_type=self.lens_type, source_redshift=self.z_source)
         k_val = utils.estimate_mass_sheet_factor(kappa)
-        kappa_shear = utils.mass_sheet_transformation(kappa, k=k_val)
-        peaks, masses = utils.find_peaks_and_masses(kappa_shear, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=250)
+        kappa = utils.mass_sheet_transformation(kappa, k=k_val)
+        peaks, masses = utils.find_peaks_and_masses(
+            kappa, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=250
+            )
 
         fig, ax = plt.subplots(figsize=(8, 10))
         self.plot_overlay(ax, X, Y, kappa, peaks=peaks, masses=masses)
-        ax.set_title(f"{self.config['cluster_name']} Convergence Map - {'Parallel' if self.field=='parallel' else 'Cluster'} Field\nM = {np.sum(self.lenses.mass):.3e} $h^{{-1}} M_\\odot$")
+        ax.set_title(f"{self.config['cluster_name']} Convergence Map - {'Parallel' if self.field=='parallel' else 'Cluster'} Field\nM = {np.sum(self.lenses.mass):.3e} $h^{{-1}} M_\\odot$\nSignals: " + self.get_signal_tag())
         plt.savefig(self.out_dir + self.file_stub + '.png')
 
+        # Set the smoothing scale as the average distance between sources
+        source_density = len(self.sources.x) / (np.pi * self.xmax**2)
+        smoothing_scale = 1 / np.sqrt(source_density) 
+        weights_shear = np.ones_like(self.sources.x) 
+        weights_flexion = self.sources.sigf**-2
         if self.use_flags == [True]*3:
             for sig in ['flexion', 'shear']:
-                Xk, Yk, kappak = utils.perform_kaiser_squire_reconstruction(self.sources, self.extent, signal=sig)
+                Xk, Yk, kappak = utils.perform_kaiser_squire_reconstruction(
+                    self.sources, self.extent, signal=sig, 
+                    smoothing_scale=smoothing_scale, 
+                    weights=weights_shear if sig == 'shear' else weights_flexion, 
+                    apodize=True if sig == 'flexion' else False
+                    )
                 k_val = utils.estimate_mass_sheet_factor(kappak)
                 kappak = utils.mass_sheet_transformation(kappak, k=k_val)
-                peaks_ks, masses_ks = utils.find_peaks_and_masses(kappak, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=250)
+                peaks_ks, masses_ks = utils.find_peaks_and_masses(
+                    kappak, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=250
+                    )
                 fig, ax = plt.subplots()
                 self.plot_overlay(ax, Xk, Yk, kappak, peaks=peaks_ks, masses=masses_ks)
                 ax.set_title(f"Kaiser-Squires {sig.capitalize()} Map")
-                plt.savefig(self.out_dir + self.file_stub + f'_ks_{sig}.png')
+                plt.savefig(self.out_dir + f'ABELL2744_ks_{sig}.png')
 
 if __name__ == '__main__':
     signal_sets = [
@@ -152,7 +166,7 @@ if __name__ == '__main__':
     for use_flags in signal_sets:
         config = {
             'field': 'cluster',
-            'full': False,
+            'full': True,
             'use_flags': use_flags,
             'lens_type': 'NFW',
             'cluster_redshift': 0.308,
