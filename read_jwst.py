@@ -6,6 +6,7 @@ from astropy.table import Table
 from astropy.visualization import ImageNormalize, LogStretch
 from pathlib import Path
 import warnings
+import csv
 
 # Import custom modules (ensure these are in your Python path)
 import main
@@ -92,6 +93,39 @@ class JWSTPipeline:
         self.initialize_sources()
         self.run_lens_fitting()
         self.plot_results()
+
+    def compute_error_bars(self):
+        """
+        High order function that performs a jacknife resampling to compute error bars
+        """
+        self.read_flexion_catalog()
+        self.read_source_catalog()
+        self.cut_flexion_catalog()
+        self.match_sources()
+        self.initialize_sources()
+
+        # From here, remove each source in turn and fit the lenses
+        # Create a csv file to store the results
+        # Columns: i, x, y, M200, concentration
+        writer = csv.writer(open("jackknife_results_{}_{}.csv".format(self.cluster_name, self.signal_choice), "w"))
+        writer.writerow(["i", "x", "y", "M200", "concentration"])
+        n_sources = len(self.sources.x)
+        # Initialize progress bar
+        utils.print_progress_bar(0, n_sources, prefix='Computing error bars', suffix='Complete', length=50)
+        for i in range(n_sources):
+            source_clone = self.sources.copy() # Store an unmodified copy of the sources
+            self.sources.remove(i) # Remove the i-th source
+
+            # Fit the lenses
+            self.run_lens_fitting(flags=False) # Don't overwhelm the output with prints
+            # Store the results
+            for j in range(len(self.lenses.x)):
+                writer.writerow([i, self.lenses.x[j], self.lenses.y[j], self.lenses.mass[j], self.lenses.concentration[j]])
+
+            # Restore the removed source
+            self.sources = source_clone
+            # Update progress bar
+            utils.print_progress_bar(i + 1, n_sources, prefix='Computing error bars', suffix='Complete', length=50)
 
     def read_source_catalog(self):
         """
@@ -236,8 +270,6 @@ class JWSTPipeline:
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
         sigf, sigg = sigaf / self.a, sigag / self.a
-        print(f"Using uncertainties: sigs = {np.mean(sigs)}, sigf = {np.median(sigf)}, sigg = {np.median(sigg)}")
-        print(f"Sigaf = {sigaf}, Sigag = {sigag}")
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
@@ -247,14 +279,14 @@ class JWSTPipeline:
         self.sources.x -= self.centroid_x # Center sources around (0, 0)
         self.sources.y -= self.centroid_y
 
-    def run_lens_fitting(self):
+    def run_lens_fitting(self, flags=True):
         """
         Runs the lens fitting pipeline.
         """
         xmax = np.max(np.hypot(self.sources.x, self.sources.y))
         
         self.lenses, _ = main.fit_lensing_field(
-            self.sources, xmax, flags=True, use_flags=self.use_flags, lens_type='NFW', z_lens=z_cluster, z_source=z_source
+            self.sources, xmax, flags=flags, use_flags=self.use_flags, lens_type='NFW', z_lens=z_cluster, z_source=z_source
         )
 
         check = self.lenses.check_for_nan_properties() # Ensure no NaN properties in lenses
@@ -384,7 +416,7 @@ class JWSTPipeline:
 
 if __name__ == '__main__':
     # Configuration dictionary
-    signals = ['shear_g']
+    signals = ['all', 'shear_f', 'f_g', 'shear_g']
     # Create an output file to store all the results
     '''
     output_file = Path('Output/JWST/ABELL/combined_results.csv')
@@ -420,7 +452,8 @@ if __name__ == '__main__':
         pipeline_abell = JWSTPipeline(abell_config)
 
         # pipeline_el_gordo.run()
-        pipeline_abell.run()
+        # pipeline_abell.run()
+        pipeline_abell.compute_error_bars()
         # Save results to the output file
         '''
         with open(output_file, 'a') as f:
