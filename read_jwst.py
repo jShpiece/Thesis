@@ -6,12 +6,16 @@ from astropy.table import Table
 from astropy.visualization import ImageNormalize, LogStretch
 from pathlib import Path
 import warnings
+
 import csv
+import concurrent.futures
+from functools import partial
+import tqdm
 
 # Import custom modules (ensure these are in your Python path)
 import main
 import source_obj
-import halo_obj
+# import halo_obj
 import utils
 
 # Set matplotlib style
@@ -22,6 +26,30 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 # Redshifts
 hubble_param = 0.67 # Hubble constant
+
+def unpack_and_run_jackknife(args):
+    # Unpack the arguments and run the jackknife worker function
+    return jackknife_worker(*args)
+
+def run_fitting_with_sources(self_obj, sources):
+    # This function runs the lens fitting with a modified set of sources.
+    # Used in the jackknife procedure.
+    original_sources = self_obj.sources
+    self_obj.sources = sources
+    self_obj.run_lens_fitting(flags=False)
+    result = self_obj.lenses.copy()
+    self_obj.sources = original_sources
+    return result
+
+# Top-level worker function: accepts self explicitly
+def jackknife_worker(i, self_obj, sources):
+    modified_sources = sources.copy()
+    modified_sources.remove(i)
+    lenses = run_fitting_with_sources(self_obj, modified_sources)
+    return [
+        [i, x, y, m, c]
+        for x, y, m, c in zip(lenses.x, lenses.y, lenses.mass, lenses.concentration)
+    ]
 
 class JWSTPipeline:
     """
@@ -55,12 +83,10 @@ class JWSTPipeline:
             self.use_flags = [True, False, True]
         else:
             raise ValueError(f"Invalid signal choice: {self.signal_choice}")
-        
-        # Create redshifts as a global variable
-        global z_source
-        z_source = config['source_redshift']
-        global z_cluster
-        z_cluster = config['cluster_redshift']
+
+        # Create redshifts as instance variables
+        self.z_source = config['source_redshift']
+        self.z_cluster = config['cluster_redshift']
 
         # Data placeholders
         self.IDs = None
@@ -96,7 +122,7 @@ class JWSTPipeline:
 
     def compute_error_bars(self):
         """
-        High order function that performs a jacknife resampling to compute error bars
+        Performs jackknife resampling to compute error bars in parallel.
         """
         self.read_flexion_catalog()
         self.read_source_catalog()
@@ -104,28 +130,22 @@ class JWSTPipeline:
         self.match_sources()
         self.initialize_sources()
 
-        # From here, remove each source in turn and fit the lenses
-        # Create a csv file to store the results
-        # Columns: i, x, y, M200, concentration
-        writer = csv.writer(open("jackknife_results_{}_{}.csv".format(self.cluster_name, self.signal_choice), "w"))
-        writer.writerow(["i", "x", "y", "M200", "concentration"])
-        n_sources = len(self.sources.x)
-        # Initialize progress bar
-        utils.print_progress_bar(0, n_sources, prefix='Computing error bars', suffix='Complete', length=50)
-        for i in range(n_sources):
-            source_clone = self.sources.copy() # Store an unmodified copy of the sources
-            self.sources.remove(i) # Remove the i-th source
+        output_path = f"jackknife_results_{self.cluster_name}_{self.signal_choice}.csv"
+        with open(output_path, "w", newline='') as f:
+            csv.writer(f).writerow(["i", "x", "y", "M200", "concentration"])
 
-            # Fit the lenses
-            self.run_lens_fitting(flags=False) # Don't overwhelm the output with prints
-            # Store the results
-            for j in range(len(self.lenses.x)):
-                writer.writerow([i, self.lenses.x[j], self.lenses.y[j], self.lenses.mass[j], self.lenses.concentration[j]])
+        sources_copy = self.sources.copy()  # Create a copy of the sources to avoid modifying the original
+        n_sources = len(sources_copy.x)
+        indices_to_use = np.random.choice(n_sources, size=200, replace=False)  # Randomly select 200 indices for jackknife
 
-            # Restore the removed source
-            self.sources = source_clone
-            # Update progress bar
-            utils.print_progress_bar(i + 1, n_sources, prefix='Computing error bars', suffix='Complete', length=50)
+        # Prepare args list for executor
+        args_list = [(i, self, sources_copy) for i in indices_to_use]
+
+        with open(output_path, "a", newline='') as f:
+            writer = csv.writer(f)
+            with concurrent.futures.ProcessPoolExecutor() as executor:
+                for result in tqdm.tqdm(executor.map(unpack_and_run_jackknife, args_list, chunksize = 3), total=len(indices_to_use), desc="Computing error bars"):
+                    writer.writerows(result)
 
     def read_source_catalog(self):
         """
@@ -286,7 +306,7 @@ class JWSTPipeline:
         xmax = np.max(np.hypot(self.sources.x, self.sources.y))
         
         self.lenses, _ = main.fit_lensing_field(
-            self.sources, xmax, flags=flags, use_flags=self.use_flags, lens_type='NFW', z_lens=z_cluster, z_source=z_source
+            self.sources, xmax, flags=flags, use_flags=self.use_flags, lens_type='NFW', z_lens=self.z_cluster, z_source=self.z_source
         )
 
         check = self.lenses.check_for_nan_properties() # Ensure no NaN properties in lenses

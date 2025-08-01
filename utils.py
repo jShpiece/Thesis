@@ -177,9 +177,6 @@ def nfw_projected_mass(
             R = np.sqrt((x_vals[j] - x_center)**2 + (y_vals[i] - y_center)**2)
             surface_density = Sigma(R)
             kappa[i, j] = surface_density / sigma_c
-    # perform a mass sheet transformation - such that the convergence goes to zero at large radii
-    # use the function mass_sheet_transformation(kappa, k) where k is the mass sheet parameter
-    # Determine the mass sheet parameter k so that the convergence goes to zero at large radii
 
     return kappa, area_per_pixel
 
