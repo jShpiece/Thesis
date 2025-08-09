@@ -188,9 +188,17 @@ class JWSTPipeline:
         F = np.hypot(self.F1_fit, self.F2_fit)
         aF = self.a * F  # Dimensionless flexion
 
-        # Updated thresholds
+        '''
+        # Updated thresholds - use for ABELL_2744
         max_aF = 0.5                 # More conservative flexion threshold
         max_rs = 5.0                 # Tighter Sérsic radius cutoff
+        max_chi2 = 1.5               # Chi2 fit quality
+        min_a, max_a = 0.01, 2.0     # Size range
+        '''
+
+        # Updated thresholds - use for EL_GORDO
+        max_aF = 0.5                 # More conservative flexion threshold
+        max_rs = 5.0                # Tighter Sérsic radius cutoff
         max_chi2 = 1.5               # Chi2 fit quality
         min_a, max_a = 0.01, 2.0     # Size range
 
@@ -216,6 +224,28 @@ class JWSTPipeline:
         self.a = self.a[~bad_indices]
         self.rs = self.rs[~bad_indices]
         self.chi2 = self.chi2[~bad_indices]
+
+        # Measures should carry the things we want to plot, and have a name attribute for plotting
+        # Recalculate aF
+        aF = self.a * np.hypot(self.F1_fit, self.F2_fit)
+        measures = [
+            self.q, self.phi, self.F1_fit, self.F2_fit,
+            self.G1_fit, self.G2_fit, self.a, self.rs, self.chi2, aF
+        ]
+        names = [
+            'q', 'phi', 'F1_fit', 'F2_fit',
+            'G1_fit', 'G2_fit', 'a', 'rs', 'chi2', 'aF'
+        ]
+
+        for measure, name in zip(measures, names):
+            plt.figure(figsize=(10, 6))
+            plt.hist(measure, bins=50, color='blue', alpha=0.7)
+            plt.title(f'Distribution of {name}')
+            plt.xlabel(name)
+            plt.ylabel("Frequency")
+            plt.grid()
+            plt.savefig(self.output_dir / f'distribution_{name}.png')
+        plt.close('all')
 
         print(f"Filtered flexion catalog to {len(self.IDs)} entries after applying updated cuts.")
 
@@ -319,6 +349,8 @@ class JWSTPipeline:
         self.sources.x += self.centroid_x # Move sources back to original coordinates
         self.sources.y += self.centroid_y
 
+        print(np.log10(self.lenses.mass))
+
     def plot_results(self):
         """
         Plots the convergence map overlaid on the JWST image.
@@ -348,13 +380,19 @@ class JWSTPipeline:
             )
             ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
 
+            # Draw a countour where kappa = 0
+            ax.contour(
+                convergence[0], convergence[1], convergence[2],
+                levels=[0], colors='black', linewidths=1.5, linestyles='dashed'
+            )
+
             # Overlay mass peaks if provided
             if peaks is not None and masses is not None:
                 for i, ((ra_offset, dec_offset), mass) in enumerate(zip(peaks, masses)):
                     ax.plot(ra_offset, dec_offset, 'ro', markersize=5, label='Mass Peak' if i == 0 else "")
                     ax.text(
                         ra_offset + 1, dec_offset + 1,
-                        r"$M_{<250 kpc} = %.2f \times 10^{13}\ M_\odot$" % (mass / 1e13),
+                        r"$M_{<300 kpc} = %.2f \times 10^{13}\ M_\odot$" % (mass / 1e13),
                         color='black', fontsize=10, weight='bold', ha='left', va='bottom'
                     )
 
@@ -366,28 +404,28 @@ class JWSTPipeline:
                 ax.legend()
             
             plt.tight_layout()
+            # plt.show()
             plt.savefig(save_name, dpi=300)
+            
         
         # Plot the cluster
         # Calculate convergence map
         
         X, Y, kappa = utils.calculate_kappa(
-            self.lenses, extent=img_extent, lens_type='NFW', source_redshift=z_source
-        )
-        k_val = utils.estimate_mass_sheet_factor(kappa) # Mass sheet transformation parameter
-        kappa = utils.mass_sheet_transformation(kappa, k=k_val)
-        peaks, masses = utils.find_peaks_and_masses(
-            kappa, 
-            z_lens=z_cluster, z_source=z_source,
-            radius_kpc=250
+            self.lenses, extent=img_extent, lens_type='NFW', source_redshift=self.z_source
         )
 
+        peaks, masses = utils.find_peaks_and_masses(
+            kappa, 
+            z_lens=self.z_cluster, z_source=self.z_source,
+            radius_kpc=300
+        )
         title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
         plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), peaks=peaks, masses=masses)
 
         # Compare mass estimates
-        utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
-                                    'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
+        # utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
+        #                            'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         # only do this for all signals - it won't vary with the signal choice
@@ -405,8 +443,8 @@ class JWSTPipeline:
         kappa_flexion = utils.mass_sheet_transformation(kappa_flexion, k=k_val)
         peaks, masses = utils.find_peaks_and_masses(
             kappa_flexion,
-            z_lens=z_cluster, z_source=z_source,
-            radius_kpc=250
+            z_lens=self.z_cluster, z_source=self.z_source,
+            radius_kpc=300
         )
         title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
@@ -418,8 +456,8 @@ class JWSTPipeline:
         kappa_shear = utils.mass_sheet_transformation(kappa_shear, k=k_val)
         peaks, masses = utils.find_peaks_and_masses(
             kappa_shear,
-            z_lens=z_cluster, z_source=z_source,
-            radius_kpc=250
+            z_lens=self.z_cluster, z_source=self.z_source,
+            radius_kpc=300
         )
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
@@ -462,8 +500,8 @@ if __name__ == '__main__':
             'image_path': 'JWST_Data/JWST/EL_GORDO/Image_Data/stacked.fits',
             'output_dir': 'Output/JWST/EL_GORDO/',
             'cluster_name': 'EL_GORDO',
-            'cluster_redshift': 0.870,
-            'source_redshift': 4.25,
+            'cluster_redshift': 0.873,
+            'source_redshift': 4.32,
             'signal_choice': signal
         }
 
@@ -471,9 +509,9 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        # pipeline_el_gordo.run()
+        pipeline_el_gordo.run()
         # pipeline_abell.run()
-        pipeline_abell.compute_error_bars()
+        # pipeline_abell.compute_error_bars()
         # Save results to the output file
         '''
         with open(output_file, 'a') as f:

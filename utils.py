@@ -8,7 +8,6 @@ computations.
 """
 
 import numpy as np
-from astropy.cosmology import Planck15 as cosmo
 from astropy.constants import c, G
 from astropy import units as u
 from itertools import combinations
@@ -16,8 +15,7 @@ from scipy.integrate import quad
 import matplotlib.pyplot as plt
 import halo_obj
 from scipy.ndimage import gaussian_filter, maximum_filter
-from scipy.signal.windows import tukey
-
+from astropy.cosmology import Planck18 as cosmo
 
 # ------------------------
 # Terminal Utility Functions
@@ -357,7 +355,7 @@ def stn_shear(eR, n, sigma, rmin, rmax):
     return term1 * term2
 
 
-def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200, threshold=0.05):
+def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200):
     """
     Identify mass peaks and compute enclosed mass within a fixed radius.
     Assumes the kappa map is gridded in arcseconds (not pixels).
@@ -367,25 +365,22 @@ def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200, threshold
     - z_lens: lens redshift
     - z_source: source redshift
     - radius_kpc: physical radius around each peak to sum kappa over
-    - threshold: minimum convergence value to consider as a peak
+    - threshold: minimum relative value to consider a peak
 
     Returns:
     - peaks_arcsec: list of (RA_offset, Dec_offset) coordinates in arcsec
     - masses: corresponding mass values in M_sun
     """
-    from scipy.ndimage import gaussian_filter, maximum_filter
-    from astropy.cosmology import Planck18 as cosmo
-    import astropy.units as u
-    import numpy as np
 
     # Smooth the convergence map
+    threshold = 0.1  # Minimum relative value to consider a peak
     kappa_smooth = gaussian_filter(kappa_map, sigma=2)
     local_max = maximum_filter(kappa_smooth, size=5)
-    peaks_mask = (kappa_smooth == local_max) & (kappa_smooth > threshold)
+    peaks_mask = (kappa_smooth == local_max) & (kappa_smooth > threshold * np.max(kappa_smooth))
     peak_indices = np.argwhere(peaks_mask)  # (y_arcsec, x_arcsec) integers
 
     # Conversion: arcsec → kpc
-    arcsec_to_kpc = cosmo.angular_diameter_distance(z_lens).to(u.kpc).value * (np.pi / (180. * 3600.))
+    arcsec_to_kpc = cosmo.angular_diameter_distance(z_lens).to(u.kpc).value * (np.pi / (180. * 3600.)) # 1 kpc in arcsec
     radius_arcsec = radius_kpc / arcsec_to_kpc  # circular aperture radius
 
     # Critical surface density
@@ -408,7 +403,6 @@ def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200, threshold
         dist = np.sqrt((X_grid - x0)**2 + (Y_grid - y0)**2)
         mask = dist <= radius_arcsec
         enclosed_kappa = np.sum(kappa_map[mask])
-        area_kpc2 = np.sum(mask) * arcsec_to_kpc**2
         mass = sigma_c * enclosed_kappa * arcsec_to_kpc**2  # M_sun
         masses.append(np.abs(mass))
 
@@ -428,6 +422,13 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8):
         tuple: (X, Y, kappa) where X and Y are meshgrid arrays, and kappa is the convergence map.
     """
     xmin, xmax, ymin, ymax = extent
+
+    # Pad the grid to drive kappa to zero at the edges
+    pad_val = 150
+    xmin -= pad_val
+    xmax += pad_val
+    ymin -= pad_val
+    ymax += pad_val
     x_range = np.linspace(xmin, xmax, int(xmax - xmin))
     y_range = np.linspace(ymin, ymax, int(ymax - ymin))
     X, Y = np.meshgrid(x_range, y_range)
@@ -470,6 +471,15 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8):
             kappa_s = rho_s[k] * rs_1[k] / sigma_crit  # Dimensionless surface density
             kappa += 2 * kappa_s * term_1 / (x ** 2 - 1)
 
+    # Break the mass sheet degeneracy by requiring kappa to go to zero at the edges
+    # k_val = estimate_mass_sheet_factor(kappa) # Mass sheet transformation parameter
+    k_val = 0.95 # Test value
+    kappa = mass_sheet_transformation(kappa, k=k_val)
+
+    # Remove the padding
+    X = X[pad_val:-pad_val, pad_val:-pad_val]
+    Y = Y[pad_val:-pad_val, pad_val:-pad_val]
+    kappa = kappa[pad_val:-pad_val, pad_val:-pad_val]
     return X, Y, kappa
 
 
@@ -543,6 +553,7 @@ def estimate_mass_sheet_factor(kappa):
 
     # Estimate k using the constraint: mean_edge_kappa_transformed = 0
     k = 1 / (1 - mean_edge_kappa)
+    print(k)
     return k
 
 
@@ -791,7 +802,6 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     # largest_halo = np.argmax(halos.mass)
     # Calculate the centroid as the center of mass of the halos
     centroid = np.array([np.sum(halos.x * halos.mass) / np.sum(halos.mass), np.sum(halos.y * halos.mass) / np.sum(halos.mass)])
-    # centroid = [100,40] # hardcoding the centroid for now - this is where we expect the center of mass for el gordo
     halos.x -= centroid[0] + 0.5
     halos.y -= centroid[1] + 0.5
 
