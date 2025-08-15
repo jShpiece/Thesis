@@ -424,7 +424,7 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8):
     xmin, xmax, ymin, ymax = extent
 
     # Pad the grid to drive kappa to zero at the edges
-    pad_val = 150
+    pad_val = 100
     xmin -= pad_val
     xmax += pad_val
     ymin -= pad_val
@@ -890,7 +890,7 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
 
 def perform_kaiser_squire_reconstruction(sources, extent, signal='shear',
                                          smoothing_scale=5.0, resolution_scale=1.0,
-                                         weights=None, apodize=False):
+                                         weights=None, apodize=False, pad_fraction=0.2):
     """
     Kaiser-Squires Fourier inversion to reconstruct convergence (kappa) from lensing signal.
 
@@ -902,6 +902,9 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='shear',
         resolution_scale: pixels per arcsecond
         weights: 1D array of per-object weights (e.g., SNR^2), optional
         apodize: whether to apply a Tukey window to suppress edge effects
+        pad_fraction: fraction of padding to apply (default is 0.2)
+            Padding is applied symmetrically to all sides of the input arrays.
+            Expressed as a fraction of the input array size.
 
     Returns:
         X, Y: coordinate grids (2D)
@@ -960,7 +963,6 @@ def perform_kaiser_squire_reconstruction(sources, extent, signal='shear',
         S2_grid = S2_grid * apod_window
 
     # --- Padding (reflection to reduce discontinuities) ---
-    pad_fraction = 0.2
     pad = int(npixels * pad_fraction)
     S1_padded = np.pad(S1_grid, pad_width=pad, mode='reflect')
     S2_padded = np.pad(S2_grid, pad_width=pad, mode='reflect')

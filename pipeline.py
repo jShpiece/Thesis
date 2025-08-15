@@ -18,7 +18,7 @@ Functions:
 
 import numpy as np
 import scipy.optimize as opt
-from scipy.optimize import minimize
+from scipy.optimize import minimize, minimize_scalar
 import utils  # Custom utility functions
 import minimizer  # Custom minimizer module
 import source_obj # Source object
@@ -525,13 +525,16 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', z_source
                 z_source
             ]
 
-            result = opt.minimize(
-                chi2wrapper, guess, args=params,
-                method='L-BFGS-B',
-                bounds=[(10, 17)],
-                options={'maxiter': 1e3, 'ftol': 1e-6}
+            chi2_fn = lambda x: chi2wrapper(x, params)
+            # Robust 1-D bounded search over log10(M)
+            res = minimize_scalar(
+                chi2_fn,
+                bounds=(10.0, 17.0),
+                method="bounded",
+                options={"xatol": 1e-6, "maxiter": 2000}
             )
-            lenses.mass[i] = 10 ** result.x
+            print('Optimization reached: {}'.format(res.success))
+            lenses.mass[i] = 10 ** res.x
             lenses.calculate_concentration()
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')

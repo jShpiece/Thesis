@@ -15,8 +15,9 @@ import tqdm
 # Import custom modules (ensure these are in your Python path)
 import main
 import source_obj
-# import halo_obj
+import halo_obj
 import utils
+import pipeline
 
 # Set matplotlib style
 plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
@@ -320,6 +321,7 @@ class JWSTPipeline:
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
         sigf, sigg = sigaf / self.a, sigag / self.a
+        print(sigf, sigg, sigaf, sigag)
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
@@ -335,6 +337,26 @@ class JWSTPipeline:
         """
         xmax = np.max(np.hypot(self.sources.x, self.sources.y))
         
+        # Override real lensing with simulated signal based on literature results for el gordo
+        
+        simulated_cluster_x = [110.0, 30.0] # First entry SE, second entry NW
+        simulated_cluster_y = [35.0, 120.0] 
+        simulated_cluster_mass = [5e14, 5e14]
+        simulated_lenses = halo_obj.NFW_Lens(
+            x=simulated_cluster_x, y=simulated_cluster_y, z=np.zeros_like(simulated_cluster_x), 
+            concentration=np.ones_like(simulated_cluster_x), mass=simulated_cluster_mass, 
+            redshift=self.z_cluster, chi2 = np.zeros_like(simulated_cluster_x)
+            )
+        
+        simulated_lenses.x -= self.centroid_x # Center simulated lenses around (0, 0)
+        simulated_lenses.y -= self.centroid_y
+        simulated_lenses.calculate_concentration()
+        self.lenses = simulated_lenses
+        self.sources.zero_lensing_signals()
+        self.sources.apply_noise()
+        self.sources.apply_lensing(simulated_lenses, lens_type='NFW', z_source=self.z_source)
+        
+        self.output_dir = Path(self.config['output_dir'] + "Simulated/")
         self.lenses, _ = main.fit_lensing_field(
             self.sources, xmax, flags=flags, use_flags=self.use_flags, lens_type='NFW', z_lens=self.z_cluster, z_source=self.z_source
         )
@@ -395,7 +417,7 @@ class JWSTPipeline:
                         r"$M_{<300 kpc} = %.2f \times 10^{13}\ M_\odot$" % (mass / 1e13),
                         color='black', fontsize=10, weight='bold', ha='left', va='bottom'
                     )
-
+            
             # Axes, title, legend
             ax.set_xlabel('RA Offset (arcsec)')
             ax.set_ylabel('Dec Offset (arcsec)')
@@ -406,10 +428,7 @@ class JWSTPipeline:
             plt.tight_layout()
             # plt.show()
             plt.savefig(save_name, dpi=300)
-            
-        
-        # Plot the cluster
-        # Calculate convergence map
+            plt.close(fig)
         
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=self.z_source
@@ -438,7 +457,9 @@ class JWSTPipeline:
         kappa_extent = [min(self.sources.x), max(self.sources.x), min(self.sources.y), max(self.sources.y)]
 
         weights_flexion = self.sources.sigf**-2
-        X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='flexion', smoothing_scale=smoothing_scale, weights=weights_flexion, apodize=True)
+        X, Y, kappa_flexion = utils.perform_kaiser_squire_reconstruction(
+            self.sources, extent=kappa_extent, signal='flexion', 
+            smoothing_scale=smoothing_scale, weights=weights_flexion, apodize=True)
         k_val = utils.estimate_mass_sheet_factor(kappa_flexion)  # Mass sheet transformation parameter
         kappa_flexion = utils.mass_sheet_transformation(kappa_flexion, k=k_val)
         peaks, masses = utils.find_peaks_and_masses(
@@ -451,7 +472,9 @@ class JWSTPipeline:
         plot_cluster([X,Y,kappa_flexion], title, save_title, peaks=peaks, masses=masses)
 
         # Do this for the shear as well
-        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(self.sources, extent=kappa_extent, signal='shear', smoothing_scale=smoothing_scale)
+        X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(
+            self.sources, extent=kappa_extent, signal='shear', 
+            smoothing_scale=smoothing_scale)
         k_val = utils.estimate_mass_sheet_factor(kappa_shear)  # Mass sheet transformation parameter
         kappa_shear = utils.mass_sheet_transformation(kappa_shear, k=k_val)
         peaks, masses = utils.find_peaks_and_masses(
@@ -462,6 +485,79 @@ class JWSTPipeline:
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title, peaks=peaks, masses=masses)
+        
+        # Look at the first lens, see how chi2 changes with mass
+        lens_SE = halo_obj.NFW_Lens(
+            x=self.lenses.x[0],
+            y=self.lenses.y[0],
+            z=self.z_cluster,
+            concentration=self.lenses.concentration[0],
+            mass=self.lenses.mass[0],
+            redshift=self.z_cluster,
+            chi2=self.lenses.chi2[0]
+        )
+        lens_NW = halo_obj.NFW_Lens(
+            x=self.lenses.x[1],
+            y=self.lenses.y[1],
+            z=self.z_cluster,
+            concentration=self.lenses.concentration[1],
+            mass=self.lenses.mass[1],
+            redshift=self.z_cluster,
+            chi2=self.lenses.chi2[1]
+        )
+
+        # We're going to vary the mass of this lens and see how the chi2 value changes
+        mass_values = np.logspace(13,16,1000)
+        chi2_values_SE = []
+        chi2_values_NW = []
+        for mass_value in mass_values:
+            lens_SE.mass[0] = mass_value
+            lens_NW.mass[0] = mass_value
+            chi2_SE = pipeline.update_chi2_values(self.sources, lens_SE, use_flags=self.use_flags, lens_type='NFW',z_source=self.z_source)
+            chi2_NW = pipeline.update_chi2_values(self.sources, lens_NW, use_flags=self.use_flags, lens_type='NFW',z_source=self.z_source)
+            chi2_values_SE.append(chi2_SE)
+            chi2_values_NW.append(chi2_NW)
+
+        # Plot
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+
+        # For SE lens
+        chi2_SE = np.array(chi2_values_SE)
+        mean_SE = np.mean(chi2_SE)
+        std_SE = np.std(chi2_SE)
+        # Mask out extreme spikes above mean + 5*std for plotting
+        mask_SE = chi2_SE < (mean_SE + 5 * std_SE)
+        axs[0].plot(mass_values[mask_SE], chi2_SE[mask_SE])
+        axs[0].set_xscale('log')
+        axs[0].set_xlabel('Mass [M_sun]')
+        axs[0].set_ylabel('Chi2')
+        axs[0].set_title('Chi2 vs Mass for SE Lens')
+        axs[0].grid()
+        # Let's add a point at the minimum value
+        min_index = np.argmin(chi2_SE)
+        axs[0].scatter(mass_values[min_index], chi2_SE[min_index], color='red')
+        # Also add a line where the actual lens is located
+        axs[0].axvline(x=self.lenses.mass[0], color='blue', linestyle='--')
+
+        # For NW lens
+        chi2_NW = np.array(chi2_values_NW)
+        mean_NW = np.mean(chi2_NW)
+        std_NW = np.std(chi2_NW)
+        mask_NW = chi2_NW < (mean_NW + 5 * std_NW)
+        axs[1].plot(mass_values[mask_NW], chi2_NW[mask_NW])
+        axs[1].set_xscale('log')
+        axs[1].set_xlabel('Mass [M_sun]')
+        axs[1].set_ylabel('Chi2')
+        axs[1].set_title('Chi2 vs Mass for NW Lens')
+        axs[1].grid()
+        # Let's add a point at the minimum value
+        min_index = np.argmin(chi2_NW)
+        axs[1].scatter(mass_values[min_index], chi2_NW[min_index], color='red')
+        # Also add a line where the actual lens is located
+        axs[1].axvline(x=self.lenses.mass[1], color='blue', linestyle='--')
+
+        plt.tight_layout()
+        plt.show()
 
     def get_image_data(self):
         """
