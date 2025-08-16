@@ -102,7 +102,7 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
                     sigg=1.0
                 )
                 # Compute the lensing signals from the lens
-                _, _, f1_model, f2_model, _, _ = utils.calculate_lensing_signals_nfw(lens, source, z_s)
+                _, _, f1_model, f2_model, _, _ = utils.calculate_lensing_signals_nfw(lens, source)
 
                 # Compute the difference between observed and modeled flexion
                 flexion_diff = np.sqrt((f1_model - sources.f1[i])**2 + (f2_model - sources.f2[i])**2)
@@ -136,7 +136,7 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
 
-def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS', z_source=0.8):
+def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
     """
     Optimizes lens positions via local minimization.
     Currently only minimizes relative to sources within a certain distance of the lens.
@@ -212,7 +212,7 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS', z
                 lens.calculate_concentration()
 
                 # Compute chi-squared for this lens and all sources
-                chi2 = metric.calculate_chi_squared(filtered_sources, lens, use_flags, lens_type='NFW', z_source=z_source)
+                chi2 = metric.calculate_chi_squared(filtered_sources, lens, use_flags, lens_type='NFW')
                 return chi2
 
             # Run the optimizer
@@ -293,7 +293,7 @@ def filter_lens_positions(sources, lenses, xmax, threshold_distance=0.5, lens_ty
     return lenses
 
 
-def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS', z_source=0.8):
+def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
     """
     Merges lenses that are closer than a specified threshold.
 
@@ -353,7 +353,7 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS', z_source=0.8
 
 
 def forward_lens_selection(
-    sources, candidate_lenses, use_flags, lens_type='NFW', z_source=0.8,
+    sources, candidate_lenses, use_flags, lens_type='NFW',
     base_tolerance=0.003, mass_scale=1e13, exponent=-1.0
     ):
     """
@@ -427,7 +427,7 @@ def forward_lens_selection(
                 )
 
             # Compute chi-squared and reduced chi-squared
-            chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type, z_source=z_source)
+            chi2 = metric.calculate_chi_squared(sources, test_lenses, use_flags, lens_type=lens_type)
             dof = metric.calc_degrees_of_freedom(sources, test_lenses, use_flags)
             reduced_chi2 = chi2 / dof if dof > 0 else np.inf
             chi2_list.append(reduced_chi2)
@@ -481,7 +481,7 @@ def forward_lens_selection(
         return selected_lenses, best_reduced_chi2
 
 
-def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', z_source=0.8):
+def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS'):
     """
     Optimizes the strength parameters (Einstein radius or mass) of the lenses.
 
@@ -521,8 +521,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', z_source
             params = [
                 'NFW', 'constrained',
                 lenses.x[i], lenses.y[i], lenses.redshift,
-                lenses.concentration[i], sources, use_flags, 
-                z_source
+                lenses.concentration[i], sources, use_flags
             ]
 
             chi2_fn = lambda x: chi2wrapper(x, params)
@@ -542,7 +541,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', z_source
     return lenses
 
 
-def update_chi2_values(sources, lenses, use_flags, lens_type='NFW', z_source=0.8):
+def update_chi2_values(sources, lenses, use_flags, lens_type='NFW'):
     """
     Updates the chi-squared values for each lens based on the current source data.
 
@@ -556,7 +555,7 @@ def update_chi2_values(sources, lenses, use_flags, lens_type='NFW', z_source=0.8
     """
     # Calculate global chi-squared and degrees of freedom
     
-    global_chi2 = metric.calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type, z_source = z_source)
+    global_chi2 = metric.calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
     dof = metric.calc_degrees_of_freedom(sources, lenses, use_flags)
     reduced_chi2 = global_chi2 / dof if dof != 0 else np.inf
 
@@ -575,7 +574,7 @@ def update_chi2_values(sources, lenses, use_flags, lens_type='NFW', z_source=0.8
                 lenses.redshift, [0]
             )
             chi2_values[i] = metric.calculate_chi_squared(
-                sources, one_halo, use_flags, lens_type=lens_type, z_source = z_source
+                sources, one_halo, use_flags, lens_type=lens_type
             )
 
     lenses.chi2 = chi2_values
@@ -633,7 +632,7 @@ def chi2wrapper(guess, params):
                 params[3], 10 ** guess, params[2], np.empty_like(params[0])
             )
             lenses.calculate_concentration()
-            return metric.calculate_chi_squared(params[4], lenses, params[5], lens_type='NFW', z_source=params[6])
+            return metric.calculate_chi_squared(params[4], lenses, params[5], lens_type='NFW')
         
         elif constraint_type == 'dual':
             # Fit both mass and concentration

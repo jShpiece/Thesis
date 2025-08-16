@@ -608,114 +608,136 @@ def calculate_lensing_signals_sis(lenses, sources):
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
 
-def calculate_lensing_signals_nfw(halos, sources, z_source):
+def calculate_lensing_signals_nfw(halos, sources):
     """
-    Calculates lensing signals (shear, flexion, g-flexion) for NFW halos.
+    Calculates lensing signals (shear, flexion, g-flexion) for NFW halos,
+    allowing each source to have its own redshift.
 
     Parameters:
-        halos: NFW_Lens object containing halo properties.
-        sources: Source object containing source positions.
-        z_source (float): Redshift of the source.
+        halos: NFW_Lens object with array-like fields
+            halos.x, halos.y        [arcsec]
+            halos.mass              [M_sun or M_sun/h]
+            halos.concentration     [dimensionless]
+            halos.redshift          [z_lens] shape (N_halos,)
+        sources: Source object with array-like fields
+            sources.x, sources.y    [arcsec]
+            sources.redshift        [z_source] shape (N_sources,)
 
     Returns:
         tuple: (shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2)
+            Each array has shape (N_sources,)
     """
-    # Angular diameter distances
-    Dl, _, _ = angular_diameter_distances(halos.redshift, z_source)
+    # --- Geometry / distances ---
+    # Broadcast lens/source redshifts to (N_halos, N_sources)
+    z_l = np.asarray(halos.redshift)[:, None]
+    z_s = np.asarray(sources.redshift)[None, :]
 
-    # Calculate R200 and scale radius
-    r200, r200_arcsec = halos.calc_R200()
-    rs = r200 / halos.concentration  # Scale radius in meters
+    # Mask: only sources behind a lens contribute
+    behind = (z_s > z_l)
 
-    # Critical surface density at lens redshift
-    sigma_crit = critical_surface_density(halos.redshift, z_source)
-    rho_c = cosmo.critical_density(halos.redshift).to(u.kg / u.m**3).value
-    delta_c = halos.calc_delta_c()
-    rho_s = rho_c * delta_c
-    kappa_s = rho_s * rs / sigma_crit  # Dimensionless surface density
-    flexion_s = (kappa_s * Dl) / (rs * u.radian.to(u.arcsecond))  # In inverse arcseconds
+    # Angular-diameter distance to the lens (per-halo), in meters
+    # Using astropy cosmology directly to avoid z_s dependence:
+    Dl = cosmo.angular_diameter_distance(np.asarray(halos.redshift)).to(u.m).value  # (N_halos,)
+    Dl = Dl[:, None]  # (N_halos, 1) for broadcasting
 
+    # Critical surface density per (halo, source) pair.
+    # This must depend on both z_l and z_s. If your helper supports broadcasting, use it directly.
+    def _sigma_crit_broadcast(zl, zs):
+        try:
+            return critical_surface_density(zl, zs)
+        except Exception:
+            vfun = np.vectorize(critical_surface_density, otypes=[float])
+            return vfun(zl, zs)
 
-    # Distances between sources and halos
-    dx = sources.x - halos.x[:, np.newaxis]
-    dy = sources.y - halos.y[:, np.newaxis]
+    sigma_crit_hs = _sigma_crit_broadcast(z_l, z_s)  # (N_halos, N_sources)
+    # Ensure no contribution if source is not behind the lens
+    sigma_crit_hs = np.where(behind, sigma_crit_hs, np.inf)
+
+    # --- Halo structural params ---
+    r200, r200_arcsec = halos.calc_R200()  # r200 [meters], r200_arcsec [arcsec], both (N_halos,)
+    rs = r200 / halos.concentration  # (N_halos,) scale radius [meters]
+
+    rho_c = cosmo.critical_density(np.asarray(halos.redshift)).to(u.kg / u.m**3).value  # (N_halos,)
+    delta_c = halos.calc_delta_c()  # (N_halos,)
+    rho_s = rho_c * delta_c  # (N_halos,)
+
+    # kappa_s per (halo, source)
+    kappa_s = (rho_s * rs)[:, None] / sigma_crit_hs  # (N_halos, N_sources)
+
+    # Flexion scale (per halo,source); convert rad→arcsec once
+    rad_to_arcsec = u.radian.to(u.arcsecond)
+    flexion_s = (kappa_s * Dl) / (rs[:, None] * rad_to_arcsec)  # (N_halos, N_sources)
+
+    # --- Source–halo separations (arcsec) ---
+    dx = sources.x[None, :] - halos.x[:, None]  # (N_halos, N_sources)
+    dy = sources.y[None, :] - halos.y[:, None]
     r = np.hypot(dx, dy)
-    r = np.where(r == 0, 0.01, r)  # Avoid division by zero
+    r = np.where(r == 0, 0.01, r)  # avoid division by zero
 
-    x = np.abs(r / (r200_arcsec[:, np.newaxis] / halos.concentration[:, np.newaxis]))
+    # x ≡ R/rs in angle units (arcsec) using r200_arcsec / c as θ_s
+    theta_s = (r200_arcsec / halos.concentration)[:, None]  # (N_halos,1)
+    x = np.abs(r / theta_s)  # (N_halos, N_sources)
 
-    # Radial terms for lensing calculations
+    # --- Radial terms (broadcasted) ---
     def radial_term_1(x):
         sol = np.zeros_like(x)
-        mask1 = x < 1
-        mask2 = x >= 1
-
-        sol[mask1] = 1 - (2 / np.sqrt(1 - x[mask1] ** 2)) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
-        sol[mask2] = 1 - (2 / np.sqrt(x[mask2] ** 2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
-
+        m1 = x < 1
+        m2 = ~m1
+        # avoid tiny negatives due to float
+        t1 = np.sqrt(np.clip((1 - x[m1]) / (1 + x[m1]), 0.0, None))
+        sol[m1] = 1 - (2 / np.sqrt(1 - x[m1]**2)) * np.arctanh(t1)
+        t2 = np.sqrt(np.clip((x[m2] - 1) / (1 + x[m2]), 0.0, None))
+        sol[m2] = 1 - (2 / np.sqrt(x[m2]**2 - 1)) * np.arctan(t2)
         return sol
 
     def radial_term_2(x):
         sol = np.zeros_like(x)
-        mask1 = x < 1
-        mask2 = x > 1
-        mask3 = x == 1
+        m1 = x < 1
+        m2 = x > 1
+        m3 = x == 1
 
         k = (1 - x) / (1 + x)
 
-        sol[mask1] = (
-            8 * np.arctanh(np.sqrt(k[mask1])) / (x[mask1] ** 2 * np.sqrt(1 - x[mask1] ** 2))
-            + 4 * np.log(x[mask1] / 2) / x[mask1] ** 2
-            - 2 / (x[mask1] ** 2 - 1)
-            + 4 * np.arctanh(np.sqrt(k[mask1])) / ((x[mask1] ** 2 - 1) * np.sqrt(1 - x[mask1] ** 2))
+        t1 = np.sqrt(np.clip(k[m1], 0.0, None))
+        sol[m1] = (
+            8 * np.arctanh(t1) / (x[m1]**2 * np.sqrt(1 - x[m1]**2))
+            + 4 * np.log(x[m1] / 2) / x[m1]**2
+            - 2 / (x[m1]**2 - 1)
+            + 4 * np.arctanh(t1) / ((x[m1]**2 - 1) * np.sqrt(1 - x[m1]**2))
         )
 
-        sol[mask2] = (
-            8 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / (x[mask2] ** 2 * np.sqrt(x[mask2] ** 2 - 1))
-            + 4 * np.log(x[mask2] / 2) / x[mask2] ** 2
-            - 2 / (x[mask2] ** 2 - 1)
-            + 4 * np.arctan(np.sqrt((x[mask2] - 1) / (x[mask2] + 1))) / ((x[mask2] ** 2 - 1) ** (3 / 2))
+        t2 = np.sqrt(np.clip((x[m2] - 1) / (x[m2] + 1), 0.0, None))
+        sol[m2] = (
+            8 * np.arctan(t2) / (x[m2]**2 * np.sqrt(x[m2]**2 - 1))
+            + 4 * np.log(x[m2] / 2) / x[m2]**2
+            - 2 / (x[m2]**2 - 1)
+            + 4 * np.arctan(t2) / ((x[m2]**2 - 1)**(3/2))
         )
 
-        sol[mask3] = 10 / 3 + 4 * np.log(1 / 2)
-
+        sol[m3] = 10.0/3.0 + 4.0 * np.log(0.5)
         return sol
 
     def radial_term_3(x):
         sol = np.zeros_like(x)
-        mask1 = x < 1
-        mask2 = x >= 1
-
-        sol[mask1] = (
-            1 / (1 - x[mask1] ** 2)
-            * (
-                1 / x[mask1]
-                - (2 * x[mask1]) / np.sqrt(1 - x[mask1] ** 2) * np.arctanh(np.sqrt((1 - x[mask1]) / (1 + x[mask1])))
-            )
-        )
-        sol[mask2] = (
-            1 / (x[mask2] ** 2 - 1)
-            * (
-                (2 * x[mask2]) / np.sqrt(x[mask2] ** 2 - 1) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
-                - 1 / x[mask2]
-            )
-        )
-
+        m1 = x < 1
+        m2 = ~m1
+        t1 = np.sqrt(np.clip((1 - x[m1]) / (1 + x[m1]), 0.0, None))
+        sol[m1] = (1 / (1 - x[m1]**2)) * (1 / x[m1] - (2 * x[m1]) / np.sqrt(1 - x[m1]**2) * np.arctanh(t1))
+        t2 = np.sqrt(np.clip((x[m2] - 1) / (1 + x[m2]), 0.0, None))
+        sol[m2] = (1 / (x[m2]**2 - 1)) * ((2 * x[m2]) / np.sqrt(x[m2]**2 - 1) * np.arctan(t2) - 1 / x[m2])
         return sol
 
     def radial_term_4(x):
         sol = np.zeros_like(x)
-        mask1 = x < 1
-        mask2 = x >= 1
-        leading_term = 8 / x ** 3 - 20 / x + 15 * x
-
+        m1 = x < 1
+        m2 = ~m1
+        leading = 8 / x**3 - 20 / x + 15 * x
         k = (1 - x) / (1 + x)
-
-        sol[mask1] = (2 / np.sqrt(1 - x[mask1] ** 2)) * np.arctanh(np.sqrt(k[mask1]))
-        sol[mask2] = (2 / np.sqrt(x[mask2] ** 2 - 1)) * np.arctan(np.sqrt(-k[mask2]))
-
-        sol *= leading_term
-
+        t1 = np.sqrt(np.clip(k[m1], 0.0, None))
+        sol[m1] = (2 / np.sqrt(1 - x[m1]**2)) * np.arctanh(t1)
+        t2 = np.sqrt(np.clip(-k[m2], 0.0, None))
+        sol[m2] = (2 / np.sqrt(x[m2]**2 - 1)) * np.arctan(t2)
+        sol *= leading
         return sol
 
     term_1 = radial_term_1(x)
@@ -723,40 +745,45 @@ def calculate_lensing_signals_nfw(halos, sources, z_source):
     term_3 = radial_term_3(x)
     term_4 = radial_term_4(x)
 
-    # Angle computations
+    # --- Angular factors ---
     cos_phi = dx / r
     sin_phi = dy / r
-    cos2phi = cos_phi ** 2 - sin_phi ** 2
+    cos2phi = cos_phi**2 - sin_phi**2
     sin2phi = 2 * cos_phi * sin_phi
     cos3phi = cos2phi * cos_phi - sin2phi * sin_phi
     sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
 
-    # Lensing magnitudes
-    shear_mag = -kappa_s[:, np.newaxis] * term_2
+    # --- Lensing magnitudes (per halo, per source) ---
+    shear_mag = -kappa_s * term_2  # (N_halos, N_sources)
 
     def calc_flexion(flexion_s, x, term_1, term_3):
-        I1 = -2 * flexion_s[:, np.newaxis]
-        I2 = 2 * x * term_1 / (x ** 2 - 1) ** 2
-        I3 = term_3 / (x ** 2 - 1)
+        I1 = -2 * flexion_s
+        I2 = 2 * x * term_1 / (x**2 - 1)**2
+        I3 = term_3 / (x**2 - 1)
         return I1 * (I2 - I3)
 
     def calc_g_flexion(flexion_s, x, term_4):
-        I1 = 2 * flexion_s[:, np.newaxis]
-        I2 = (8 / x ** 3) * np.log(x / 2)
-        I3 = (3 / x) * (1 - 2 * x ** 2) + term_4
-        I4 = (x ** 2 - 1) ** 2
+        I1 = 2 * flexion_s
+        I2 = (8 / x**3) * np.log(x / 2)
+        I3 = (3 / x) * (1 - 2 * x**2) + term_4
+        I4 = (x**2 - 1)**2
         return I1 * (I2 + (I3 / I4))
 
-    flexion_mag = calc_flexion(flexion_s, x, term_1, term_3)
-    g_flexion_mag = calc_g_flexion(flexion_s, x, term_4)
+    flexion_mag  = calc_flexion (flexion_s, x, term_1, term_3)   # (N_halos, N_sources)
+    g_flexion_mag = calc_g_flexion(flexion_s, x, term_4)         # (N_halos, N_sources)
 
-    # Sum over all halos
-    shear_1 = np.sum(shear_mag * cos2phi, axis=0)
-    shear_2 = np.sum(shear_mag * sin2phi, axis=0)
-    flexion_1 = np.sum(flexion_mag * cos_phi, axis=0)
-    flexion_2 = np.sum(flexion_mag * sin_phi, axis=0)
-    g_flexion_1 = np.sum(g_flexion_mag * cos3phi, axis=0)
-    g_flexion_2 = np.sum(g_flexion_mag * sin3phi, axis=0)
+    # Zero out any pairs that are not lens–behind–source
+    shear_mag    = np.where(behind, shear_mag, 0.0)
+    flexion_mag  = np.where(behind, flexion_mag, 0.0)
+    g_flexion_mag= np.where(behind, g_flexion_mag, 0.0)
+
+    # --- Sum over halos -> per-source results ---
+    shear_1    = np.sum(shear_mag    * cos2phi, axis=0)
+    shear_2    = np.sum(shear_mag    * sin2phi, axis=0)
+    flexion_1  = np.sum(flexion_mag  * cos_phi, axis=0)
+    flexion_2  = np.sum(flexion_mag  * sin_phi, axis=0)
+    g_flexion_1= np.sum(g_flexion_mag* cos3phi, axis=0)
+    g_flexion_2= np.sum(g_flexion_mag* sin3phi, axis=0)
 
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 

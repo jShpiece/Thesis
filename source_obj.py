@@ -20,9 +20,10 @@ class Source:
         sigs (np.ndarray): Standard deviations of the shear components.
         sigf (np.ndarray): Standard deviations of the flexion components.
         sigg (np.ndarray): Standard deviations of the g-flexion components.
+        redshift (np.ndarray): Redshifts of the sources.
     """
 
-    def __init__(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, arcsec_per_pixel=1.0):
+    def __init__(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, redshift):
         # Ensure all inputs are numpy arrays
         self.x = np.atleast_1d(x)
         self.y = np.atleast_1d(y)
@@ -35,7 +36,10 @@ class Source:
         self.sigs = np.atleast_1d(sigs)
         self.sigf = np.atleast_1d(sigf)
         self.sigg = np.atleast_1d(sigg)
-        self.arcsec_per_pixel = arcsec_per_pixel
+        # If redshift is a float, convert it to a numpy array
+        if np.issubdtype(type(redshift), np.floating):
+            redshift = np.ones_like(self.x) * redshift
+        self.redshift = np.atleast_1d(redshift)
 
     def copy(self):
         """
@@ -56,9 +60,11 @@ class Source:
             sigs=self.sigs.copy(),
             sigf=self.sigf.copy(),
             sigg=self.sigg.copy()
+            redshift=self.redshift.copy()
         )
 
-    def add(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg):
+
+    def add(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, redshift):
         """
         Adds a new source to the catalog.
 
@@ -87,6 +93,7 @@ class Source:
         self.sigs = np.append(self.sigs, sigs)
         self.sigf = np.append(self.sigf, sigf)
         self.sigg = np.append(self.sigg, sigg)
+        self.redshift = np.append(self.redshift, redshift)
 
     def remove(self, indices):
         """
@@ -96,7 +103,7 @@ class Source:
             indices (array_like): Indices of the sources to remove.
         """
         for attr in [
-            'x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg'
+            'x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg', 'redshift'
         ]:
             setattr(self, attr, np.delete(getattr(self, attr), indices))
 
@@ -159,7 +166,7 @@ class Source:
             )
         elif lens_type == 'NFW':
             shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(
-                lenses, self, z_source
+                lenses, self
             )
         else:
             raise ValueError("Invalid lens type. Use 'SIS' or 'NFW'.")
@@ -192,7 +199,8 @@ class Source:
             'g2': self.g2,
             'sigs': self.sigs,
             'sigf': self.sigf,
-            'sigg': self.sigg
+            'sigg': self.sigg,
+            'redshift': self.redshift
         })
 
         # Export the DataFrame to a CSV file
@@ -211,5 +219,5 @@ class Source:
         df = pd.read_csv(filename)
 
         # Assign the DataFrame columns to the Source object attributes
-        for attr in ['x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg']:
+        for attr in ['x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg', 'redshift']:
             setattr(self, attr, df[attr].values)

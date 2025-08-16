@@ -39,7 +39,7 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
         return np.inf
     return dof
 
-def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', z_source = 0.8) -> float:
+def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
     """
     Calculate the chi-squared statistic for the difference between observed and modeled source properties.
 
@@ -68,7 +68,7 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS', z_source = 0.
     source_clone.zero_lensing_signals()
 
     # Apply lensing effects to the cloned source based on the lensing model
-    source_clone.apply_lensing(lenses, lens_type=lens_type, z_source=z_source)
+    source_clone.apply_lensing(lenses, lens_type=lens_type)
 
     # Calculate the squared differences for each lensing signal component
     chi_squared_components = {}

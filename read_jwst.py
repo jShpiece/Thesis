@@ -159,7 +159,7 @@ class JWSTPipeline:
 
     def read_flexion_catalog(self):
             """
-            Reads the flexion catalog and filters out bad data.
+            Reads the flexion catalog.
             """
             # Read the flexion catalog
             df = pd.read_pickle(self.flexion_catalog_path)
@@ -228,6 +228,7 @@ class JWSTPipeline:
 
         # Measures should carry the things we want to plot, and have a name attribute for plotting
         # Recalculate aF
+        '''
         aF = self.a * np.hypot(self.F1_fit, self.F2_fit)
         measures = [
             self.q, self.phi, self.F1_fit, self.F2_fit,
@@ -247,7 +248,7 @@ class JWSTPipeline:
             plt.grid()
             plt.savefig(self.output_dir / f'distribution_{name}.png')
         plt.close('all')
-
+        '''
         print(f"Filtered flexion catalog to {len(self.IDs)} entries after applying updated cuts.")
 
     def match_sources(self):
@@ -321,7 +322,6 @@ class JWSTPipeline:
         sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
         sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
         sigf, sigg = sigaf / self.a, sigag / self.a
-        print(sigf, sigg, sigaf, sigag)
 
         # Update Source object with new uncertainties
         self.sources.sigs = sigs
@@ -336,7 +336,7 @@ class JWSTPipeline:
         Runs the lens fitting pipeline.
         """
         xmax = np.max(np.hypot(self.sources.x, self.sources.y))
-        
+        '''
         # Override real lensing with simulated signal based on literature results for el gordo
         
         simulated_cluster_x = [110.0, 30.0] # First entry SE, second entry NW
@@ -357,8 +357,10 @@ class JWSTPipeline:
         self.sources.apply_lensing(simulated_lenses, lens_type='NFW', z_source=self.z_source)
         
         self.output_dir = Path(self.config['output_dir'] + "Simulated/")
+        '''
+
         self.lenses, _ = main.fit_lensing_field(
-            self.sources, xmax, flags=flags, use_flags=self.use_flags, lens_type='NFW', z_lens=self.z_cluster, z_source=self.z_source
+            self.sources, xmax, flags=flags, use_flags=self.use_flags, lens_type='NFW', z_lens=self.z_cluster
         )
 
         check = self.lenses.check_for_nan_properties() # Ensure no NaN properties in lenses
@@ -443,8 +445,8 @@ class JWSTPipeline:
         plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), peaks=peaks, masses=masses)
 
         # Compare mass estimates
-        # utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
-        #                            'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
+        utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
+                                'Mass Comparison of {} with JWST Data \n Signal used: - {}'.format(self.cluster_name, self.signal_choice), self.cluster_name)
 
         # Create a comparison by doing a kaiser squires transformation to get kappa from the flexion
         # only do this for all signals - it won't vary with the signal choice
@@ -485,7 +487,7 @@ class JWSTPipeline:
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
         plot_cluster([X,Y,kappa_shear], title, save_title, peaks=peaks, masses=masses)
-        
+        '''
         # Look at the first lens, see how chi2 changes with mass
         lens_SE = halo_obj.NFW_Lens(
             x=self.lenses.x[0],
@@ -558,6 +560,7 @@ class JWSTPipeline:
 
         plt.tight_layout()
         plt.show()
+        '''
 
     def get_image_data(self):
         """
@@ -597,7 +600,7 @@ if __name__ == '__main__':
             'output_dir': 'Output/JWST/EL_GORDO/',
             'cluster_name': 'EL_GORDO',
             'cluster_redshift': 0.873,
-            'source_redshift': 4.32,
+            'source_redshift': 1.2,
             'signal_choice': signal
         }
 
