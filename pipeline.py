@@ -99,7 +99,8 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
                     g2=0.0,
                     sigs=1.0,
                     sigf=1.0,
-                    sigg=1.0
+                    sigg=1.0,
+                    redshift=sources.redshift[i]
                 )
                 # Compute the lensing signals from the lens
                 _, _, f1_model, f2_model, _, _ = utils.calculate_lensing_signals_nfw(lens, source)
@@ -164,7 +165,8 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
                 sources.e1[i], sources.e2[i],
                 sources.f1[i], sources.f2[i],
                 sources.g1[i], sources.g2[i],
-                sources.sigs[i], sources.sigf[i], sources.sigg[i]
+                sources.sigs[i], sources.sigf[i], sources.sigg[i],
+                sources.redshift[i]
             )
             # Initial guess for the optimizer
             guess = [lenses.x[i], lenses.y[i], lenses.te[i]]

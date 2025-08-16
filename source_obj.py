@@ -59,7 +59,7 @@ class Source:
             g2=self.g2.copy(),
             sigs=self.sigs.copy(),
             sigf=self.sigf.copy(),
-            sigg=self.sigg.copy()
+            sigg=self.sigg.copy(),
             redshift=self.redshift.copy()
         )
 

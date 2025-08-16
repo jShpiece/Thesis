@@ -315,7 +315,7 @@ class JWSTPipeline:
             f1=self.F1_fit, f2=self.F2_fit,
             g1=self.G1_fit, g2=self.G2_fit,  
             sigs=dummy, sigf=dummy, sigg=dummy, 
-            arcsec_per_pixel=self.CDELT
+            redshift=self.z_source
         )
 
         sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
