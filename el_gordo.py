@@ -30,7 +30,7 @@ class ELGORDO:
         self.source_catalog_path = source_catalog_path
         self.redshift_path = redshift_path
         self.CDELT = 8.54006306703281e-6 * 3600  # degrees/pixel converted to arcsec/pixel
-        self.z_source = 4.8
+        self.z_source = 1.0
         self.z_cluster = 0.87
     
     def read_source_catalog(self):

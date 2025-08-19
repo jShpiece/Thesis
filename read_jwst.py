@@ -572,6 +572,8 @@ class JWSTPipeline:
 
 
 if __name__ == '__main__':
+    #while True:
+        #print('This machine is a useless piece of shit and is lucky Jacob doesnt have a hammer nearby')
     # Configuration dictionary
     signals = ['all', 'shear_f', 'f_g', 'shear_g']
     # Create an output file to store all the results
