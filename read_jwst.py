@@ -4,20 +4,19 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.table import Table
 from astropy.visualization import ImageNormalize, LogStretch
+from matplotlib.patches import FancyArrow
+from scipy.ndimage import gaussian_filter
 from pathlib import Path
 import warnings
-
 import csv
 import concurrent.futures
-from functools import partial
 import tqdm
 
 # Import custom modules (ensure these are in your Python path)
 import main
 import source_obj
-import halo_obj
 import utils
-import pipeline
+
 
 # Set matplotlib style
 plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
@@ -386,52 +385,136 @@ class JWSTPipeline:
         ]
         
         # Plot settings
-        def plot_cluster(convergence, title, save_name, peaks=None, masses=None):
-            fig, ax = plt.subplots(figsize=(10, 10))
-            
-            norm = ImageNormalize(img_data, vmin=0, vmax=100, stretch=LogStretch())
+        def plot_cluster_kappa(
+            img_data, img_extent, kx, ky, kappa,
+            title, save_name_pdf,
+            peaks=None, masses=None,
+            z_lens=None, cosmo=None,
+            levels=None,  # e.g., levels=[0.02,0.04,0.06,0.08,0.10]
+            zero_contour=True,
+            smooth_sigma=None  # e.g., 1.0 pixels
+        ):
+            """
+            Create MNRAS-ready figure: JWST grayscale background + kappa contours,
+            with fixed contour levels, scalebar, and compass arrows.
 
-            # Display JWST image
-            ax.imshow(
-                img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm
-            )
-            
-            # Overlay convergence contours
-            contour_levels = np.percentile(convergence[2], np.linspace(70, 99, 5))
-            contours = ax.contour(
-                convergence[0], convergence[1], convergence[2], levels=contour_levels,
-                cmap='plasma', linewidths=1.5, alpha=0.8
-            )
-            ax.clabel(contours, inline=True, fontsize=8, fmt='%.3f')
+            Parameters
+            ----------
+            img_data : 2D array
+                Background image (JWST).
+            img_extent : (xmin, xmax, ymin, ymax) in arcsec offsets
+                Extent for imshow.
+            kx, ky : 2D arrays (arcsec offsets)
+                Meshgrid coordinates for kappa.
+            kappa : 2D array
+                Convergence field.
+            title : str
+                Figure title (short).
+            save_name_pdf : str
+                Path to save vector output (PDF).
+            peaks : list of (x, y) arcsec offsets, optional
+            masses : list of floats in Msun, optional
+            z_lens : float, optional
+                Cluster redshift for physical scale conversion.
+            cosmo : astropy.cosmology, optional
+            levels : list of floats, optional
+                Fixed contour levels in kappa; required for inter-panel consistency.
+            zero_contour : bool
+                Draw bold dashed kappa=0 contour.
+            smooth_sigma : float, optional
+                Gaussian sigma in pixels for smoothing kappa before contouring.
+            """
 
-            # Draw a countour where kappa = 0
-            ax.contour(
-                convergence[0], convergence[1], convergence[2],
-                levels=[0], colors='black', linewidths=1.5, linestyles='dashed'
-            )
+            # Prepare kappa field
+            kappa_disp = gaussian_filter(kappa, smooth_sigma) if smooth_sigma else kappa
 
-            # Overlay mass peaks if provided
-            if peaks is not None and masses is not None:
-                for i, ((ra_offset, dec_offset), mass) in enumerate(zip(peaks, masses)):
-                    ax.plot(ra_offset, dec_offset, 'ro', markersize=5, label='Mass Peak' if i == 0 else "")
-                    ax.text(
-                        ra_offset + 1, dec_offset + 1,
-                        r"$M_{<300 kpc} = %.2f \times 10^{13}\ M_\odot$" % (mass / 1e13),
-                        color='black', fontsize=10, weight='bold', ha='left', va='bottom'
-                    )
-            
-            # Axes, title, legend
-            ax.set_xlabel('RA Offset (arcsec)')
-            ax.set_ylabel('Dec Offset (arcsec)')
-            ax.set_title(title)
-            if len(ax.get_legend_handles_labels()[0]) > 0:
-                ax.legend()
-            
-            plt.tight_layout()
-            # plt.show()
-            plt.savefig(save_name, dpi=300)
+            # Figure
+            fig, ax = plt.subplots(figsize=(4.25, 4.25))  # ~8.9 cm width typical MNRAS column
+
+            # Background image
+            norm_img = ImageNormalize(img_data, vmin=np.percentile(img_data, 1),
+                                    vmax=np.percentile(img_data, 99.7),
+                                    stretch=LogStretch())
+            ax.imshow(img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm_img)
+
+            # Contours
+            if levels is None:
+                # Fallback (mildly robust), but prefer fixed levels passed in
+                finite = np.isfinite(kappa_disp)
+                q = np.quantile(kappa_disp[finite], [0.80, 0.88, 0.92, 0.96, 0.98])
+                levels = [lv for lv in q if lv > 0]
+                if len(levels) == 0:
+                    levels = [np.nanmax(kappa_disp)*0.2, np.nanmax(kappa_disp)*0.4]
+
+            cs = ax.contour(kx, ky, kappa_disp, levels=levels, colors='C1', linewidths=1.2)
+            # Optional labels: uncomment if not too busy
+            # ax.clabel(cs, inline=True, fontsize=8, fmt='%.3f')
+
+            if zero_contour:
+                try:
+                    ax.contour(kx, ky, kappa_disp, levels=[0], colors='k', linewidths=2.0, linestyles='--')
+                except Exception:
+                    pass  # if kappa never crosses 0
+
+            # Peaks
+            if peaks is not None and masses is not None and len(peaks) == len(masses):
+                for i, ((x0, y0), m) in enumerate(zip(peaks, masses), start=1):
+                    ax.plot(x0, y0, marker='o', ms=3.5, mfc='none', mec='r', mew=1.1)
+                    label = rf"{i}: $M_{{<300\,\mathrm{{kpc}}}}={(m/1e13):.2f}\times 10^{{13}}\,M_\odot$"
+                    ax.annotate(label, xy=(x0, y0), xytext=(x0+8, y0+8),
+                                textcoords='data',
+                                fontsize=8, color='k',
+                                bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='0.2', lw=0.8),
+                                arrowprops=dict(arrowstyle='->', lw=0.8, color='0.2'))
+
+            # Axes
+            ax.set_xlabel('RA offset (arcsec)')
+            ax.set_ylabel('Dec offset (arcsec)')
+            ax.set_title(title, fontsize=11)
+
+            # Compass (N/E)
+            # Small arrows at ~10% in from edge
+            xmin, xmax, ymin, ymax = img_extent
+            dx = xmax - xmin
+            dy = ymax - ymin
+            base_x = xmin + 0.1 * dx
+            base_y = ymin + 0.1 * dy
+            ax.add_patch(FancyArrow(base_x, base_y, 0, 0.08*dy, width=0.0, length_includes_head=True, head_width=0.02*dx, head_length=0.04*dy, color='k'))
+            ax.text(base_x, base_y + 0.09*dy, 'N', ha='center', va='bottom', fontsize=8)
+            ax.add_patch(FancyArrow(base_x, base_y, 0.08*dx, 0, width=0.0, length_includes_head=True, head_width=0.02*dy, head_length=0.04*dx, color='k'))
+            ax.text(base_x + 0.09*dx, base_y, 'E', ha='left', va='center', fontsize=8)
+
+            # Scale bar (arcsec and kpc)
+            bar_len_arcsec = 50.0  # adjust to field scale
+            bar_x0 = xmax - 0.1*dx - bar_len_arcsec
+            bar_y0 = ymin + 0.08*dy
+            ax.plot([bar_x0, bar_x0 + bar_len_arcsec], [bar_y0, bar_y0], color='k', lw=1.8)
+            if z_lens is not None and cosmo is not None:
+                # Physical scale (kpc/arcsec)
+                kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_lens).value / 60.0
+                ax.text(bar_x0 + bar_len_arcsec/2, bar_y0 + 0.02*dy,
+                        f"{bar_len_arcsec:.0f}\" ({bar_len_arcsec*kpc_per_arcsec:.0f} kpc)",
+                        ha='center', va='bottom', fontsize=8)
+            else:
+                ax.text(bar_x0 + bar_len_arcsec/2, bar_y0 + 0.02*dy,
+                        f"{bar_len_arcsec:.0f}\"", ha='center', va='bottom', fontsize=8)
+
+            # Inset legend for levels (optional)
+            # Create a small text box listing contour levels
+            levels_str = ", ".join([f"{lv:.2f}" for lv in levels[:4]]) + ("…" if len(levels) > 4 else "")
+            ax.text(0.02, 0.98, rf"$\kappa$ levels: {levels_str}",
+                    transform=ax.transAxes, ha='left', va='top',
+                    fontsize=8, bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='0.2', lw=0.8))
+
+            # Final polish
+            ax.grid(False)  # no grid on imaging
+            for spine in ax.spines.values():
+                spine.set_linewidth(0.8)
+
+            fig.tight_layout(pad=0.5)
+            fig.savefig(save_name_pdf, dpi=600, bbox_inches='tight', format='pdf', transparent=False)
             plt.close(fig)
-        
+
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type='NFW', source_redshift=self.z_source
         )
@@ -442,7 +525,7 @@ class JWSTPipeline:
             radius_kpc=300
         )
         title = r'Mass Reconstruction of {} with JWST - {}'.format(self.cluster_name, self.signal_choice) + '\n' + r'Total Mass = {:.2e} $h^{{-1}} M_\odot$'.format(np.sum(self.lenses.mass))
-        plot_cluster([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), peaks=peaks, masses=masses)
+        plot_cluster_kappa([X,Y,kappa], title, self.output_dir / '{}_clu_{}.png'.format(self.cluster_name, self.signal_choice), peaks=peaks, masses=masses)
 
         # Compare mass estimates
         utils.compare_mass_estimates(self.lenses, self.output_dir / 'mass_{}_{}.png'.format(self.cluster_name, self.signal_choice), 
@@ -471,7 +554,7 @@ class JWSTPipeline:
         )
         title = 'Kaiser-Squires Flexion Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_flex_{}.png'.format(self.cluster_name)
-        plot_cluster([X,Y,kappa_flexion], title, save_title, peaks=peaks, masses=masses)
+        plot_cluster_kappa([X,Y,kappa_flexion], title, save_title, peaks=peaks, masses=masses)
 
         # Do this for the shear as well
         X, Y, kappa_shear = utils.perform_kaiser_squire_reconstruction(
@@ -486,81 +569,8 @@ class JWSTPipeline:
         )
         title = 'Kaiser-Squires Shear Reconstruction of {} with JWST'.format(self.cluster_name)
         save_title = self.output_dir / 'ks_shear_{}.png'.format(self.cluster_name)
-        plot_cluster([X,Y,kappa_shear], title, save_title, peaks=peaks, masses=masses)
-        '''
-        # Look at the first lens, see how chi2 changes with mass
-        lens_SE = halo_obj.NFW_Lens(
-            x=self.lenses.x[0],
-            y=self.lenses.y[0],
-            z=self.z_cluster,
-            concentration=self.lenses.concentration[0],
-            mass=self.lenses.mass[0],
-            redshift=self.z_cluster,
-            chi2=self.lenses.chi2[0]
-        )
-        lens_NW = halo_obj.NFW_Lens(
-            x=self.lenses.x[1],
-            y=self.lenses.y[1],
-            z=self.z_cluster,
-            concentration=self.lenses.concentration[1],
-            mass=self.lenses.mass[1],
-            redshift=self.z_cluster,
-            chi2=self.lenses.chi2[1]
-        )
+        plot_cluster_kappa([X,Y,kappa_shear], title, save_title, peaks=peaks, masses=masses)
 
-        # We're going to vary the mass of this lens and see how the chi2 value changes
-        mass_values = np.logspace(13,16,1000)
-        chi2_values_SE = []
-        chi2_values_NW = []
-        for mass_value in mass_values:
-            lens_SE.mass[0] = mass_value
-            lens_NW.mass[0] = mass_value
-            chi2_SE = pipeline.update_chi2_values(self.sources, lens_SE, use_flags=self.use_flags, lens_type='NFW',z_source=self.z_source)
-            chi2_NW = pipeline.update_chi2_values(self.sources, lens_NW, use_flags=self.use_flags, lens_type='NFW',z_source=self.z_source)
-            chi2_values_SE.append(chi2_SE)
-            chi2_values_NW.append(chi2_NW)
-
-        # Plot
-        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-
-        # For SE lens
-        chi2_SE = np.array(chi2_values_SE)
-        mean_SE = np.mean(chi2_SE)
-        std_SE = np.std(chi2_SE)
-        # Mask out extreme spikes above mean + 5*std for plotting
-        mask_SE = chi2_SE < (mean_SE + 5 * std_SE)
-        axs[0].plot(mass_values[mask_SE], chi2_SE[mask_SE])
-        axs[0].set_xscale('log')
-        axs[0].set_xlabel('Mass [M_sun]')
-        axs[0].set_ylabel('Chi2')
-        axs[0].set_title('Chi2 vs Mass for SE Lens')
-        axs[0].grid()
-        # Let's add a point at the minimum value
-        min_index = np.argmin(chi2_SE)
-        axs[0].scatter(mass_values[min_index], chi2_SE[min_index], color='red')
-        # Also add a line where the actual lens is located
-        axs[0].axvline(x=self.lenses.mass[0], color='blue', linestyle='--')
-
-        # For NW lens
-        chi2_NW = np.array(chi2_values_NW)
-        mean_NW = np.mean(chi2_NW)
-        std_NW = np.std(chi2_NW)
-        mask_NW = chi2_NW < (mean_NW + 5 * std_NW)
-        axs[1].plot(mass_values[mask_NW], chi2_NW[mask_NW])
-        axs[1].set_xscale('log')
-        axs[1].set_xlabel('Mass [M_sun]')
-        axs[1].set_ylabel('Chi2')
-        axs[1].set_title('Chi2 vs Mass for NW Lens')
-        axs[1].grid()
-        # Let's add a point at the minimum value
-        min_index = np.argmin(chi2_NW)
-        axs[1].scatter(mass_values[min_index], chi2_NW[min_index], color='red')
-        # Also add a line where the actual lens is located
-        axs[1].axvline(x=self.lenses.mass[1], color='blue', linestyle='--')
-
-        plt.tight_layout()
-        plt.show()
-        '''
 
     def get_image_data(self):
         """
@@ -572,16 +582,9 @@ class JWSTPipeline:
 
 
 if __name__ == '__main__':
-    #while True:
-        #print('This machine is a useless piece of shit and is lucky Jacob doesnt have a hammer nearby')
     # Configuration dictionary
     signals = ['all', 'shear_f', 'f_g', 'shear_g']
     # Create an output file to store all the results
-    '''
-    output_file = Path('Output/JWST/ABELL/combined_results.csv')
-    with open(output_file, 'w') as f:
-        f.write("Signal\tCluster\tX\tY\tMass\n")
-    '''
 
     for signal in signals:
         abell_config = {
@@ -611,15 +614,5 @@ if __name__ == '__main__':
         pipeline_abell = JWSTPipeline(abell_config)
 
         pipeline_el_gordo.run()
-        # pipeline_abell.run()
-        # pipeline_abell.compute_error_bars()
-        # Save results to the output file
-        '''
-        with open(output_file, 'a') as f:
-            for i in range(len(pipeline_abell.lenses.x)):
-                f.write(f"{signal}\t{pipeline_abell.cluster_name}\t{pipeline_abell.lenses.x[i]:.2f}\t{pipeline_abell.lenses.y[i]:.2f}\t{pipeline_abell.lenses.mass[i]:.2e}\n")
-            for i in range(len(pipeline_el_gordo.lenses.x)):
-                f.write(f"{signal}\t{pipeline_el_gordo.cluster_name}\t{pipeline_el_gordo.lenses.x[i]:.2f}\t{pipeline_el_gordo.lenses.y[i]:.2f}\t{pipeline_el_gordo.lenses.mass[i]:.2e}\n")
-        # Print completion message
-        '''
+        pipeline_abell.run()
         print(f"Finished running pipeline for signal choice: {signal}")

@@ -1,17 +1,17 @@
 #### Figure Size and DPI ####
 figure.figsize : 10, 6
 figure.dpi : 100
-savefig.dpi : 300
 
-#### Fonts ####
-font.size : 12
+# Fonts
+font.size : 10
 font.family : serif
 mathtext.fontset : stix
 
-#### Axes ####
-axes.labelsize : medium
-axes.titlesize : large
-axes.grid : True
+# Axes
+axes.grid : False
+axes.titlesize : 11
+axes.labelsize : 10
+
 # Set the aspect of the plot to be equal
 axes.axisbelow : True
 axes.spines.left : True
@@ -37,12 +37,11 @@ lines.linewidth : 2
 lines.markersize : 6
 lines.markeredgewidth : 0.5
 
-#### Legend ####
+# Legend
 legend.frameon : True
 legend.framealpha : 1
+legend.edgecolor : 0.2
 legend.facecolor : white
-legend.edgecolor : black
-legend.fancybox : False
 
 #### Grid ####
 grid.linestyle : --
@@ -51,6 +50,7 @@ grid.alpha : 0.5
 #### Plot Title and Labels ####
 axes.labelpad : 10
 
-#### Savefig ####
-savefig.format : png
+# Savefig
+savefig.format : pdf
+savefig.dpi : 600
 savefig.bbox : tight
