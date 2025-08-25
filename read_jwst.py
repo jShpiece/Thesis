@@ -1,10 +1,12 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.patches import FancyArrow
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import matplotlib.patheffects as pe
 from astropy.io import fits
 from astropy.table import Table
 from astropy.visualization import ImageNormalize, LogStretch
-from matplotlib.patches import FancyArrow
 from scipy.ndimage import gaussian_filter
 from pathlib import Path
 import warnings
@@ -12,13 +14,13 @@ import csv
 import concurrent.futures
 import tqdm
 from astropy.cosmology import Planck18 as COSMO
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from matplotlib.gridspec import GridSpec
 
-# Import custom modules (ensure these are in your Python path)
+# Import custom modules 
 import main
 import source_obj
+import halo_obj
 import utils
-
 
 # Set matplotlib style
 plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
@@ -125,6 +127,13 @@ class JWSTPipeline:
         '''
         Visualizes the lensing results.
         '''
+        self.read_source_catalog()
+        self.read_flexion_catalog()
+        self.cut_flexion_catalog()
+        self.match_sources()
+        self.initialize_sources()
+        self.sources.x += self.centroid_x # Move sources back to original coordinates
+        self.sources.y += self.centroid_y
         self.import_lenses()
         self.plot_results()
 
@@ -363,391 +372,234 @@ class JWSTPipeline:
 
     def plot_results(self):
         """
-        Execute all plotting for the current cluster/state using the MNRAS-ready plot function.
+        Create publication-ready figures (no side table):
+        • Grayscale JWST background
+        • κ-contours with fixed levels (consistent across panels)
+        • Numbered peak markers only (no mass text on the image)
+        • Compass (N/E) and scale bar
+        • Title and footer caption with ΣM in h^{-1} M_⊙
         Saves vector PDFs into self.output_dir.
         """
 
-        # Define some useful functions 
+        # ---------------- helpers ----------------
 
-        def _format_mass(m):
-            '''
-            Helper function for plotting: formats mass in solar masses.
-            '''
-            return rf"{(m/1e13):.2f}\times 10^{{13}}"
-
-        def _add_side_table(ax, peaks, masses, max_rows=6, title="Peaks (R<300 kpc)"):
-            """
-            Adds a side table to the plot with peak positions and masses.
-            """
-            if not peaks or not masses: 
-                return
-            n = min(len(peaks), len(masses), max_rows)
-            entries = [f"{i+1}:  ({x:.1f}\", {y:.1f}\")  M={_format_mass(m)} M_\\odot"
-                    for i, ((x,y), m) in enumerate(zip(peaks[:n], masses[:n]))]
-            ax_in = inset_axes(ax, width="40%", height="55%", loc="upper right",
-                            borderpad=0.8)
-            ax_in.axis("off")
-            ax_in.text(0.0, 1.0, title, ha="left", va="top", fontsize=8,
-                    fontweight="bold")
-            y = 0.86
-            for line in entries:
-                ax_in.text(0.0, y, line, ha="left", va="top", fontsize=7)
-                y -= 0.13
-
-        def _place_labels(ax, peaks, masses, avoid_lines=None, pad=6):
-            """
-            Greedy label placement that repels labels from each other and from lines.
-            """
-            import numpy as np
-            import matplotlib.patheffects as pe
-            if not peaks or not masses:
-                return
-            # Start with offset candidates (NE, NW, SE, SW)
-            offsets = np.array([[8,8], [-8,8], [8,-8], [-8,-8],
-                                [12,0], [-12,0], [0,12], [0,-12]], dtype=float)
-            labels = []
-            # Pre-collect contour segments to avoid
-            line_boxes = []
-            if avoid_lines:
-                for ln in avoid_lines.collections:
-                    for seg in ln.get_paths():
-                        bb = seg.get_extents()
-                        line_boxes.append(bb)
-            # Greedy placement
-            placed = []
-            for i, ((x0,y0), m) in enumerate(zip(peaks, masses), start=1):
-                text = rf"{i}: $M_{{<300\,\mathrm{{kpc}}}}={_format_mass(m)}\,M_\odot$"
-                best_artist = None
-                best_cost = np.inf
-                for dx,dy in offsets:
-                    t = ax.text(x0+dx, y0+dy, text, fontsize=8, color='k',
-                                bbox=dict(boxstyle='round,pad=0.25', fc='white', ec='0.2', lw=0.8, alpha=0.9))
-                    t.set_path_effects([pe.withStroke(linewidth=1.2, foreground='w')])
-                    renderer = ax.figure.canvas.get_renderer()
-                    bb = t.get_window_extent(renderer=renderer).expanded(1.05,1.1)
-                    # overlap cost with placed labels
-                    cost = 0.0
-                    for bb2 in placed:
-                        if bb.overlaps(bb2):
-                            # penalize overlap proportionally to area intersection
-                            cost += 1.0
-                    # avoid contour lines
-                    for lb in line_boxes:
-                        if bb.overlaps(lb.transformed(ax.transData)):
-                            cost += 0.5
-                    if cost < best_cost:
-                        # keep best candidate
-                        if best_artist: best_artist.remove()
-                        best_artist = t
-                        best_cost = cost
-                    else:
-                        t.remove()
-                if best_artist is None:
-                    continue
-                # arrow from text to marker
-                ax.annotate("",
-                    xy=(x0, y0), xytext=best_artist.get_position(),
-                    arrowprops=dict(arrowstyle='-', lw=0.8, color='0.2'))
-                placed.append(best_artist.get_window_extent(
-                    renderer=ax.figure.canvas.get_renderer()).expanded(1.02,1.05))
-                labels.append(best_artist)
-            return labels
+        def _fmt_sum_mass_hinv(m_hinv):
+            """ΣM = a × 10^{14} h^{-1} M_⊙ (mathtext) or N/A."""
+            if not np.isfinite(m_hinv):
+                return r"$\sum M =$ N/A"
+            return rf"$\sum M = {(m_hinv/1e14):.2f}\times 10^{{14}}\ h^{{-1}}\,M_\odot$"
 
         def _compute_levels_from_kappa(kappa, positive=True):
-            """
-            Fallback for setting fixed κ contour levels from a reference map.
-            Use quantiles but freeze them and reuse across signal-combo panels.
-            """
+            """Stable κ-levels from quantiles of positive κ; fallback if sparse."""
             finite = np.isfinite(kappa)
             if not np.any(finite):
                 return [0.02, 0.04, 0.06, 0.08, 0.10]
             vals = kappa[finite]
             if positive:
                 vals = vals[vals > 0]
-            if vals.size < 10:
-                # Robust default if map is very sparse or non-positive
+            if vals.size < 20:
                 kmax = np.nanmax(kappa)
-                return [0.2, 0.4, 0.6, 0.8] * (kmax if np.isfinite(kmax) and kmax > 0 else 0.1)
+                if not np.isfinite(kmax) or kmax <= 0:
+                    return [0.02, 0.04, 0.06]
+                return list(np.linspace(0.35, 0.9, 5) * kmax)
             qs = np.quantile(vals, [0.70, 0.82, 0.90, 0.96, 0.985])
-            # Ensure uniqueness/positivity
-            levels = sorted(set([lv for lv in qs if np.isfinite(lv) and lv > 0]))
+            levels = [float(lv) for lv in qs if np.isfinite(lv) and lv > 0]
             if len(levels) < 3:
-                # Conservative fallback
-                kmax = np.nanmax(vals) if vals.size else 0.1
-                levels = [0.2, 0.4, 0.6, 0.8] * kmax
-            return levels
-    
-        def plot_cluster_kappa(
-            img_data, img_extent, kx, ky, kappa,
-            title, save_name_pdf,
-            peaks=None, masses=None,
-            z_lens=None, cosmo=None,
-            levels=None,  # e.g., levels=[0.02,0.04,0.06,0.08,0.10]
-            smooth_sigma=None  # e.g., 1.0 pixels
+                kmax = np.nanmax(vals)
+                levels = list(np.linspace(0.4, 0.85, 4) * (kmax if np.isfinite(kmax) else 0.1))
+            return sorted(set(levels))
+
+        def _draw_compass_and_scalebar(ax, extent, bar_arcsec=50.0, z_lens=None, cosmo=None):
+            """Draw N(up)/E(left) arrows and a 50″ scale bar (+kpc if cosmology provided)."""
+            xmin, xmax, ymin, ymax = extent
+            dx, dy = (xmax - xmin), (ymax - ymin)
+
+            # Compass (bottom-left)
+            cx = xmin + 0.12*dx
+            cy = ymin + 0.12*dy
+            alen = 0.08*max(dx, dy)
+            ax.add_patch(FancyArrow(cx, cy, 0,     alen, width=0.0,
+                                    head_width=0.035*dx, head_length=0.04*dy,
+                                    length_includes_head=True, color='k'))
+            ax.text(cx, cy + alen + 0.02*dy, "N", ha="center", va="bottom", fontsize=8)
+            ax.add_patch(FancyArrow(cx, cy, -alen, 0,    width=0.0,
+                                    head_width=0.035*dy, head_length=0.04*dx,
+                                    length_includes_head=True, color='k'))
+            ax.text(cx - alen - 0.02*dx, cy, "E", ha="right", va="center", fontsize=8)
+
+            # Scale bar (bottom-right)
+            sx1 = xmax - 0.12*dx
+            sx0 = sx1 - bar_arcsec
+            sy  = ymin + 0.10*dy
+            ax.plot([sx0, sx1], [sy, sy], color='k', lw=1.8)
+            if (z_lens is not None) and ('COSMO' in globals()) and (COSMO is not None):
+                kpc_per_arcsec = COSMO.kpc_proper_per_arcmin(z_lens).value / 60.0
+                label = rf"{int(round(bar_arcsec))}″ ({int(round(bar_arcsec*kpc_per_arcsec))} kpc)"
+            else:
+                label = rf"{int(round(bar_arcsec))}″"
+            ax.text(0.5*(sx0+sx1), sy + 0.02*dy, label, ha="center", va="bottom", fontsize=8)
+
+        def _plot_single_panel(
+            img_data, img_extent, X, Y, kappa, levels, peaks, title, sum_mass_hinv,
+            z_lens=None, smooth_sigma=1.0, save_pdf_path=None
         ):
-            """
-            Create MNRAS-ready figure: JWST grayscale background + kappa contours,
-            with fixed contour levels, scalebar, and compass arrows.
-
-            Parameters
-            ----------
-            img_data : 2D array
-                Background image (JWST).
-            img_extent : (xmin, xmax, ymin, ymax) in arcsec offsets
-                Extent for imshow.
-            kx, ky : 2D arrays (arcsec offsets)
-                Meshgrid coordinates for kappa.
-            kappa : 2D array
-                Convergence field.
-            title : str
-                Figure title (short).
-            save_name_pdf : str
-                Path to save vector output (PDF).
-            peaks : list of (x, y) arcsec offsets, optional
-            masses : list of floats in Msun, optional
-            z_lens : float, optional
-                Cluster redshift for physical scale conversion.
-            cosmo : astropy.cosmology, optional
-            levels : list of floats, optional
-                Fixed contour levels in kappa; required for inter-panel consistency.
-            zero_contour : bool
-                Draw bold dashed kappa=0 contour.
-            smooth_sigma : float, optional
-                Gaussian sigma in pixels for smoothing kappa before contouring.
-            """
-
-            # Prepare kappa field
+            """Single clean panel with background, κ-contours, numbered peaks, compass & scalebar."""
+            # Smooth κ for display/contours (optional)
             kappa_disp = gaussian_filter(kappa, smooth_sigma) if smooth_sigma else kappa
 
             # Figure
-            fig, ax = plt.subplots(figsize=(4.25, 4.25))  # ~8.9 cm width typical MNRAS column
+            fig, ax = plt.subplots(figsize=(4.8, 4.9), dpi=600)  # single-column friendly
 
-            # Background image
-            norm_img = ImageNormalize(img_data, vmin=np.percentile(img_data, 1),
-                                    vmax=np.percentile(img_data, 99.7),
-                                    stretch=LogStretch())
-            ax.imshow(img_data, cmap='gray_r', origin='lower', extent=img_extent, norm=norm_img)
+            # Background (JWST grayscale)
+            norm = ImageNormalize(img_data, vmin=np.percentile(img_data, 1),
+                                vmax=np.percentile(img_data, 99.7), stretch=LogStretch())
+            ax.imshow(img_data, cmap="gray_r", origin="lower", extent=img_extent, norm=norm)
 
-            # Contours
-            if levels is None:
-                # Fallback (mildly robust), but prefer fixed levels passed in
-                finite = np.isfinite(kappa_disp)
-                q = np.quantile(kappa_disp[finite], [0.80, 0.88, 0.92, 0.96, 0.98])
-                levels = [lv for lv in q if lv > 0]
-                if len(levels) == 0:
-                    levels = [np.nanmax(kappa_disp)*0.2, np.nanmax(kappa_disp)*0.4]
+            # κ-contours (use precomputed fixed levels if available)
+            try:
+                cs = ax.contour(X, Y, kappa_disp, levels=levels, colors='C1', linewidths=1.1)
+            except Exception:
+                # Robust fallback
+                kmax = np.nanmax(kappa_disp)
+                lvls = [0.3*kmax, 0.6*kmax] if np.isfinite(kmax) and kmax > 0 else [0.02, 0.04]
+                ax.contour(X, Y, kappa_disp, levels=lvls, colors='C1', linewidths=1.1)
 
-            cs = ax.contour(kx, ky, kappa_disp, levels=levels, colors='C1', linewidths=1.2)
-            # Optional labels: uncomment if not too busy
-            # ax.clabel(cs, inline=True, fontsize=8, fmt='%.3f')
+            # Peaks: numeric markers only (no mass text on-figure)
+            if peaks:
+                for i, (px, py) in enumerate(peaks, start=1):
+                    ax.plot(px, py, marker='o', ms=3.5, mfc='none', mec='r', mew=1.1)
+                    t = ax.text(px, py, f"{i}", ha='center', va='center', fontsize=7,
+                                color='r', fontweight='bold')
+                    t.set_path_effects([pe.withStroke(linewidth=1.5, foreground='w')])
 
-            # Peaks: numbered markers
-            if peaks is not None and masses is not None and len(peaks) == len(masses):
-                for i, ((x0, y0), m) in enumerate(zip(peaks, masses), start=1):
-                    ax.plot(x0, y0, marker='o', ms=3.5, mfc='none', mec='r', mew=1.1)
-                    ax.text(x0, y0, f"{i}", ha='center', va='center', fontsize=7,
-                            color='r', fontweight='bold')
+            # Labels & title
+            ax.set_xlabel("RA offset (arcsec)")
+            ax.set_ylabel("Dec offset (arcsec)")
+            # ax.set_title(title, fontsize=11)
 
-                # --- choose ONE of the two modes below ---
+            # κ-level legend (compact)
+            lv_str = ", ".join([f"{lv:.2f}" for lv in levels[:5]]) + ("…" if len(levels) > 5 else "")
+            ax.text(0.02, 0.98, rf"$\kappa$ levels: {lv_str}", transform=ax.transAxes,
+                    ha="left", va="top", fontsize=8,
+                    bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='0.2', lw=0.8))
 
-                # 1) Side table (recommended for submission)
-                _add_side_table(ax, peaks, masses, max_rows=8,
-                                title="Peaks: ID, (RA,Dec) [\"]  and  $M_{<300\,\\rm kpc}$")
+            # Compass & scale bar
+            _draw_compass_and_scalebar(ax, img_extent, z_lens=z_lens, cosmo=globals().get('COSMO', None))
 
-                # 2) On-map labels with collision avoidance
-                # cs is your contour QuadContourSet; pass it so labels avoid lines
-                # _place_labels(ax, peaks, masses, avoid_lines=cs, pad=6)
-            # Axes
-            ax.set_xlabel('RA offset (arcsec)')
-            ax.set_ylabel('Dec offset (arcsec)')
-            ax.set_title(title, fontsize=11)
+            # Footer caption with ΣM (kept off the map area)
+            '''
+            if sum_mass_hinv is not None:
+                fig.text(0.5, 0.01, _fmt_sum_mass_hinv(sum_mass_hinv),
+                        ha="center", va="bottom", fontsize=9)
+            '''
+            for sp in ax.spines.values():
+                sp.set_linewidth(0.8)
+            ax.grid(False)
 
-            # Compass (N/E)
-            # Small arrows at ~10% in from edge
-            xmin, xmax, ymin, ymax = img_extent
-            dx = xmax - xmin
-            dy = ymax - ymin
-            base_x = xmin + 0.1 * dx
-            base_y = ymin + 0.1 * dy
-            ax.add_patch(FancyArrow(base_x, base_y, 0, 0.08*dy, width=0.0, length_includes_head=True, head_width=0.02*dx, head_length=0.04*dy, color='k'))
-            ax.text(base_x, base_y + 0.09*dy, 'N', ha='center', va='bottom', fontsize=8)
-            ax.add_patch(FancyArrow(base_x, base_y, 0.08*dx, 0, width=0.0, length_includes_head=True, head_width=0.02*dy, head_length=0.04*dx, color='k'))
-            ax.text(base_x + 0.09*dx, base_y, 'E', ha='left', va='center', fontsize=8)
-
-            # Scale bar (arcsec and kpc)
-            bar_len_arcsec = 50.0  # adjust to field scale
-            bar_x0 = xmax - 0.1*dx - bar_len_arcsec
-            bar_y0 = ymin + 0.08*dy
-            ax.plot([bar_x0, bar_x0 + bar_len_arcsec], [bar_y0, bar_y0], color='k', lw=1.8)
-            if z_lens is not None and cosmo is not None:
-                # Physical scale (kpc/arcsec)
-                kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_lens).value / 60.0
-                ax.text(bar_x0 + bar_len_arcsec/2, bar_y0 + 0.02*dy,
-                        f"{bar_len_arcsec:.0f}\" ({bar_len_arcsec*kpc_per_arcsec:.0f} kpc)",
-                        ha='center', va='bottom', fontsize=8)
+            fig.tight_layout(rect=(0.04, 0.04, 0.98, 0.98))
+            if save_pdf_path is not None:
+                fig.savefig(save_pdf_path, bbox_inches="tight", format="pdf")
+                plt.close(fig)
             else:
-                ax.text(bar_x0 + bar_len_arcsec/2, bar_y0 + 0.02*dy,
-                        f"{bar_len_arcsec:.0f}\"", ha='center', va='bottom', fontsize=8)
+                return fig, ax
 
-            # Inset legend for levels (optional)
-            # Create a small text box listing contour levels
-            levels_str = ", ".join([f"{lv:.2f}" for lv in levels[:4]]) + ("…" if len(levels) > 4 else "")
-            ax.text(0.02, 0.98, rf"$\kappa$ levels: {levels_str}",
-                    transform=ax.transAxes, ha='left', va='top',
-                    fontsize=8, bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='0.2', lw=0.8))
+        # ---------------- main body ----------------
 
-            # Final polish
-            ax.grid(False)  # no grid on imaging
-            for spine in ax.spines.values():
-                spine.set_linewidth(0.8)
-
-            # fig.tight_layout(pad=0.5)
-            fig.savefig(save_name_pdf, dpi=600, bbox_inches='tight', format='pdf', transparent=False)
-            plt.close(fig)
-
-        # --- Background image + extent in arcsec offsets ---
+        # Background image + extent (arcsec)
         img_data = self.get_image_data()
-        img_extent = (
-            0.0,
-            img_data.shape[1] * self.CDELT,
-            0.0,
-            img_data.shape[0] * self.CDELT
-        )
+        img_extent = (0.0, img_data.shape[1] * self.CDELT,
+                    0.0, img_data.shape[0] * self.CDELT)
 
-        # --- Model κ from current lenses ---
+        # Model κ from current lenses
         X, Y, kappa = utils.calculate_kappa(
-            self.lenses,
-            extent=img_extent,
-            lens_type='NFW',
-            source_redshift=self.z_source
+            self.lenses, extent=img_extent, lens_type='NFW', source_redshift=self.z_source
         )
 
-        # --- Peaks and 300 kpc masses from model κ ---
+        # Peaks within 300 kpc (positions only for plotting)
         peaks, masses = utils.find_peaks_and_masses(
-            kappa,
-            z_lens=self.z_cluster,
-            z_source=self.z_source,
-            radius_kpc=300
+            kappa, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=300
         )
 
-        # --- Fixed κ levels per cluster (persist across signal combinations) ---
-        # Cache on `self` to reuse within a run; you can persist externally if needed.
+        # Fixed κ-levels per cluster (cached for consistency)
         if not hasattr(self, "_kappa_levels"):
             self._kappa_levels = {}
         if self.cluster_name not in self._kappa_levels:
             self._kappa_levels[self.cluster_name] = _compute_levels_from_kappa(kappa, positive=True)
         levels = self._kappa_levels[self.cluster_name]
 
-        # --- Title and save path for the primary reconstruction ---
-        total_mass = np.sum(getattr(self.lenses, "mass", np.array([np.nan])))
-        title = (
-            rf"{self.cluster_name}: Reconstruction ({self.signal_choice})" + "\n" +
-            rf"$\sum M = {total_mass:.2e}\ M_\odot$"
-        )
-        save_pdf = Path(self.output_dir) / f"{self.cluster_name}_clu_{self.signal_choice}.pdf"
+        # Titles, formatting, and save paths
+        total_mass_hinv = float(np.nansum(getattr(self.lenses, "mass", np.array([np.nan]))))
+        title_main = rf"{self.cluster_name}: JWST Weak-Lensing Mass Reconstruction ({self.signal_choice})"
+        save_main  = Path(self.output_dir) / f"{self.cluster_name}_clu_{self.signal_choice}.pdf"
 
-        # --- Plot main reconstruction (PDF, vector) ---
-        plot_cluster_kappa(
-            img_data=img_data,
-            img_extent=img_extent,
-            kx=X, ky=Y, kappa=kappa,
-            title=title,
-            save_name_pdf=str(save_pdf),
-            peaks=peaks, masses=masses,
-            z_lens=self.z_cluster, cosmo=COSMO,
-            levels=levels,
-            smooth_sigma=1.0  # light smoothing for contours
+        # Main panel (no table)
+        _plot_single_panel(
+            img_data=img_data, img_extent=img_extent,
+            X=X, Y=Y, kappa=kappa, levels=levels, peaks=peaks,
+            title=title_main, sum_mass_hinv=total_mass_hinv,
+            z_lens=self.z_cluster, smooth_sigma=1.0, save_pdf_path=str(save_main)
         )
 
-        # --- Compare mass estimates (keep your existing utility; consider PDF export) ---
+        # Mass comparison (existing utility)
         utils.compare_mass_estimates(
             self.lenses,
             Path(self.output_dir) / f"mass_{self.cluster_name}_{self.signal_choice}.pdf",
-            f"Mass Comparison: {self.cluster_name}  (signals: {self.signal_choice})",
+            f"Mass Comparison: {self.cluster_name} (signals: {self.signal_choice})",
             self.cluster_name
         )
 
-        # --- Kaiser–Squires reconstructions (only once for 'all' signals) ---
-        if self.signal_choice != 'all':
-            print("Skipping Kaiser–Squires reconstructions for non-'all' signal choices.")
-            return
+        # Kaiser–Squires panels (only when combining all signals)
+        if self.signal_choice == 'all':
+            # Extent from source footprint (arcsec)
+            x_min, x_max = float(np.min(self.sources.x)), float(np.max(self.sources.x))
+            y_min, y_max = float(np.min(self.sources.y)), float(np.max(self.sources.y))
+            ks_extent = [x_min, x_max, y_min, y_max]
 
-        # Define a reconstruction extent from source footprint (arcsec offsets)
-        x_min, x_max = float(np.min(self.sources.x)), float(np.max(self.sources.x))
-        y_min, y_max = float(np.min(self.sources.y)), float(np.max(self.sources.y))
-        kappa_extent = [x_min, x_max, y_min, y_max]
+            # Simple density-based smoothing scale (arcsec)
+            max_r = np.max(np.hypot(self.sources.x, self.sources.y))
+            avg_density = len(self.sources.x) / (np.pi/4.0 * max_r**2 + 1e-12)
+            smoothing_scale = (1.0 / max(avg_density, 1e-6))**0.5
 
-        # Average source density and smoothing scale (arcsec)
-        # Note: area≈π/4 * D^2 for max radial extent D
-        max_r = np.max(np.hypot(self.sources.x, self.sources.y))
-        avg_source_density = len(self.sources.x) / (np.pi/4.0 * max_r**2)
-        smoothing_scale = (1.0 / max(avg_source_density, 1e-6))**0.5
+            # Flexion-only KS
+            w_f = getattr(self.sources, "sigf", None)
+            w_f = None if w_f is None else (w_f**-2)
+            Xf, Yf, kappa_f = utils.perform_kaiser_squire_reconstruction(
+                self.sources, extent=ks_extent, signal='flexion',
+                smoothing_scale=smoothing_scale, weights=w_f, apodize=True
+            )
+            kappa_f = utils.mass_sheet_transformation(kappa_f, k=utils.estimate_mass_sheet_factor(kappa_f))
+            peaks_f, _m_f = utils.find_peaks_and_masses(
+                kappa_f, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=300
+            )
+            save_f = Path(self.output_dir) / f"ks_flex_{self.cluster_name}.pdf"
+            _plot_single_panel(
+                img_data=img_data, img_extent=img_extent,
+                X=Xf, Y=Yf, kappa=kappa_f, levels=levels, peaks=peaks_f,
+                title=f"{self.cluster_name}: Kaiser–Squires (flexion)",
+                sum_mass_hinv=total_mass_hinv, z_lens=self.z_cluster,
+                smooth_sigma=1.0, save_pdf_path=str(save_f)
+            )
 
-        # --- KS: Flexion-only ---
-        weights_flexion = getattr(self.sources, "sigf", None)
-        weights_flexion = None if weights_flexion is None else (weights_flexion**-2)
+            # Shear-only KS
+            Xs, Ys, kappa_s = utils.perform_kaiser_squire_reconstruction(
+                self.sources, extent=ks_extent, signal='shear',
+                smoothing_scale=smoothing_scale, weights=None, apodize=True
+            )
+            kappa_s = utils.mass_sheet_transformation(kappa_s, k=utils.estimate_mass_sheet_factor(kappa_s))
+            peaks_s, _m_s = utils.find_peaks_and_masses(
+                kappa_s, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=300
+            )
+            save_s = Path(self.output_dir) / f"ks_shear_{self.cluster_name}.pdf"
+            _plot_single_panel(
+                img_data=img_data, img_extent=img_extent,
+                X=Xs, Y=Ys, kappa=kappa_s, levels=levels, peaks=peaks_s,
+                title=f"{self.cluster_name}: Kaiser–Squires (shear)",
+                sum_mass_hinv=total_mass_hinv, z_lens=self.z_cluster,
+                smooth_sigma=1.0, save_pdf_path=str(save_s)
+            )
+        else:
+            print("Skipping Kaiser–Squires panels (only generated for signal_choice='all').")
 
-        Xf, Yf, kappa_flex = utils.perform_kaiser_squire_reconstruction(
-            self.sources,
-            extent=kappa_extent,
-            signal='flexion',
-            smoothing_scale=smoothing_scale,
-            weights=weights_flexion,
-            apodize=True
-        )
-        k_val_f = utils.estimate_mass_sheet_factor(kappa_flex)
-        kappa_flex = utils.mass_sheet_transformation(kappa_flex, k=k_val_f)
-
-        peaks_f, masses_f = utils.find_peaks_and_masses(
-            kappa_flex,
-            z_lens=self.z_cluster, z_source=self.z_source,
-            radius_kpc=300
-        )
-        title_f = f"{self.cluster_name}: KS Flexion (all signals run)"
-        save_pdf_f = Path(self.output_dir) / f"ks_flex_{self.cluster_name}.pdf"
-        # Use the SAME levels for consistency across panels
-        plot_cluster_kappa(
-            img_data=img_data,
-            img_extent=img_extent,
-            kx=Xf, ky=Yf, kappa=kappa_flex,
-            title=title_f,
-            save_name_pdf=str(save_pdf_f),
-            peaks=peaks_f, masses=masses_f,
-            z_lens=self.z_cluster, cosmo=COSMO,
-            levels=levels,
-            smooth_sigma=1.0
-        )
-
-        # --- KS: Shear-only ---
-        Xs, Ys, kappa_shear = utils.perform_kaiser_squire_reconstruction(
-            self.sources,
-            extent=kappa_extent,
-            signal='shear',
-            smoothing_scale=smoothing_scale,
-            weights=None,  # add weights if you have per-source shear uncertainties
-            apodize=True
-        )
-        k_val_s = utils.estimate_mass_sheet_factor(kappa_shear)
-        kappa_shear = utils.mass_sheet_transformation(kappa_shear, k=k_val_s)
-
-        peaks_s, masses_s = utils.find_peaks_and_masses(
-            kappa_shear,
-            z_lens=self.z_cluster, z_source=self.z_source,
-            radius_kpc=300
-        )
-        title_s = f"{self.cluster_name}: KS Shear (all signals run)"
-        save_pdf_s = Path(self.output_dir) / f"ks_shear_{self.cluster_name}.pdf"
-        plot_cluster_kappa(
-            img_data=img_data,
-            img_extent=img_extent,
-            kx=Xs, ky=Ys, kappa=kappa_shear,
-            title=title_s,
-            save_name_pdf=str(save_pdf_s),
-            peaks=peaks_s, masses=masses_s,
-            z_lens=self.z_cluster, cosmo=COSMO,
-            levels=levels,
-            smooth_sigma=1.0
-        )
 
     def get_image_data(self):
         """
@@ -762,8 +614,10 @@ class JWSTPipeline:
         Imports lens data from a CSV file.
         """
         file_name = self.output_dir / f"lenses_{self.cluster_name}_{self.signal_choice}.csv"
-        self.lenses = halo_obj.NFW_Lens.import_from_csv(file_name)
-
+        # Create an empty lens
+        lens = halo_obj.NFW_Lens(x=[], y=[], z=[], mass=[], concentration=[], redshift=self.z_cluster, chi2=[])
+        lens.import_from_csv(file_name)
+        self.lenses = lens
 
 if __name__ == '__main__':
     # Configuration dictionary
@@ -776,7 +630,7 @@ if __name__ == '__main__':
             'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
             'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
             'output_dir': 'Output/JWST/ABELL/',
-            'cluster_name': 'ABELL 2744',
+            'cluster_name': 'ABELL_2744',
             'cluster_redshift': 0.308,
             'source_redshift': 0.8,
             'signal_choice': signal
@@ -787,7 +641,7 @@ if __name__ == '__main__':
             'source_catalog_path': 'JWST_Data/JWST/EL_GORDO/Catalogs/stacked_cat.ecsv',
             'image_path': 'JWST_Data/JWST/EL_GORDO/Image_Data/stacked.fits',
             'output_dir': 'Output/JWST/EL_GORDO/',
-            'cluster_name': 'EL GORDO',
+            'cluster_name': 'EL_GORDO',
             'cluster_redshift': 0.873,
             'source_redshift': 1.2,
             'signal_choice': signal
@@ -797,8 +651,8 @@ if __name__ == '__main__':
         pipeline_el_gordo = JWSTPipeline(el_gordo_config)
         pipeline_abell = JWSTPipeline(abell_config)
 
-        pipeline_el_gordo.run()
-        #pipeline_el_gordo.visualize()
-        pipeline_abell.run()
-        #pipeline_abell.visualize()
+        #pipeline_el_gordo.run()
+        pipeline_el_gordo.visualize()
+        #pipeline_abell.run()
+        pipeline_abell.visualize()
         print(f"Finished running pipeline for signal choice: {signal}")

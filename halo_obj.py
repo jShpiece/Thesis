@@ -197,7 +197,7 @@ class NFW_Lens:
         Parameters:
             filename (str): Name of the CSV file to read.
         """
-        data = np.loadtxt(filename, delimiter=",", skiprows=1)
+        data = np.loadtxt(filename, delimiter=",", skiprows=1, ndmin=2)
         self.x = data[:, 0]
         self.y = data[:, 1]
         self.z = data[:, 2]
