@@ -553,7 +553,6 @@ def estimate_mass_sheet_factor(kappa):
 
     # Estimate k using the constraint: mean_edge_kappa_transformed = 0
     k = 1 / (1 - mean_edge_kappa)
-    print(k)
     return k
 
 
@@ -787,7 +786,6 @@ def calculate_lensing_signals_nfw(halos, sources):
                 flexion_1.item(), flexion_2.item(),
                 g_flexion_1.item(), g_flexion_2.item())
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
-
 
 
 def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_2744'):

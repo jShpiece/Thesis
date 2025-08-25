@@ -534,7 +534,6 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS'):
                 method="bounded",
                 options={"xatol": 1e-6, "maxiter": 2000}
             )
-            print('Optimization reached: {}'.format(res.success))
             lenses.mass[i] = 10 ** res.x
             lenses.calculate_concentration()
     else:

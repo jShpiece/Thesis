@@ -53,4 +53,5 @@ axes.labelpad : 10
 # Savefig
 savefig.format : pdf
 savefig.dpi : 600
-savefig.bbox : tight
+#savefig.bbox : tight
+figure.constrained_layout.use : True
