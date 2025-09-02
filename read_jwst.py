@@ -621,7 +621,7 @@ class JWSTPipeline:
 
 if __name__ == '__main__':
     # Configuration dictionary
-    signals = ['all', 'shear_f', 'f_g', 'shear_g']
+    signals = ['shear_f', 'f_g', 'shear_g']
     # Create an output file to store all the results
 
     for signal in signals:
@@ -652,7 +652,8 @@ if __name__ == '__main__':
         pipeline_abell = JWSTPipeline(abell_config)
 
         #pipeline_el_gordo.run()
-        pipeline_el_gordo.visualize()
+        #pipeline_el_gordo.visualize()
         #pipeline_abell.run()
-        pipeline_abell.visualize()
+        #pipeline_abell.visualize()
+        pipeline_el_gordo.compute_error_bars()
         print(f"Finished running pipeline for signal choice: {signal}")
