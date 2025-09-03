@@ -600,7 +600,6 @@ class JWSTPipeline:
         else:
             print("Skipping Kaiser–Squires panels (only generated for signal_choice='all').")
 
-
     def get_image_data(self):
         """
         Reads image data from a FITS file.
