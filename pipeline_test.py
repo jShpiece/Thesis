@@ -60,8 +60,8 @@ def test_pipeline():
     xmax = 50.0                    # half-size of the map (arcsec)
     masses_true = [1e14, 1e13]     # M200 in Msun
     # Place halos ~35" apart
-    xl_true = np.array([  0.5,  25.0])
-    yl_true = np.array([ -0.5, -25.0])
+    xl_true = np.array([  0.5,  15.0])
+    yl_true = np.array([ -0.5, -15.0])
 
     # source catalog
     Nsource = 100
@@ -212,10 +212,11 @@ def test_pipeline():
     axes[1].set_ylabel("y [arcsec]", fontsize=9)
 
     # annotate map-level metrics
+    '''
     axes[1].text(0.02, 0.98, f"r={corr:0.3f}\nNRMSE={nrmse:0.3f}",
                  transform=axes[1].transAxes, va='top', ha='left', fontsize=9,
                  bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
-
+    '''
     for ax in axes:
         ax.tick_params(axis='both', which='major', labelsize=8)
         ax.set_aspect('equal')
