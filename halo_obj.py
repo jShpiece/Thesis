@@ -284,6 +284,13 @@ class NFW_Lens:
         """
         mass_corrected = self.mass + 1e-10 # Avoid division by zero
         self.concentration = (5.71 * (mass_corrected / 2e12) ** (-0.084) * (1 + self.redshift) ** (-0.47))
+        '''
+        Or raganin et al
+        A = 6.02
+        B = -0.12
+        C = 0.16
+        self.concentration = (A * (mass_corrected / 1e13) ** B * ((1.47)/(1 + self.redshift)) ** (C))
+        '''
 
     def check_for_nan_properties(self):
         """
