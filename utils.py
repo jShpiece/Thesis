@@ -690,6 +690,7 @@ def calculate_lensing_signals_nfw(halos, sources):
         return sol
 
     def radial_term_2(x):
+        # Called g(x), used in shear calculation
         sol = np.zeros_like(x)
         m1 = x < 1
         m2 = x > 1
@@ -735,10 +736,25 @@ def calculate_lensing_signals_nfw(halos, sources):
         sol *= leading
         return sol
 
+    def radial_term_5(x):
+        # Use this to compute necessary term for kappa
+        sol = np.zeros_like(x)
+        m1 = x < 1
+        m2 = x == 1
+        m3 = x > 1
+        t1 = np.sqrt(np.clip((1 - x[m1]) / (1 + x[m1]), 0.0, None))
+        sol[m1] = (2/np.sqrt(1 - x[m1]**2)) * np.arctanh(t1) + (np.log(x[m1]/2))/x[m1]**2
+        sol[m2] = 1 + np.log(0.5)
+        t2 = np.sqrt(np.clip((x[m3] - 1) / (1 + x[m3]), 0.0, None))
+        sol[m3] = (2/np.sqrt(x[m3]**2 - 1)) * np.arctan(t2) + (np.log(x[m3]/2))/x[m3]**2
+        return sol
+        
+
     term_1 = radial_term_1(x)
     term_2 = radial_term_2(x)
     term_3 = radial_term_3(x)
     term_4 = radial_term_4(x)
+    term_5 = radial_term_5(x)
 
     # --- Angular factors ---
     cos_phi = dx / r
@@ -749,6 +765,7 @@ def calculate_lensing_signals_nfw(halos, sources):
     sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
 
     # --- Lensing magnitudes (per halo, per source) ---
+    kappa_mag = 4 * kappa_s * term_5
     shear_mag = -kappa_s * term_2
 
     def calc_flexion(flexion_s, x, term_1, term_3):
@@ -773,6 +790,7 @@ def calculate_lensing_signals_nfw(halos, sources):
     g_flexion_mag = np.where(behind[None, :], g_flexion_mag, 0.0)
 
     # --- Sum over halos => per-source outputs ---
+    kappa       = np.sum(kappa_mag              , axis=0) 
     shear_1     = np.sum(shear_mag     * cos2phi, axis=0)
     shear_2     = np.sum(shear_mag     * sin2phi, axis=0)
     flexion_1   = np.sum(flexion_mag   * cos_phi, axis=0)
@@ -785,7 +803,7 @@ def calculate_lensing_signals_nfw(halos, sources):
         return (shear_1.item(), shear_2.item(),
                 flexion_1.item(), flexion_2.item(),
                 g_flexion_1.item(), g_flexion_2.item())
-    return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
+    return kappa, shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
 
 def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_2744'):

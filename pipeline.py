@@ -60,7 +60,7 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
 
         # Estimate radial distance to lens
         # The factor 1.45 is empirical; adjust based on model calibration if necessary
-        r = 1.45 * gamma / flexion
+        r = 2.0 * gamma / flexion
 
         # Estimate lens positions
         xl = sources.x + r * np.cos(phi)

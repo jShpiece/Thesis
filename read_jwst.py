@@ -652,7 +652,7 @@ if __name__ == '__main__':
 
         #pipeline_el_gordo.run()
         #pipeline_el_gordo.visualize()
-        #pipeline_abell.run()
-        #pipeline_abell.visualize()
-        pipeline_el_gordo.compute_error_bars()
+        pipeline_abell.run()
+        pipeline_abell.visualize()
+        #pipeline_el_gordo.compute_error_bars()
         print(f"Finished running pipeline for signal choice: {signal}")

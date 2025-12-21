@@ -225,6 +225,58 @@ def plot_G_panel(ax, X, Y, kappa, x_m, y_m, G1_m, G2_m,
 # ===============================
 if __name__ == "__main__":
 
+    # Create a halo
+    halo = halo_obj.NFW_Lens(0.0, 0.0, 0.0, 0.0, 1e14, 0.2, 0.0)
+    halo.calculate_concentration()
+
+    r = np.linspace(0.1, 100, 1000)
+    # put a source at each r, compute shear and flexion, and plot them as a function of r
+    sources = source_obj.Source(
+        r, np.zeros_like(r),
+        np.zeros_like(r), np.zeros_like(r),  # e1, e2
+        np.zeros_like(r), np.zeros_like(r),  # f1, f2
+        np.zeros_like(r), np.zeros_like(r),  # g1, g2
+        np.ones_like(r)*0.1,            # e-err
+        np.ones_like(r)*0.00075,          # f-err
+        np.ones_like(r)*0.008,          # g-err
+        np.ones_like(r)*0.8             # SNR / weight
+    )
+    sources.apply_lensing(halo, lens_type='NFW')
+    e_mag = np.sqrt(sources.e1**2 + sources.e2**2)
+    f_mag = np.sqrt(sources.f1**2 + sources.f2**2)
+    g_mag = np.sqrt(sources.g1**2 + sources.g2**2)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Left plot: Shear and Flexion comparison
+    ax1.loglog(r, e_mag, label="Shear |γ|", color="blue", linewidth=2)
+    ax1.loglog(r, f_mag, label="First Flexion |ℱ|", color="orange", linewidth=2)
+    #ax1.loglog(r, g_mag, label="Second Flexion |𝔾|", color="red", linewidth=2)
+    ax1.set_xlabel("Radius (arcsec)", fontsize=12)
+    ax1.set_ylabel("Magnitude", fontsize=12)
+    ax1.set_title("Shear and Flexion Profiles for NFW Halo", fontsize=14)
+    ax1.legend(fontsize=11)
+    ax1.grid(True, which="both", ls="--", alpha=0.5)
+    
+    # Right plot: Distance comparison
+    predicted_dist = 2 * e_mag / f_mag  # Your predicted distance from ratio
+    true_dist = r  # True radial distance
+    ax2.loglog(true_dist, predicted_dist, label="Predicted: |γ| / |ℱ|", 
+               color="green", linewidth=2)
+    ax2.loglog(true_dist, true_dist, label="True distance", 
+               color="black", linestyle="--", linewidth=2)
+    ax2.set_xlabel("True Radius (arcsec)", fontsize=12)
+    ax2.set_ylabel("Distance (arcsec)", fontsize=12)
+    ax2.set_title("Predicted vs True Distance", fontsize=14)
+    ax2.legend(fontsize=11)
+    ax2.grid(True, which="both", ls="--", alpha=0.5)
+    
+    plt.tight_layout()
+    plt.savefig("nfw_shear_flexion_profiles.png", dpi=300)
+    plt.show()
+
+    raise SystemExit("lensing_fields.py is not intended to be run directly.")
+
     # halo model for lensing (shear/flexion)
     halos = halo_obj.SIS_Lens(HALO_X, HALO_Y, HALO_THETA_E,
                               np.ones_like(HALO_X))
