@@ -409,7 +409,7 @@ def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200):
     return peaks_arcsec, masses
 
 
-def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8):
+def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8, k_val=0.95):
     """
     Calculates the convergence (kappa) map for a given set of lenses.
 
@@ -473,7 +473,6 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8):
 
     # Break the mass sheet degeneracy by requiring kappa to go to zero at the edges
     # k_val = estimate_mass_sheet_factor(kappa) # Mass sheet transformation parameter
-    k_val = 0.95 # Test value
     kappa = mass_sheet_transformation(kappa, k=k_val)
 
     # Remove the padding
@@ -742,11 +741,9 @@ def calculate_lensing_signals_nfw(halos, sources):
         m1 = x < 1
         m2 = x == 1
         m3 = x > 1
-        t1 = np.sqrt(np.clip((1 - x[m1]) / (1 + x[m1]), 0.0, None))
-        sol[m1] = (2/np.sqrt(1 - x[m1]**2)) * np.arctanh(t1) + (np.log(x[m1]/2))/x[m1]**2
-        sol[m2] = 1 + np.log(0.5)
-        t2 = np.sqrt(np.clip((x[m3] - 1) / (1 + x[m3]), 0.0, None))
-        sol[m3] = (2/np.sqrt(x[m3]**2 - 1)) * np.arctan(t2) + (np.log(x[m3]/2))/x[m3]**2
+        sol[m1] = np.arctanh(np.sqrt(1-x[m1]**2)) / np.sqrt(1-x[m1]**2)
+        sol[m2] = 1 
+        sol[m3] = np.arctan(np.sqrt(x[m3]**2 - 1)) / np.sqrt(x[m3]**2 - 1)
         return sol
         
 
@@ -765,7 +762,7 @@ def calculate_lensing_signals_nfw(halos, sources):
     sin3phi = sin2phi * cos_phi + cos2phi * sin_phi
 
     # --- Lensing magnitudes (per halo, per source) ---
-    kappa_mag = 4 * kappa_s * term_5
+    kappa_mag = 2 * kappa_s* (1 - term_5) / (x**2 - 1)
     shear_mag = -kappa_s * term_2
 
     def calc_flexion(flexion_s, x, term_1, term_3):

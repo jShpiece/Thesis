@@ -4,6 +4,7 @@ from matplotlib.ticker import FuncFormatter
 
 import halo_obj
 import source_obj
+import utils
 
 
 # ===============================
@@ -226,26 +227,62 @@ def plot_G_panel(ax, X, Y, kappa, x_m, y_m, G1_m, G2_m,
 if __name__ == "__main__":
 
     # Create a halo
-    halo = halo_obj.NFW_Lens(0.0, 0.0, 0.0, 0.0, 1e14, 0.2, 0.0)
-    halo.calculate_concentration()
+    masses = [1e14, 5e14, 1e15]  # in Msun
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
 
-    r = np.linspace(0.1, 100, 1000)
-    # put a source at each r, compute shear and flexion, and plot them as a function of r
-    sources = source_obj.Source(
-        r, np.zeros_like(r),
-        np.zeros_like(r), np.zeros_like(r),  # e1, e2
-        np.zeros_like(r), np.zeros_like(r),  # f1, f2
-        np.zeros_like(r), np.zeros_like(r),  # g1, g2
-        np.ones_like(r)*0.1,            # e-err
-        np.ones_like(r)*0.00075,          # f-err
-        np.ones_like(r)*0.008,          # g-err
-        np.ones_like(r)*0.8             # SNR / weight
-    )
-    sources.apply_lensing(halo, lens_type='NFW')
-    e_mag = np.sqrt(sources.e1**2 + sources.e2**2)
-    f_mag = np.sqrt(sources.f1**2 + sources.f2**2)
-    g_mag = np.sqrt(sources.g1**2 + sources.g2**2)
+    for m in masses:
 
+        halo = halo_obj.NFW_Lens(0.0, 0.0, 0.0, 0.0, m, 0.2, 0.0)
+        halo.calculate_concentration()
+
+        r = np.linspace(0.01, 1000, 10000)
+        # put a source at each r, compute shear and flexion, and plot them as a function of r
+        sources = source_obj.Source(
+            r, np.zeros_like(r),
+            np.zeros_like(r), np.zeros_like(r),  # e1, e2
+            np.zeros_like(r), np.zeros_like(r),  # f1, f2
+            np.zeros_like(r), np.zeros_like(r),  # g1, g2
+            np.ones_like(r)*0.1,            # e-err
+            np.ones_like(r)*0.00075,          # f-err
+            np.ones_like(r)*0.008,          # g-err
+            np.ones_like(r)*0.8             # SNR / weight
+        )
+
+        kappa, shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(
+            halo, sources
+        )
+        e_mag = np.sqrt(shear_1**2 + shear_2**2)
+        f_mag = np.sqrt(flex_1**2 + flex_2**2)
+        g_mag = np.sqrt(gflex_1**2 + gflex_2**2)
+
+        # Plot kappa in logspace, handling sign changes
+        # Split into positive and negative regions to show full profile
+        pos_mask = kappa > 0
+        neg_mask = kappa < 0
+        
+        # Plot positive values as solid line
+        if np.any(pos_mask):
+            ax.loglog(r[pos_mask], kappa[pos_mask], 
+                 label=f"M={m:.1e} Msun", linewidth=2)
+        
+        # Plot negative values as dashed line (absolute value)
+        if np.any(neg_mask):
+            ax.loglog(r[neg_mask], np.abs(kappa[neg_mask]), 
+                 linestyle='--', linewidth=2, alpha=0.7)
+
+    ax.set_xlabel("Radius (arcsec)", fontsize=12)
+    ax.set_ylabel("Convergence κ", fontsize=12)
+    ax.set_title("NFW Halo Convergence Profiles", fontsize=14)
+    # Plot a line at kappa = 1 for reference (cutting line between strong and weak lensing)
+    ax.axhline(1, color="red", linestyle="--", linewidth=1, label="κ = 1")
+    ax.legend(fontsize=11)
+    ax.grid(True, which="both", ls="--", alpha=0.5)
+    plt.tight_layout()
+    plt.savefig("nfw_convergence_profiles.png", dpi=300)
+    plt.show()
+
+    '''
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     
     # Left plot: Shear and Flexion comparison
@@ -274,6 +311,7 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig("nfw_shear_flexion_profiles.png", dpi=300)
     plt.show()
+    '''
 
     raise SystemExit("lensing_fields.py is not intended to be run directly.")
 
