@@ -23,7 +23,7 @@ import arch.utils as utils  # Custom utility functions
 import arch.minimizer as minimizer  # Custom minimizer module
 import arch.source_obj as source_obj # Source object
 import arch.halo_obj as halo_obj # Halo object
-import metric # Metric calculation functions
+import arch.metric as metric # Metric calculation functions
 
 
 def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
@@ -103,7 +103,7 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
                     redshift=sources.redshift[i]
                 )
                 # Compute the lensing signals from the lens
-                _, _, f1_model, f2_model, _, _ = utils.calculate_lensing_signals_nfw(lens, source)
+                _, _, _, f1_model, f2_model, _, _ = utils.calculate_lensing_signals_nfw(lens, source)
 
                 # Compute the difference between observed and modeled flexion
                 flexion_diff = np.sqrt((f1_model - sources.f1[i])**2 + (f2_model - sources.f2[i])**2)
