@@ -2,9 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
-import halo_obj
-import source_obj
-import utils
+import arch.halo_obj as halo_obj
+import arch.source_obj as source_obj
+import arch.utils as utils
 
 
 # ===============================

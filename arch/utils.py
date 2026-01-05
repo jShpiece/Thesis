@@ -13,7 +13,7 @@ from astropy import units as u
 from itertools import combinations
 from scipy.integrate import quad
 import matplotlib.pyplot as plt
-import halo_obj
+import arch.halo_obj as halo_obj
 from scipy.ndimage import gaussian_filter, maximum_filter
 from astropy.cosmology import Planck18 as cosmo
 

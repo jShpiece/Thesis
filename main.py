@@ -1,4 +1,4 @@
-import pipeline
+import arch.pipeline as pipeline
 
 def fit_lensing_field(sources, xmax, flags=False, use_flags=None, lens_type='SIS', z_lens=0.5):
     """

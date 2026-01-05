@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import utils
-import halo_obj
+import arch.utils as utils
+import arch.halo_obj as halo_obj
 from astropy.io import fits
 import read_jwst
 

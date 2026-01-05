@@ -1,8 +1,5 @@
 import numpy as np
-import utils
-import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter
-from skimage.feature import peak_local_max
+import arch.utils as utils
 
 class Source:
     """

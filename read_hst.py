@@ -4,9 +4,9 @@ from astropy.io import fits
 from astropy.visualization import ImageNormalize, LogStretch
 import warnings
 import main
-import source_obj
-import halo_obj
-import utils
+import arch.source_obj as source_obj
+import arch.halo_obj as halo_obj
+import arch.utils as utils
 
 plt.style.use('scientific_presentation.mplstyle')
 

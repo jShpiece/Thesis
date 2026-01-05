@@ -17,11 +17,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.visualization import hist as fancy_hist
 import pipeline
-import halo_obj
-import source_obj
+import arch.halo_obj as halo_obj
+import arch.source_obj as source_obj
 import time
 import main
-import utils
+import arch.utils as utils
 from scipy.optimize import curve_fit
 
 plt.style.use('scientific_presentation.mplstyle')  # Use the scientific presentation style sheet for all plots

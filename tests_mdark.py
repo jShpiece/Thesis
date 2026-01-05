@@ -2,8 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.visualization import hist as fancyhist
 import pandas as pd
-import halo_obj
-import source_obj
+import arch.halo_obj as halo_obj
+import arch.source_obj as source_obj
 import astropy.units as u
 from astropy.cosmology import Planck15 as cosmo
 from multiprocessing import Pool
@@ -11,7 +11,7 @@ import time
 import main
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from utils import print_progress_bar
+from arch.utils import print_progress_bar
 
 # Physical constants
 c = 3e8  # Speed of light in m/s

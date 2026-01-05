@@ -19,10 +19,10 @@ Functions:
 import numpy as np
 import scipy.optimize as opt
 from scipy.optimize import minimize, minimize_scalar
-import utils  # Custom utility functions
+import arch.utils as utils  # Custom utility functions
 import minimizer  # Custom minimizer module
-import source_obj # Source object
-import halo_obj # Halo object
+import arch.source_obj as source_obj # Source object
+import arch.halo_obj as halo_obj # Halo object
 import metric # Metric calculation functions
 
 

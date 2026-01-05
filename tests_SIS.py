@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pipeline
-import utils
+import arch.utils as utils
 import time
 from astropy.visualization import hist as fancyhist
 from multiprocessing import Pool

@@ -18,9 +18,9 @@ from matplotlib.gridspec import GridSpec
 
 # Import custom modules 
 import main
-import source_obj
-import halo_obj
-import utils
+import arch.source_obj as source_obj
+import arch.halo_obj as halo_obj
+import arch.utils as utils
 
 # Set matplotlib style
 plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists

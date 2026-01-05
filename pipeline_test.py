@@ -1,10 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pipeline
-import halo_obj
-import source_obj
+import arch.halo_obj as halo_obj
+import arch.source_obj as source_obj
 import main
-import utils
+import arch.utils as utils
 import csv
 
 plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
