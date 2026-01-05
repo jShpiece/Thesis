@@ -20,7 +20,7 @@ import pipeline
 import arch.halo_obj as halo_obj
 import arch.source_obj as source_obj
 import time
-import main
+import arch.main as main
 import arch.utils as utils
 from scipy.optimize import curve_fit
 

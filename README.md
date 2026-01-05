@@ -39,20 +39,16 @@ arch/
 pipelines/
     End-to-end workflows for specific analyses or datasets
 
-simulations/
-    Synthetic data generation and controlled tests
-
-notebooks/
-    Exploratory, diagnostic, and validation notebooks
-
 tests/
-    Unit tests and regression checks
+    Controlled tests and regression checks
 
-data/
-    Small example or derived datasets only
-    (raw survey or simulation data are excluded)
+JWST_Data/
+    Image files and derived catalogs from JWST surveys
 
-figures/
+MDARK/
+    Multidark cluster Nbody simulation derived halo catalogs (used for simulated tests)
+
+output/
     Diagnostic and publication-quality plots
 
 requirements.txt

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import arch.utils as utils
 import arch.halo_obj as halo_obj
 from astropy.io import fits
-import read_jwst
+import pipelines.read_jwst as read_jwst
 
 if __name__ == '__main__':
     signals = ['all', 'shear_f', 'f_g', 'shear_g']

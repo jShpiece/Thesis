@@ -8,7 +8,7 @@ import astropy.units as u
 from astropy.cosmology import Planck15 as cosmo
 from multiprocessing import Pool
 import time
-import main
+import arch.main as main
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from arch.utils import print_progress_bar

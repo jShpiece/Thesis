@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.visualization import ImageNormalize, LogStretch
 import warnings
-import main
+import arch.main as main
 import arch.source_obj as source_obj
 import arch.halo_obj as halo_obj
 import arch.utils as utils

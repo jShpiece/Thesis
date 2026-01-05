@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import pipeline
 import arch.halo_obj as halo_obj
 import arch.source_obj as source_obj
-import main
+import arch.main as main
 import arch.utils as utils
 import csv
 

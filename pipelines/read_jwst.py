@@ -17,7 +17,7 @@ from astropy.cosmology import Planck18 as COSMO
 from matplotlib.gridspec import GridSpec
 
 # Import custom modules 
-import main
+import arch.main as main
 import arch.source_obj as source_obj
 import arch.halo_obj as halo_obj
 import arch.utils as utils
