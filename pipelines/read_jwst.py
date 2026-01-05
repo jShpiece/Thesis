@@ -22,8 +22,8 @@ import arch.source_obj as source_obj
 import arch.halo_obj as halo_obj
 import arch.utils as utils
 
-# Set matplotlib style
-plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
+# Set matplotlib style (located in root directory)
+plt.style.use('scientific_presentation.mplstyle')  
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore",category=RuntimeWarning)
