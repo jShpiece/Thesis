@@ -22,8 +22,8 @@ import arch.source_obj as source_obj
 import arch.halo_obj as halo_obj
 import arch.utils as utils
 
-# Set matplotlib style (located in root directory)
-plt.style.use('scientific_presentation.mplstyle')  
+# Set matplotlib style
+plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore",category=RuntimeWarning)
@@ -441,11 +441,50 @@ class JWSTPipeline:
 
         def _plot_single_panel(
             img_data, img_extent, X, Y, kappa, levels, peaks, title, sum_mass_hinv,
-            z_lens=None, smooth_sigma=1.0, save_pdf_path=None
+            z_lens=None, smooth_sigma=1.0, save_pdf_path=None, cluster_name=None
         ):
+            
+            
+            def _rotate_cw90_panel(img_data, img_extent, X, Y, kappa, peaks=None):
+                """
+                Rotate panel content 90 degrees clockwise in a coordinate-consistent way.
+
+                Assumes img_extent = (xmin, xmax, ymin, ymax) in the same physical units as X,Y.
+                X,Y are 2D meshgrids matching kappa shape.
+                peaks is an iterable of (x,y) points in the same coordinate system.
+                """
+                xmin, xmax, ymin, ymax = img_extent
+
+                # Rotate raster-like arrays (clockwise = k=-1)
+                img_r   = np.rot90(img_data, k=-1)
+                kappa_r = np.rot90(kappa,    k=-1)
+
+                # Coordinate transform for a 90° clockwise rotation about the origin:
+                # (x, y) -> (y, -x)
+                # But we must also reindex to match np.rot90’s pixel mapping; the correct
+                # new coordinate grids at each rotated pixel are obtained by rotating the
+                # transformed grids:
+                X_r = np.rot90(Y,     k=-1)   # new x' = old y
+                Y_r = np.rot90(-X,    k=-1)   # new y' = -old x
+
+                # Update extent accordingly: x' spans old y-range, y' spans -old x-range
+                extent_r = (ymin, ymax, -xmax, -xmin)
+
+                # Rotate peaks (pure coordinate transform; no reindexing needed for points)
+                peaks_r = None
+                if peaks:
+                    peaks_r = [(py, -px) for (px, py) in peaks]
+
+                return img_r, extent_r, X_r, Y_r, kappa_r, peaks_r
+            
             """Single clean panel with background, κ-contours, numbered peaks, compass & scalebar."""
             # Smooth κ for display/contours (optional)
             kappa_disp = gaussian_filter(kappa, smooth_sigma) if smooth_sigma else kappa
+
+            if cluster_name == "EL_GORDO":
+                img_data, img_extent, X, Y, kappa_disp, peaks = _rotate_cw90_panel(
+                    img_data, img_extent, X, Y, kappa_disp, peaks=peaks
+                )
 
             # Figure
             fig, ax = plt.subplots(figsize=(4.8, 4.9), dpi=600)  # single-column friendly
@@ -475,7 +514,6 @@ class JWSTPipeline:
             # Labels & title
             ax.set_xlabel("RA offset (arcsec)")
             ax.set_ylabel("Dec offset (arcsec)")
-            # ax.set_title(title, fontsize=11)
 
             # κ-level legend (compact)
             lv_str = ", ".join([f"{lv:.2f}" for lv in levels[:5]]) + ("…" if len(levels) > 5 else "")
@@ -486,12 +524,6 @@ class JWSTPipeline:
             # Compass & scale bar
             _draw_compass_and_scalebar(ax, img_extent, z_lens=z_lens, cosmo=globals().get('COSMO', None))
 
-            # Footer caption with ΣM (kept off the map area)
-            '''
-            if sum_mass_hinv is not None:
-                fig.text(0.5, 0.01, _fmt_sum_mass_hinv(sum_mass_hinv),
-                        ha="center", va="bottom", fontsize=9)
-            '''
             for sp in ax.spines.values():
                 sp.set_linewidth(0.8)
             ax.grid(False)
@@ -537,17 +569,19 @@ class JWSTPipeline:
             img_data=img_data, img_extent=img_extent,
             X=X, Y=Y, kappa=kappa, levels=levels, peaks=peaks,
             title=title_main, sum_mass_hinv=total_mass_hinv,
-            z_lens=self.z_cluster, smooth_sigma=1.0, save_pdf_path=str(save_main)
+            z_lens=self.z_cluster, smooth_sigma=1.0, save_pdf_path=str(save_main), 
+            cluster_name=self.cluster_name
         )
 
         # Mass comparison (existing utility)
+        '''
         utils.compare_mass_estimates(
             self.lenses,
             Path(self.output_dir) / f"mass_{self.cluster_name}_{self.signal_choice}.pdf",
             f"Mass Comparison: {self.cluster_name} (signals: {self.signal_choice})",
             self.cluster_name
         )
-
+        
         # Kaiser–Squires panels (only when combining all signals)
         if self.signal_choice == 'all':
             # Extent from source footprint (arcsec)
@@ -599,7 +633,8 @@ class JWSTPipeline:
             )
         else:
             print("Skipping Kaiser–Squires panels (only generated for signal_choice='all').")
-
+        '''
+        
     def get_image_data(self):
         """
         Reads image data from a FITS file.
@@ -620,7 +655,7 @@ class JWSTPipeline:
 
 if __name__ == '__main__':
     # Configuration dictionary
-    signals = ['shear_f', 'f_g', 'shear_g']
+    signals = ['all', 'shear_f', 'f_g', 'shear_g']
     # Create an output file to store all the results
 
     for signal in signals:
@@ -651,8 +686,8 @@ if __name__ == '__main__':
         pipeline_abell = JWSTPipeline(abell_config)
 
         #pipeline_el_gordo.run()
-        #pipeline_el_gordo.visualize()
-        pipeline_abell.run()
-        pipeline_abell.visualize()
+        pipeline_el_gordo.visualize()
+        #pipeline_abell.run()
+        #pipeline_abell.visualize()
         #pipeline_el_gordo.compute_error_bars()
         print(f"Finished running pipeline for signal choice: {signal}")
