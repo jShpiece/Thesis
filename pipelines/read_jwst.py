@@ -660,9 +660,9 @@ if __name__ == '__main__':
 
     for signal in signals:
         abell_config = {
-            'flexion_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
-            'source_catalog_path': 'JWST_Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
-            'image_path': 'JWST_Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
+            'flexion_catalog_path': 'Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
+            'source_catalog_path': 'Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
+            'image_path': 'Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
             'output_dir': 'Output/JWST/ABELL/',
             'cluster_name': 'ABELL_2744',
             'cluster_redshift': 0.308,
@@ -671,9 +671,9 @@ if __name__ == '__main__':
         }
 
         el_gordo_config = {
-            'flexion_catalog_path': 'JWST_Data/JWST/EL_GORDO/Catalogs/multiband_flexion.pkl',
-            'source_catalog_path': 'JWST_Data/JWST/EL_GORDO/Catalogs/stacked_cat.ecsv',
-            'image_path': 'JWST_Data/JWST/EL_GORDO/Image_Data/stacked.fits',
+            'flexion_catalog_path': 'Data/JWST/EL_GORDO/Catalogs/multiband_flexion.pkl',
+            'source_catalog_path': 'Data/JWST/EL_GORDO/Catalogs/stacked_cat.ecsv',
+            'image_path': 'Data/JWST/EL_GORDO/Image_Data/stacked.fits',
             'output_dir': 'Output/JWST/EL_GORDO/',
             'cluster_name': 'EL_GORDO',
             'cluster_redshift': 0.873,
