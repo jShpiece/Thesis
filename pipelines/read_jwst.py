@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrow
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import matplotlib.patheffects as pe
 from astropy.io import fits
 from astropy.table import Table
@@ -14,9 +13,8 @@ import csv
 import concurrent.futures
 import tqdm
 from astropy.cosmology import Planck18 as COSMO
-from matplotlib.gridspec import GridSpec
 
-# Import custom modules 
+# Import ARCH modules 
 import arch.main as main
 import arch.source_obj as source_obj
 import arch.halo_obj as halo_obj
@@ -183,21 +181,14 @@ class JWSTPipeline:
             self.IDs = df['label'].to_numpy()
             self.q = df['q'].to_numpy()
             self.phi = df['phi'].to_numpy()
-            self.F1_fit = df['F1_fit'].to_numpy()
-            self.F2_fit = df['F2_fit'].to_numpy() 
-            self.G1_fit = df['G1_fit'].to_numpy() 
-            self.G2_fit = df['G2_fit'].to_numpy()
-            self.a = df['a'].to_numpy()
+            self.F1_fit = df['F1_fit'].to_numpy() / self.CDELT  # Convert to arcseconds / inverse arcseconds
+            self.F2_fit = df['F2_fit'].to_numpy() / self.CDELT
+            self.G1_fit = df['G1_fit'].to_numpy() / self.CDELT
+            self.G2_fit = df['G2_fit'].to_numpy() / self.CDELT
+            self.a = df['a'].to_numpy() * self.CDELT  
             self.chi2 = df['rchi2'].to_numpy()
-            self.rs = df['rs'].to_numpy() # We don't need to carry this past this function
+            self.rs = df['rs'].to_numpy() * self.CDELT
 
-            # Convert to arcseconds / inverse arcseconds - do this step *immediately*, there are no circumstances where we want to keep the data in pixels
-            self.a *= self.CDELT
-            self.F1_fit /= self.CDELT
-            self.F2_fit /= self.CDELT
-            self.G1_fit /= self.CDELT
-            self.G2_fit /= self.CDELT
-            self.rs *= self.CDELT
             print(f"Read {len(self.IDs)} entries from flexion catalog.")
 
     def cut_flexion_catalog(self):
@@ -205,19 +196,11 @@ class JWSTPipeline:
         F = np.hypot(self.F1_fit, self.F2_fit)
         aF = self.a * F  # Dimensionless flexion
 
-        '''
-        # Updated thresholds - use for ABELL_2744
-        max_aF = 0.5                 # More conservative flexion threshold
-        max_rs = 5.0                 # Tighter Sérsic radius cutoff
-        max_chi2 = 1.5               # Chi2 fit quality
-        min_a, max_a = 0.01, 2.0     # Size range
-        '''
-
-        # Updated thresholds - use for EL_GORDO
-        max_aF = 0.5                 # More conservative flexion threshold
-        max_rs = 5.0                # Tighter Sérsic radius cutoff
-        max_chi2 = 1.5               # Chi2 fit quality
-        min_a, max_a = 0.01, 2.0     # Size range
+        # Define cut thresholds in aF, rs, chi2, and a
+        max_aF = 0.5                
+        max_rs = 5.0              
+        max_chi2 = 1.5               
+        min_a, max_a = 0.01, 2.0     
 
         # Boolean masks for bad data
         bad_flexion = aF > max_aF
@@ -242,29 +225,6 @@ class JWSTPipeline:
         self.rs = self.rs[~bad_indices]
         self.chi2 = self.chi2[~bad_indices]
 
-        # Measures should carry the things we want to plot, and have a name attribute for plotting
-        # Recalculate aF
-        '''
-        aF = self.a * np.hypot(self.F1_fit, self.F2_fit)
-        measures = [
-            self.q, self.phi, self.F1_fit, self.F2_fit,
-            self.G1_fit, self.G2_fit, self.a, self.rs, self.chi2, aF
-        ]
-        names = [
-            'q', 'phi', 'F1_fit', 'F2_fit',
-            'G1_fit', 'G2_fit', 'a', 'rs', 'chi2', 'aF'
-        ]
-
-        for measure, name in zip(measures, names):
-            plt.figure(figsize=(10, 6))
-            plt.hist(measure, bins=50, color='blue', alpha=0.7)
-            plt.title(f'Distribution of {name}')
-            plt.xlabel(name)
-            plt.ylabel("Frequency")
-            plt.grid()
-            plt.savefig(self.output_dir / f'distribution_{name}.png')
-        plt.close('all')
-        '''
         print(f"Filtered flexion catalog to {len(self.IDs)} entries after applying updated cuts.")
 
     def match_sources(self):
@@ -293,36 +253,28 @@ class JWSTPipeline:
                 xc_list.append(self.x_centroids[idx])
                 yc_list.append(self.y_centroids[idx])
             else:
-                # Necessary to assign NaN if ID not found - otherwise, xc_list and yc_list will be of different lengths
-                # This is a warning, not an error, as we want to continue processing
-                # Also this has never happened in the use of this script - it's unlikely to happen in practice
                 warnings.warn(f"ID '{ID}' not found in source catalog. Assigning NaN.")
                 xc_list.append(np.nan)
                 yc_list.append(np.nan)
 
-        # Assign results to attributes
-        self.xc = np.array(xc_list)
-        self.yc = np.array(yc_list)
-
-        # Convert positions to arcseconds
-        self.xc *= self.CDELT 
-        self.yc *= self.CDELT
+        # Assign results to attributes (in arcseconds)
+        self.xc = np.array(xc_list) * self.CDELT
+        self.yc = np.array(yc_list) * self.CDELT
 
     def initialize_sources(self):
         """
         Prepares the Source object with calculated lensing signals and uncertainties.
         """
-        # Calculate shear components
+        # Calculate shear components from axis ratio and orientation
         shear_magnitude = (self.q - 1) / (self.q + 1)
         e1 = shear_magnitude * np.cos(2 * self.phi)
         e2 = shear_magnitude * np.sin(2 * self.phi)
 
-        # Center coordinates (necessary for pipeline)
-        self.centroid_x = np.mean(self.xc) # Store centroid for later use
-        self.centroid_y = np.mean(self.yc)
-
-        # Use dummy values for uncertainties to initialize Source object
-        dummy = np.ones_like(e1) 
+        # Estimate uncertainties based on standard deviations
+        sigs = np.full_like(e1, np.mean([np.std(e1), np.std(e2)]))
+        sigaf = np.mean([np.std(self.a * self.F1_fit), np.std(self.a * self.F2_fit)]) 
+        sigag = np.mean([np.std(self.a * self.G1_fit), np.std(self.a * self.G2_fit)])
+        sigf, sigg = sigaf / self.a, sigag / self.a
 
         # Create Source object
         self.sources = source_obj.Source(
@@ -330,19 +282,12 @@ class JWSTPipeline:
             e1=e1, e2=e2,
             f1=self.F1_fit, f2=self.F2_fit,
             g1=self.G1_fit, g2=self.G2_fit,  
-            sigs=dummy, sigf=dummy, sigg=dummy, 
+            sigs=sigs, sigf=sigf, sigg=sigg, 
             redshift=self.z_source
         )
 
-        sigs = np.full_like(self.sources.e1, np.mean([np.std(self.sources.e1), np.std(self.sources.e2)]))
-        sigaf = np.mean([np.std(self.a * self.sources.f1), np.std(self.a * self.sources.f2)]) 
-        sigag = np.mean([np.std(self.a * self.sources.g1), np.std(self.a * self.sources.g2)])
-        sigf, sigg = sigaf / self.a, sigag / self.a
-
-        # Update Source object with new uncertainties
-        self.sources.sigs = sigs
-        self.sources.sigf = sigf
-        self.sources.sigg = sigg
+        self.centroid_x = np.mean(self.xc) # Store centroid for later use
+        self.centroid_y = np.mean(self.yc)
 
         self.sources.x -= self.centroid_x # Center sources around (0, 0)
         self.sources.y -= self.centroid_y
@@ -357,7 +302,7 @@ class JWSTPipeline:
             self.sources, xmax, flags=flags, use_flags=self.use_flags, lens_type='NFW', z_lens=self.z_cluster
         )
 
-        check = self.lenses.check_for_nan_properties() # Ensure no NaN properties in lenses
+        check = self.lenses.check_for_nan_properties() # Safety check
         if check:
             print("Warning: Some lens properties are NaN or Inf. Check the lens fitting process.")
 
@@ -384,6 +329,11 @@ class JWSTPipeline:
         # ---------------- helpers ----------------
 
         def _fmt_sum_mass_hinv(m_hinv):
+            '''
+            Docstring for _fmt_sum_mass_hinv
+            
+            :param m_hinv: Mass in h^{-1} M_⊙
+            '''
             """ΣM = a × 10^{14} h^{-1} M_⊙ (mathtext) or N/A."""
             if not np.isfinite(m_hinv):
                 return r"$\sum M =$ N/A"
@@ -443,8 +393,7 @@ class JWSTPipeline:
             img_data, img_extent, X, Y, kappa, levels, peaks, title, sum_mass_hinv,
             z_lens=None, smooth_sigma=1.0, save_pdf_path=None, cluster_name=None
         ):
-            
-            
+
             def _rotate_cw90_panel(img_data, img_extent, X, Y, kappa, peaks=None):
                 """
                 Rotate panel content 90 degrees clockwise in a coordinate-consistent way.
@@ -548,7 +497,7 @@ class JWSTPipeline:
         )
 
         # Peaks within 300 kpc (positions only for plotting)
-        peaks, masses = utils.find_peaks_and_masses(
+        peaks, _ = utils.find_peaks_and_masses(
             kappa, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=300
         )
 
@@ -574,67 +523,14 @@ class JWSTPipeline:
         )
 
         # Mass comparison (existing utility)
-        '''
+        
         utils.compare_mass_estimates(
             self.lenses,
             Path(self.output_dir) / f"mass_{self.cluster_name}_{self.signal_choice}.pdf",
             f"Mass Comparison: {self.cluster_name} (signals: {self.signal_choice})",
             self.cluster_name
         )
-        
-        # Kaiser–Squires panels (only when combining all signals)
-        if self.signal_choice == 'all':
-            # Extent from source footprint (arcsec)
-            x_min, x_max = float(np.min(self.sources.x)), float(np.max(self.sources.x))
-            y_min, y_max = float(np.min(self.sources.y)), float(np.max(self.sources.y))
-            ks_extent = [x_min, x_max, y_min, y_max]
 
-            # Simple density-based smoothing scale (arcsec)
-            max_r = np.max(np.hypot(self.sources.x, self.sources.y))
-            avg_density = len(self.sources.x) / (np.pi/4.0 * max_r**2 + 1e-12)
-            smoothing_scale = (1.0 / max(avg_density, 1e-6))**0.5
-
-            # Flexion-only KS
-            w_f = getattr(self.sources, "sigf", None)
-            w_f = None if w_f is None else (w_f**-2)
-            Xf, Yf, kappa_f = utils.perform_kaiser_squire_reconstruction(
-                self.sources, extent=ks_extent, signal='flexion',
-                smoothing_scale=smoothing_scale, weights=w_f, apodize=True
-            )
-            kappa_f = utils.mass_sheet_transformation(kappa_f, k=utils.estimate_mass_sheet_factor(kappa_f))
-            peaks_f, _m_f = utils.find_peaks_and_masses(
-                kappa_f, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=300
-            )
-            save_f = Path(self.output_dir) / f"ks_flex_{self.cluster_name}.pdf"
-            _plot_single_panel(
-                img_data=img_data, img_extent=img_extent,
-                X=Xf, Y=Yf, kappa=kappa_f, levels=levels, peaks=peaks_f,
-                title=f"{self.cluster_name}: Kaiser–Squires (flexion)",
-                sum_mass_hinv=total_mass_hinv, z_lens=self.z_cluster,
-                smooth_sigma=1.0, save_pdf_path=str(save_f)
-            )
-
-            # Shear-only KS
-            Xs, Ys, kappa_s = utils.perform_kaiser_squire_reconstruction(
-                self.sources, extent=ks_extent, signal='shear',
-                smoothing_scale=smoothing_scale, weights=None, apodize=True
-            )
-            kappa_s = utils.mass_sheet_transformation(kappa_s, k=utils.estimate_mass_sheet_factor(kappa_s))
-            peaks_s, _m_s = utils.find_peaks_and_masses(
-                kappa_s, z_lens=self.z_cluster, z_source=self.z_source, radius_kpc=300
-            )
-            save_s = Path(self.output_dir) / f"ks_shear_{self.cluster_name}.pdf"
-            _plot_single_panel(
-                img_data=img_data, img_extent=img_extent,
-                X=Xs, Y=Ys, kappa=kappa_s, levels=levels, peaks=peaks_s,
-                title=f"{self.cluster_name}: Kaiser–Squires (shear)",
-                sum_mass_hinv=total_mass_hinv, z_lens=self.z_cluster,
-                smooth_sigma=1.0, save_pdf_path=str(save_s)
-            )
-        else:
-            print("Skipping Kaiser–Squires panels (only generated for signal_choice='all').")
-        '''
-        
     def get_image_data(self):
         """
         Reads image data from a FITS file.
@@ -682,12 +578,3 @@ if __name__ == '__main__':
         }
 
         # Initialize and run the pipeline
-        pipeline_el_gordo = JWSTPipeline(el_gordo_config)
-        pipeline_abell = JWSTPipeline(abell_config)
-
-        #pipeline_el_gordo.run()
-        pipeline_el_gordo.visualize()
-        #pipeline_abell.run()
-        #pipeline_abell.visualize()
-        #pipeline_el_gordo.compute_error_bars()
-        print(f"Finished running pipeline for signal choice: {signal}")

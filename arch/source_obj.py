@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+
 import arch.utils as utils
 
 class Source:
@@ -59,7 +61,6 @@ class Source:
             sigg=self.sigg.copy(),
             redshift=self.redshift.copy()
         )
-
 
     def add(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, redshift):
         """
@@ -162,16 +163,9 @@ class Source:
                 lenses, self
             )
         elif lens_type == 'NFW':
-            kappa, shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(
+            _, shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(
                 lenses, self
             )
-            # Use kappa to compute the *reduced* shear and flexion - this is what we compare to observations
-            shear_1 /= (1 - kappa)
-            shear_2 /= (1 - kappa)
-            flex_1 /= (1 - kappa)
-            flex_2 /= (1 - kappa)
-            gflex_1 /= (1 - kappa)
-            gflex_2 /= (1 - kappa)
         else:
             raise ValueError("Invalid lens type. Use 'SIS' or 'NFW'.")
 
@@ -189,7 +183,6 @@ class Source:
         Parameters:
             filename (str): Name of the file to export to.
         """
-        import pandas as pd
 
         # Create a DataFrame from the Source object
         df = pd.DataFrame({
@@ -217,8 +210,6 @@ class Source:
         Parameters:
             filename (str): Name of the file to import from.
         """
-        import pandas as pd
-
         # Read the CSV file into a DataFrame
         df = pd.read_csv(filename)
 

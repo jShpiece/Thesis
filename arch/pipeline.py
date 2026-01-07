@@ -10,7 +10,7 @@ Functions:
     - optimize_lens_positions
     - filter_lens_positions
     - merge_close_lenses
-    - iterative_elimination
+    - forward_lens_selection
     - optimize_lens_strength
     - update_chi2_values
     - chi2wrapper
@@ -19,12 +19,11 @@ Functions:
 import numpy as np
 import scipy.optimize as opt
 from scipy.optimize import minimize, minimize_scalar
+
 import arch.utils as utils  # Custom utility functions
-import arch.minimizer as minimizer  # Custom minimizer module
 import arch.source_obj as source_obj # Source object
 import arch.halo_obj as halo_obj # Halo object
 import arch.metric as metric # Metric calculation functions
-
 
 def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
     """
@@ -59,7 +58,7 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
         flexion = np.where(flexion == 0, 1e-10, flexion)
 
         # Estimate radial distance to lens
-        # The factor 1.45 is empirical; adjust based on model calibration if necessary
+        # The factor 1.45 is determined numerically; adjust based on model calibration if necessary
         r = 2.0 * gamma / flexion
 
         # Estimate lens positions
@@ -79,27 +78,20 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
                     x=xl[i],
                     y=yl[i],
                     z=0.0,
-                    concentration=0.0,  # Placeholder, will be calculated later
+                    concentration=0.0, # Placeholder
                     mass=mass,
                     redshift=z_l,
                     chi2=0.0
                 )
-                # Calculate concentration
                 lens.calculate_concentration()
 
                 # Create a single-source object
                 source = source_obj.Source(
-                    x=sources.x[i],
-                    y=sources.y[i],
-                    e1=0.0,
-                    e2=0.0,
-                    f1=0.0,
-                    f2=0.0,
-                    g1=0.0,
-                    g2=0.0,
-                    sigs=1.0,
-                    sigf=1.0,
-                    sigg=1.0,
+                    x=sources.x[i], y=sources.y[i],
+                    e1=0.0, e2=0.0,
+                    f1=0.0, f2=0.0,
+                    g1=0.0, g2=0.0,
+                    sigs=1.0, sigf=1.0, sigg=1.0,
                     redshift=sources.redshift[i]
                 )
                 # Compute the lensing signals from the lens
@@ -136,7 +128,6 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
-
 def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
     """
     Optimizes lens positions via local minimization.
@@ -155,9 +146,6 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
     num_iterations = 1e6
 
     if lens_type == 'SIS':
-        learning_rates = [1e-2, 1e-2, 1e-2]  # Learning rates for position and strength
-        beta1 = 0.9
-        beta2 = 0.999
         for i in range(len(lenses.x)):
             # Create a single-source object
             one_source = source_obj.Source(
@@ -171,16 +159,14 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
             # Initial guess for the optimizer
             guess = [lenses.x[i], lenses.y[i], lenses.te[i]]
             params = ['SIS', 'unconstrained', one_source, use_flags]
-            # Optimize using custom Adam optimizer
-            result, _ = minimizer.adam_optimizer(
-                chi2wrapper, guess, learning_rates, num_iterations, beta1, beta2, params=params
-            )
-            # Update lens parameters
+            # Optimize 
+            result = minimize(chi2wrapper, guess, args=params, method='L-BFGS-B',
+                            options={'maxiter': num_iterations, 'ftol': 1e-6})
             lenses.x[i], lenses.y[i], lenses.te[i] = result[0], result[1], result[2]
 
     elif lens_type == 'NFW':
         for i in range(len(lenses.x)):
-            # Initial guess: [x, y, log10(mass)]
+            # Initial guess: [x, y, log10(mass)] - optimize in log-space for mass
             initial_guess = [lenses.x[i], lenses.y[i], np.log10(lenses.mass[i])]
 
             # Define bounds for x, y, and log10(mass)
@@ -225,8 +211,6 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
                 bounds=bounds,
                 options={'maxiter': num_iterations, 'ftol': 1e-6}
             )
-
-            # Update lens parameters with optimized values
             optimized_params = result.x
             lenses.x[i] = optimized_params[0]
             lenses.y[i] = optimized_params[1]
@@ -238,7 +222,6 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS'):
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
     return lenses
-
 
 def filter_lens_positions(sources, lenses, xmax, threshold_distance=0.5, lens_type='SIS'):
     """
@@ -259,11 +242,8 @@ def filter_lens_positions(sources, lenses, xmax, threshold_distance=0.5, lens_ty
     
     # Identify lenses that are too close to any source
     too_close = np.any(distances < threshold_distance, axis=1)
-    # Check if this identifies every lens as too close
-    if np.all(too_close):
-        print('All lenses are too close to at least one source.')
     # Identify lenses that are too far from the center
-    too_far = np.sqrt(lenses.x ** 2 + lenses.y ** 2) > xmax
+    too_far = np.sqrt(lenses.x ** 2 + lenses.y ** 2) > xmax * 1.5
 
     if lens_type == 'SIS':
         # SIS-specific condition: Einstein radius too small
@@ -294,7 +274,6 @@ def filter_lens_positions(sources, lenses, xmax, threshold_distance=0.5, lens_ty
 
     return lenses
 
-
 def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
     """
     Merges lenses that are closer than a specified threshold.
@@ -323,10 +302,8 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
         # Update position of lens i
         lenses.x[i] = (lenses.x[i] * weight_i + lenses.x[j] * weight_j) / total_weight
         lenses.y[i] = (lenses.y[i] * weight_i + lenses.y[j] * weight_j) / total_weight
-        # Update strength of lens i
-        strength[i] = total_weight / 2  # Adjust strength as needed
-        # Remove lens j
-        lenses.remove([j])
+        strength[i] = total_weight / 2  # Update strength of lens i
+        lenses.remove([j]) # Remove lens at index j
 
     i = 0
     while i < len(lenses.x):
@@ -342,17 +319,7 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
     # Update lens properties based on type
     if lens_type == 'NFW':
         lenses.calculate_concentration()
-
-    # Do a couple of safety checks
-    if len(lenses.x) == 0:
-        raise ValueError('All lenses have been removed during merging.')
-    if lens_type == 'NFW':
-        assert np.all(lenses.mass > 0), 'Negative mass detected after merging.'
-        assert np.all(lenses.concentration > 0), 'Negative concentration detected after merging.'
-        assert len(lenses.mass) == len(lenses.concentration), 'Mass and concentration arrays have different lengths.'
-        assert len(lenses.x) == len(lenses.y) == len(lenses.mass), 'Inconsistent array lengths after merging: {len(lenses.x)}, {len(lenses.y)}, {len(lenses.mass)}'
     return lenses
-
 
 def forward_lens_selection(
     sources, candidate_lenses, use_flags, lens_type='NFW',
@@ -482,7 +449,6 @@ def forward_lens_selection(
     else:
         return selected_lenses, best_reduced_chi2
 
-
 def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS'):
     """
     Optimizes the strength parameters (Einstein radius or mass) of the lenses.
@@ -516,8 +482,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS'):
         lenses.te = best_params
 
     elif lens_type == 'NFW':
-        # Optimize mass for each lens individually - this is verified to be the better approach as of 9/26/2024
-        
+        # Optimize mass for each lens individually
         for i in range(len(lenses.x)):
             guess = [np.log10(lenses.mass[i])]
             params = [
@@ -541,7 +506,6 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS'):
 
     return lenses
 
-
 def update_chi2_values(sources, lenses, use_flags, lens_type='NFW'):
     """
     Updates the chi-squared values for each lens based on the current source data.
@@ -560,12 +524,9 @@ def update_chi2_values(sources, lenses, use_flags, lens_type='NFW'):
     dof = metric.calc_degrees_of_freedom(sources, lenses, use_flags)
     reduced_chi2 = global_chi2 / dof if dof != 0 else np.inf
 
-    # Initialize chi-squared values for individual lenses
-    chi2_values = np.zeros(len(lenses.x))
-
     if len(lenses.x) == 1:
-        # Only one lens
-        chi2_values[0] = global_chi2
+        # Only one lens, assign global chi-squared
+        lenses.chi2[0] = global_chi2
     else:
         for i in range(len(lenses.x)):
             # Calculate chi-squared for each lens individually
@@ -574,18 +535,11 @@ def update_chi2_values(sources, lenses, use_flags, lens_type='NFW'):
                 lenses.concentration[i], lenses.mass[i],
                 lenses.redshift, [0]
             )
-            chi2_values[i] = metric.calculate_chi_squared(
+            lenses.chi2[i] = metric.calculate_chi_squared(
                 sources, one_halo, use_flags, lens_type=lens_type
             )
 
-    lenses.chi2 = chi2_values
-
-    if dof == 0:
-        print('Degrees of freedom is zero')
-        return global_chi2
-
     return reduced_chi2
-
 
 def chi2wrapper(guess, params):
     """
@@ -594,6 +548,12 @@ def chi2wrapper(guess, params):
     Parameters:
         guess (list): List of guessed parameters.
         params (list): List of parameters required for lensing models.
+            - params[0]: Model type ('SIS' or 'NFW').
+            - params[1]: Constraint type ('unconstrained', 'constrained', or 'dual').
+                Unconstrained: optimize all parameters in guess.
+                Constrained: optimize only strength parameters, other params in params.
+                Dual: optimize both mass and concentration (NFW only).
+            - Remaining params depend on model and constraint type.
 
     Returns:
         float: Chi-squared value to be minimized.
@@ -619,7 +579,6 @@ def chi2wrapper(guess, params):
 
     elif model_type == 'NFW':
         if constraint_type == 'unconstrained':
-            print('This function was called')
             lenses = halo_obj.NFW_Lens(
                 guess[0], guess[1], np.zeros_like(guess[0]),
                 params[2], 10 ** guess[2], params[3], [0]

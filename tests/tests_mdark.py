@@ -1,6 +1,5 @@
 import numpy as np 
 import matplotlib.pyplot as plt
-from astropy.visualization import hist as fancyhist
 import pandas as pd
 import arch.halo_obj as halo_obj
 import arch.source_obj as source_obj
@@ -29,10 +28,6 @@ column_names = [
     'MainHaloID', 'Total Mass', 'Redshift', 'Halo Number',
     'Mass Fraction', 'Characteristic Size'
 ]
-
-# Important Notes!
-# Total Mass is in units of M_sun/h
-# Characteristic Size is in units of arcseconds
 
 # Use the scientific presentation style sheet for all plots
 plt.style.use('scientific_presentation.mplstyle')
@@ -507,8 +502,6 @@ def build_ID_file(Ncluster, IDs_path, test_number, redshift):
                     keep_IDs.append(ID)
                     found_cluster = True
                     break
-    
-    
 
     # Now, we have a list of IDs that meet our criteria. Lets get the additional information from the key file, then save it to a file
     key_file = 'MDARK/fixed_key_{}.MDARK'.format(redshift)
@@ -675,7 +668,7 @@ def create_improved_key_optimized():
         chunksize=10000
     )
 
-    # Example chunk count for display (adjust if known or derive dynamically)
+    # Example chunk count for display 
     chunk_count_key = 11271  
     chunk_index_key = 0
 
@@ -717,7 +710,7 @@ def create_improved_key_optimized():
         chunksize=10000
     )
 
-    # Example chunk count for halos (adjust if known or derive dynamically)
+    # Example chunk count for halos
     chunk_count_halo = 50000  
     chunk_index_halo = 0
 
@@ -775,7 +768,6 @@ def create_improved_key_optimized():
         halo_number = len(cluster_df)
         mass_fraction = 1 - np.max(cluster_df['HaloMass']) / total_mass
         
-        # Use stored values from relevant_clusters, except redshift is forced to 0.221 as in your example
         char_size = relevant_clusters[cid]['char_size']
         redshift = 0.221
 

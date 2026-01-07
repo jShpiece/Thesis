@@ -16,10 +16,9 @@ Functions:
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.visualization import hist as fancy_hist
-import pipeline
+import arch.pipeline as pipeline
 import arch.halo_obj as halo_obj
 import arch.source_obj as source_obj
-import time
 import arch.main as main
 import arch.utils as utils
 from scipy.optimize import curve_fit
@@ -110,7 +109,7 @@ def plot_results(lens, true_lens, title, reduced_chi2, xmax, ax=None, legend=Fal
 
 def build_standardized_field(Nlens, Nsource, lens_mass, xmax, use_noise=False):
     """
-    Builds a standardized field with specified parameters.
+    Builds a uniform field with specified parameters.
 
     Parameters:
         Nlens (int): Number of lenses.
@@ -193,10 +192,6 @@ def write_plot_name(Nlens, lens_mass, noisy, use_flags, append=None, directory=N
     
     return plot_name
 
-# --------------------------------------------
-# Pipeline Alternatives
-# --------------------------------------------
-
 
 # --------------------------------------------
 # Testing Functions
@@ -265,7 +260,6 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     if print_steps:
         print('Step 4: Finished forward selection')
     
-
     # Step 5: Merge closely positioned lenses
     area = np.pi * xmax ** 2
     ns = len(sources.x) / area
@@ -296,7 +290,6 @@ def pipeline_breakdown(sources, true_lenses, xmax, use_flags, noisy, name=None, 
     plt.close()
     print(f'Plot saved as {plot_name}')
     return lenses
-
 
 def run_simple_tests():
     """
@@ -333,7 +326,6 @@ def run_simple_tests():
     masses = [1e14, 1e13, 1e12]
     lens_numbers = [1, 2 ]
     noise_use = [True]
-    # use_flags = [[True, True, False], [True, False, True], [False, True, True], [True, True, True]]
     use_flags = [[True, True, False]]
 
     for mass in masses:
@@ -341,8 +333,6 @@ def run_simple_tests():
             for noise in noise_use:
                 for flags in use_flags:
                     simple_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=flags)
-                # simple_nfw_test(Nlens, Nsource, xmax, mass, use_noise=noise, use_flags=use_flags)
-
 
 def plot_random_realizations(recovered_params, true_params, title, xmax):
     """
@@ -463,7 +453,6 @@ def plot_random_realizations(recovered_params, true_params, title, xmax):
     # plt.show()
     plt.close() # Close the plot to avoid memory issues
 
-
 def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass=1e14, z_l=0.194, use_flags=[True, True, False], 
                             random_seed=None, substructure=False):
     """
@@ -551,111 +540,7 @@ def run_random_realizations(Ntrials, Nlenses=1, Nsources=100, xmax=50, lens_mass
     # Return the recovered lens parameters
     return recovered_params, true_params
 
-
-def test_source_sep():
-    Ntrials = 100
-    Nlenses = 1
-    xmax = 50
-    lens_mass = 1e14
-    ns = 0.01  # Source density per unit area
-    area = np.pi * xmax ** 2
-    Nsource = int(ns * area)  # Number of sources
-    use_flags = [True, True, False]
-    true_lenses = halo_obj.NFW_Lens(np.array([0]), np.array([0]), np.zeros(1), np.zeros(1), np.array([lens_mass]), 0.194, np.zeros(1))
-    true_lenses.calculate_concentration()
-    
-    min_lens_source_dist = []
-    sources_within_10 = []
-    radius_10_sources = []
-    success = []
-    for trial in range(Ntrials):
-        rs = np.sqrt(np.random.random(Nsource)) * xmax
-        thetas = np.random.random(Nsource) * 2 * np.pi
-        xs = rs * np.cos(thetas)
-        ys = rs * np.sin(thetas)
-        sig_s = np.full(Nsource, 0.1)
-        sig_f = np.full(Nsource, 0.01)
-        sig_g = np.full(Nsource, 0.02)
-        sources = source_obj.Source(xs, ys, np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs), np.zeros_like(xs),
-                                    np.zeros_like(xs), np.zeros_like(xs), sig_s, sig_f, sig_g)
-        sources.apply_lensing(true_lenses, lens_type='NFW', z_source=0.8)
-        sources.apply_noise()
-        sources.filter_sources()
-        lenses, reduced_chi2 = main.fit_lensing_field(sources, xmax, flags=False, use_flags=use_flags, lens_type='NFW')
-        if len(lenses.x) == 0:
-            min_lens_source_dist.append(np.nan)
-            sources_within_10.append(np.nan)
-            radius_10_sources.append(np.nan)
-            success.append(False)
-            continue
-        # Calculate the minimum distance between the true lens and any source
-        source_distances = np.sqrt((sources.x - true_lenses.x[0]) ** 2 + (sources.y - true_lenses.y[0]) ** 2)
-        min_lens_source_dist.append(np.min(source_distances))
-        # Calculate the number of sources within 10 units of the true lens
-        sources_within_10.append(np.sum(source_distances < 10))
-        # Calculate the radius from the true lens which contains 10 sources
-        radius_10_sources.append(np.sort(source_distances)[9])
-        # Check if the test was successful
-        total_mass = np.sum(true_lenses.mass)
-        recovered_mass = np.sum(lenses.mass)
-        largest_mass = np.max(lenses.mass)
-        # Determine success
-        lens_distances = np.sqrt((lenses.x - true_lenses.x[0]) ** 2 + (lenses.y - true_lenses.y[0]) ** 2)
-        closest_lens_dist = np.min(lens_distances)
-        closest_mass = lenses.mass[np.argmin(lens_distances)]
-        contained_mass = np.sum(lenses.mass[lens_distances < 5])
-        success.append((np.abs(true_lenses.mass[0] - closest_mass) / true_lenses.mass[0] < 0.2) and closest_lens_dist < 5 and contained_mass / total_mass > 0.8)
-    
-    # Convert lists to numpy arrays
-    min_lens_source_dist = np.array(min_lens_source_dist)
-    sources_within_10 = np.array(sources_within_10)
-    radius_10_sources = np.array(radius_10_sources)
-    success = np.array(success)
-
-    # Save the results
-    np.save('Output/NFW_tests/random_realization/test_results.npy', {'min_dist': min_lens_source_dist, 'within_10': sources_within_10, 'radius_10': radius_10_sources, 'success': success})
-    
-    results = np.load('Output/NFW_tests/random_realization/test_results.npy', allow_pickle=True).item()
-    # Unpack the results
-    min_lens_source_dist = results['min_dist']
-    sources_within_10 = results['within_10']
-    radius_10_sources = results['radius_10']
-    success = results['success']
-
-    # Plot the results - split by success and failure
-    fig, axarr = plt.subplots(1, 3, figsize=(20, 6))
-
-    # Plot the minimum distance between the true lens and any source
-    fancy_hist(min_lens_source_dist[success], bins='freedman', histtype='stepfilled', color='blue', alpha=0.5, label='Successful Tests', ax=axarr[0], density=True)
-    fancy_hist(min_lens_source_dist[~success], bins='freedman', histtype='stepfilled', color='red', alpha=0.5, label='Failed Tests', ax=axarr[0], density=True)
-    axarr[0].set_xlabel('Minimum Lens-Source Distance')
-    axarr[0].set_ylabel('Frequency')
-    axarr[0].set_title('Minimum Lens-Source Distance')
-    axarr[0].legend()
-
-    # Plot the number of sources within 10 units of the true lens
-    fancy_hist(sources_within_10[success], bins='freedman', histtype='stepfilled', color='blue', alpha=0.5, label='Successful Tests', ax=axarr[1], density=True)
-    fancy_hist(sources_within_10[~success], bins='freedman', histtype='stepfilled', color='red', alpha=0.5, label='Failed Tests', ax=axarr[1], density=True)
-    axarr[1].set_xlabel('Sources Within 10 Units')
-    axarr[1].set_ylabel('Frequency')
-    axarr[1].set_title('Number of Sources Within 10 arcsec of lens')
-    axarr[1].legend()
-
-    # Plot the radius from the true lens which contains 10 sources
-    fancy_hist(radius_10_sources[success], bins='freedman', histtype='stepfilled', color='blue', alpha=0.5, label='Successful Tests', ax=axarr[2], density=True)
-    fancy_hist(radius_10_sources[~success], bins='freedman', histtype='stepfilled', color='red', alpha=0.5, label='Failed Tests', ax=axarr[2], density=True)
-    axarr[2].set_xlabel('Minimum Radius Containing 10 Sources')
-    axarr[2].set_ylabel('Frequency')
-    axarr[2].set_title('Radius Containing 10 Sources')
-    axarr[2].legend()
-
-    plt.tight_layout()
-    plt.savefig('Output/NFW_tests/random_realization/source_dist_test.png')
-
-
 if __name__ == '__main__':
-    # run_simple_tests()
-    
     Ntrial = 1000
     Nlenses = [1]
     Nsources = 100

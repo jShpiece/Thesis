@@ -1,11 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import pipeline
+import csv
+
 import arch.halo_obj as halo_obj
 import arch.source_obj as source_obj
 import arch.main as main
 import arch.utils as utils
-import csv
 
 plt.style.use('scientific_presentation.mplstyle')  # Ensure this style file exists
 
@@ -224,7 +224,7 @@ def test_pipeline():
     cbar = fig.colorbar(im1, ax=axes, orientation='vertical', fraction=0.046, pad=0.04)
     cbar.ax.tick_params(labelsize=8)
 
-    fig.savefig("convergence_comparison_unified.pdf", dpi=300, bbox_inches='tight')
+    fig.savefig("Output/convergence_comparison_unified.pdf", dpi=300, bbox_inches='tight')
     plt.close(fig)
 
 if __name__ == "__main__":

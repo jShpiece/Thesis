@@ -10,7 +10,6 @@ computations.
 import numpy as np
 from astropy.constants import c, G
 from astropy import units as u
-from itertools import combinations
 from scipy.integrate import quad
 import matplotlib.pyplot as plt
 import arch.halo_obj as halo_obj
@@ -53,16 +52,9 @@ def print_progress_bar(iteration, total, prefix='', suffix='', decimals=1, lengt
 def angular_diameter_distances(z1, z2):
     """
     Calculates the angular diameter distances required for lensing calculations.
-
     Parameters:
         z1 (float): Redshift of the lens.
         z2 (float): Redshift of the source.
-
-    Returns:
-        tuple: (Dl, Ds, Dls) in meters, where:
-            - Dl: Angular diameter distance to the lens.
-            - Ds: Angular diameter distance to the source.
-            - Dls: Angular diameter distance between the lens and the source.
     """
     dl = cosmo.angular_diameter_distance(z1).to(u.m).value
     ds = cosmo.angular_diameter_distance(z2).to(u.m).value
@@ -183,7 +175,6 @@ def nfw_projected_mass(
 # Image Processing Functions
 # ------------------------
 
-
 def CIC_2d(fsize, npixels, xpos, ypos, signal_values):
     """
     Cloud-in-Cell (CIC) 2D binning of scattered data onto a square grid.
@@ -240,119 +231,9 @@ def convolve_image(img, kernel):
     return np.fft.fftshift(convolved_img)
 
 
-def create_gaussian_kernel(stamp_size, sigma):
-    """
-    Generates a 2D Gaussian kernel.
-
-    Parameters:
-        stamp_size (int): Size of the kernel (stamp_size x stamp_size).
-        sigma (float): Standard deviation of the Gaussian.
-
-    Returns:
-        np.ndarray: 2D Gaussian kernel normalized to sum to 1.
-    """
-    yp, xp = np.mgrid[-stamp_size / 2:stamp_size / 2, -stamp_size / 2:stamp_size / 2]
-    gaussian = np.exp(-((xp / sigma) ** 2 + (yp / sigma) ** 2) / 2)
-    return gaussian / np.sum(gaussian)
-
-
-# ------------------------
-# Chi-Squared Utility Functions
-# ------------------------
-
-def compute_source_weights(lenses, sources, r_char=10):
-    """
-    Computes Gaussian weights for lens-source pairs based on their separation.
-
-    Parameters:
-        lenses: Lens object containing positions of lenses.
-        sources: Source object containing positions of sources.
-        r_char (float): Characteristic length scale for weighting.
-
-    Returns:
-        np.ndarray: Array of weights for each source.
-    """
-    weights = np.zeros((len(lenses.x), len(sources.x)))
-    for i in range(len(lenses.x)):
-        dx = lenses.x[i] - sources.x
-        dy = lenses.y[i] - sources.y
-        r = np.hypot(dx, dy)
-        weights[i] = np.exp(-r / r_char)
-
-    # Normalize the weights for each lens
-    weights /= weights.sum(axis=1, keepdims=True)
-    return weights[0]  # Assuming single lens for now
-
-
-def find_combinations(values, k):
-    """
-    Finds all combinations of the given values of length k.
-
-    Parameters:
-        values (iterable): Iterable of values to combine.
-        k (int): Length of combinations.
-
-    Returns:
-        list: List of combinations.
-    """
-    return list(combinations(values, k))
-
-
-def filter_combinations(combination_list):
-    """
-    Filters out duplicate combinations from a list of combinations.
-
-    Parameters:
-        combination_list (list): List of combinations.
-
-    Returns:
-        np.ndarray: Array of unique combinations.
-    """
-    sorted_combinations = np.sort(combination_list, axis=1)
-    unique_combinations = np.unique(sorted_combinations, axis=0)
-    return unique_combinations
-
-
 # ------------------------
 # Lensing Utility Functions
 # ------------------------
-
-def stn_flexion(eR, n, sigma, rmin, rmax):
-    """
-    Calculates the signal-to-noise ratio of the flexion signal.
-
-    Parameters:
-        eR (float): Einstein radius.
-        n (float): Number density of sources.
-        sigma (float): Noise level.
-        rmin (float): Minimum radius.
-        rmax (float): Maximum radius.
-
-    Returns:
-        float: Signal-to-noise ratio for flexion.
-    """
-    term1 = eR * np.sqrt(np.pi * n) / (sigma * rmin)
-    term2 = np.log(rmax / rmin) / np.sqrt(rmax**2 / rmin**2 - 1)
-    return term1 * term2
-
-
-def stn_shear(eR, n, sigma, rmin, rmax):
-    """
-    Calculates the signal-to-noise ratio of the shear signal.
-
-    Parameters:
-        eR (float): Einstein radius.
-        n (float): Number density of sources.
-        sigma (float): Noise level.
-        rmin (float): Minimum radius.
-        rmax (float): Maximum radius.
-
-    Returns:
-        float: Signal-to-noise ratio for shear.
-    """
-    term1 = eR * np.sqrt(np.pi * n) / sigma
-    term2 = (1 - rmin / rmax) / np.sqrt(1 - (rmin / rmax) ** 2)
-    return term1 * term2
 
 
 def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200):
