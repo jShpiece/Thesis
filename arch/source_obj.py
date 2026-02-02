@@ -1,7 +1,56 @@
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Any
+
 import numpy as np
 import pandas as pd
 
 import arch.utils as utils
+
+
+@dataclass()
+class StrongLensingSystem:
+    """
+    A single multiply-imaged source (one background galaxy / transient / knot family).
+
+    All positions are in the same coordinate frame/units as Source.x/y (typically arcsec offsets).
+    """
+    system_id: str # Unique identifier for the strong lensing system
+    theta_x: np.ndarray # x-positions of the multiple images
+    theta_y: np.ndarray # y-positions of the multiple images
+    z_source: float # Redshift of the source
+    sigma_theta: float | np.ndarray = 0.1 # Positional uncertainty per image (scalar or per-image array)
+    meta: dict = field(default_factory=dict) # Additional metadata for the system
+
+    def __post_init__(self) -> None:
+        self.theta_x = np.atleast_1d(self.theta_x).astype(float)
+        self.theta_y = np.atleast_1d(self.theta_y).astype(float)
+        if self.theta_x.shape != self.theta_y.shape:
+            raise ValueError("theta_x and theta_y must have the same shape.")
+        if self.theta_x.size < 2:
+            raise ValueError("A StrongLensingSystem must have at least 2 images.")
+        if isinstance(self.sigma_theta, np.ndarray):
+            self.sigma_theta = np.atleast_1d(self.sigma_theta).astype(float)
+            if self.sigma_theta.shape not in ((), self.theta_x.shape):
+                raise ValueError("sigma_theta must be scalar or same shape as theta_x/theta_y.")
+
+    @property
+    def n_images(self) -> int:
+        return int(self.theta_x.size)
+
+    def iter_images(self) -> Iterator[Tuple[float, float, float]]:
+        """
+        Yields (x, y, sigma_theta) per image.
+        """
+        if isinstance(self.sigma_theta, np.ndarray):
+            sig = self.sigma_theta
+        else:
+            sig = np.full_like(self.theta_x, float(self.sigma_theta), dtype=float)
+
+        for x, y, s in zip(self.theta_x, self.theta_y, sig):
+            yield float(x), float(y), float(s)
 
 class Source:
     """
@@ -22,8 +71,11 @@ class Source:
         redshift (np.ndarray): Redshifts of the sources.
     """
 
-    def __init__(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, redshift):
-        # Ensure all inputs are numpy arrays
+    def __init__(
+        self,
+        x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, redshift,
+        strong_systems: Optional[Iterable[StrongLensingSystem]] = None,  # <- ADD (default keeps old calls working)
+    ):        # Ensure all inputs are numpy arrays
         self.x = np.atleast_1d(x)
         self.y = np.atleast_1d(y)
         self.e1 = np.atleast_1d(e1)
@@ -40,6 +92,9 @@ class Source:
             redshift = np.ones_like(self.x) * redshift
         self.redshift = np.atleast_1d(redshift)
 
+        # Initialize strong lensing systems - if provided
+        self.strong_systems: List[StrongLensingSystem] = list(strong_systems) if strong_systems is not None else []
+
     def copy(self):
         """
         Creates a deep copy of the Source object.
@@ -47,6 +102,19 @@ class Source:
         Returns:
             Source: Deep copy of the Source object.
         """
+
+        strong_copy = [
+            StrongLensingSystem(
+                system_id=s.system_id,
+                theta_x=s.theta_x.copy(),
+                theta_y=s.theta_y.copy(),
+                z_source=float(s.z_source),
+                sigma_theta=s.sigma_theta.copy() if isinstance(s.sigma_theta, np.ndarray) else float(s.sigma_theta),
+                meta=dict(s.meta),
+            )
+            for s in self.strong_systems
+        ]
+
         return Source(
             x=self.x.copy(),
             y=self.y.copy(),
@@ -59,7 +127,8 @@ class Source:
             sigs=self.sigs.copy(),
             sigf=self.sigf.copy(),
             sigg=self.sigg.copy(),
-            redshift=self.redshift.copy()
+            redshift=self.redshift.copy(),
+            strong_systems=strong_copy,
         )
 
     def add(self, x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, redshift):
@@ -216,3 +285,36 @@ class Source:
         # Assign the DataFrame columns to the Source object attributes
         for attr in ['x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg', 'redshift']:
             setattr(self, attr, df[attr].values)
+        
+
+    @property
+    def has_strong_lensing(self) -> bool:
+        return len(self.strong_systems) > 0
+
+    def add_strong_system(self, system: StrongLensingSystem) -> None:
+        if any(s.system_id == system.system_id for s in self.strong_systems):
+            raise ValueError(f"Strong lensing system_id '{system.system_id}' already exists.")
+        self.strong_systems.append(system)
+
+    def remove_strong_system(self, system_id: str) -> None:
+        self.strong_systems = [s for s in self.strong_systems if s.system_id != system_id]
+
+    def get_strong_system(self, system_id: str) -> StrongLensingSystem:
+        for s in self.strong_systems:
+            if s.system_id == system_id:
+                return s
+        raise KeyError(f"No strong lensing system with id '{system_id}'.")
+
+    def iter_strong_images(self) -> Iterator[Tuple[str, float, float, float, float]]:
+        """
+        Flatten all strong-lensing images.
+
+        Yields tuples:
+            (system_id, x, y, sigma_theta, z_source)
+        """
+        for sys in self.strong_systems:
+            for x, y, sig in sys.iter_images():
+                yield sys.system_id, x, y, sig, float(sys.z_source)
+
+    # Note: export_to_csv / import_from_csv remain WL-only by default to avoid breaking existing IO.
+    # If/when needed, add separate SL serialization methods rather than altering the current CSV schema.

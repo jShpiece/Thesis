@@ -487,6 +487,162 @@ def calculate_lensing_signals_sis(lenses, sources):
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
 
+def calculate_deflection_sis(lenses, theta_x, theta_y, eps=1.0e-6):
+    """
+    Compute the total SIS deflection field alpha(theta) from a set of SIS lenses.
+
+    SIS deflection for one lens:
+        alpha_vec = theta_E * (dtheta_vec / |dtheta|)
+
+    Conventions:
+        - theta_x, theta_y are image-plane coordinates in arcsec (same frame as lenses.x/y).
+        - lenses.te is the Einstein radius theta_E in arcsec.
+        - Returns alpha_x, alpha_y in arcsec.
+
+    Parameters
+    ----------
+    lenses : SIS_Lens-like
+        Must have array-like attributes: x, y, te (Einstein radius, arcsec).
+        x,y are lens centers in arcsec.
+    theta_x, theta_y : array-like
+        Evaluation positions in arcsec.
+    eps : float
+        Softening to avoid division by zero at r=0 (arcsec).
+
+    Returns
+    -------
+    alpha_x, alpha_y : ndarray
+        Total deflection components at each evaluation point, shape (N_pts,).
+    """
+    tx = np.atleast_1d(theta_x).astype(float)
+    ty = np.atleast_1d(theta_y).astype(float)
+
+    xl = np.atleast_1d(lenses.x).astype(float)
+    yl = np.atleast_1d(lenses.y).astype(float)
+    te = np.atleast_1d(lenses.te).astype(float)
+
+    # Broadcast: (N_lens, N_pts)
+    dx = tx[None, :] - xl[:, None]
+    dy = ty[None, :] - yl[:, None]
+    r = np.hypot(dx, dy)
+
+    # Avoid r=0 singularity
+    r = np.where(r < eps, eps, r)
+
+    # Unit vector from lens to evaluation point
+    ux = dx / r
+    uy = dy / r
+
+    # SIS deflection magnitude = theta_E
+    alpha_x = np.sum(te[:, None] * ux, axis=0)
+    alpha_y = np.sum(te[:, None] * uy, axis=0)
+
+    return alpha_x, alpha_y
+
+
+def backproject_source_positions_sis(lenses, theta_x, theta_y, eps=1.0e-6):
+    """
+    Back-project observed image positions theta -> source-plane positions beta
+    using the SIS lens equation:
+        beta = theta - alpha(theta)
+
+    Returns
+    -------
+    beta_x, beta_y : ndarray, ndarray
+        Source-plane coordinates (arcsec), shape (N_pts,).
+    """
+    ax, ay = calculate_deflection_sis(lenses, theta_x, theta_y, eps=eps)
+    tx = np.atleast_1d(theta_x).astype(float)
+    ty = np.atleast_1d(theta_y).astype(float)
+    return tx - ax, ty - ay
+
+
+def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6, return_breakdown=False):
+    """
+    Source-plane scatter chi^2 for multiply-imaged systems under SIS lenses.
+
+    For each system i with images m:
+        beta_{i,m} = theta_{i,m} - alpha(theta_{i,m})
+        beta_bar_i = weighted mean of beta_{i,m}
+        chi2_i = sum_m |beta_{i,m} - beta_bar_i|^2 / sigma_beta^2
+
+    Here we take sigma_beta = sigma_theta by default (simple + stable). If you later
+    add Jacobian propagation, this is the place to do it.
+
+    Parameters
+    ----------
+    lenses : SIS_Lens-like
+        Must have x, y, te arrays.
+    strong_systems : iterable
+        Iterable of StrongLensingSystem-like objects with attributes:
+            - system_id : str
+            - theta_x : array-like
+            - theta_y : array-like
+            - sigma_theta : float or array-like
+        z_source can exist but is not used for SIS deflection in this minimal model.
+    eps : float
+        Softening for r=0 in deflection (arcsec).
+    return_breakdown : bool
+        If True, also return a dict keyed by system_id with per-system chi2 and metadata.
+
+    Returns
+    -------
+    chi2_sl : float
+        Total chi^2 across systems.
+    breakdown : dict (optional)
+        Per-system diagnostics.
+    """
+    chi2_total = 0.0
+    breakdown = {}
+
+    for sys in strong_systems:
+        tx = np.atleast_1d(sys.theta_x).astype(float)
+        ty = np.atleast_1d(sys.theta_y).astype(float)
+
+        if tx.shape != ty.shape:
+            raise ValueError(f"[{getattr(sys, 'system_id', 'unknown')}] theta_x/theta_y shape mismatch.")
+
+        # Back-project to source plane
+        bx, by = backproject_source_positions_sis(lenses, tx, ty, eps=eps)
+
+        # Sigma handling
+        sig = getattr(sys, "sigma_theta", 0.1)
+        if np.isscalar(sig):
+            sigx = np.full_like(bx, float(sig), dtype=float)
+            sigy = np.full_like(by, float(sig), dtype=float)
+        else:
+            sig_arr = np.atleast_1d(sig).astype(float)
+            if sig_arr.shape != bx.shape:
+                raise ValueError(f"[{getattr(sys, 'system_id', 'unknown')}] sigma_theta shape mismatch.")
+            sigx = sig_arr
+            sigy = sig_arr
+
+        # Weighted mean source position
+        wx = 1.0 / np.maximum(sigx, 1.0e-12) ** 2
+        wy = 1.0 / np.maximum(sigy, 1.0e-12) ** 2
+
+        bx_bar = np.sum(wx * bx) / np.sum(wx)
+        by_bar = np.sum(wy * by) / np.sum(wy)
+
+        # Source-plane scatter chi2
+        chi2_i = np.sum(((bx - bx_bar) / sigx) ** 2 + ((by - by_bar) / sigy) ** 2)
+
+        chi2_total += float(chi2_i)
+
+        if return_breakdown:
+            sid = getattr(sys, "system_id", "unknown")
+            breakdown[sid] = {
+                "chi2": float(chi2_i),
+                "n_images": int(bx.size),
+                "beta_bar": (float(bx_bar), float(by_bar)),
+                "beta": np.column_stack([bx, by]),
+            }
+
+    if return_breakdown:
+        return chi2_total, breakdown
+    return chi2_total
+
+
 def calculate_lensing_signals_nfw(halos, sources):
     """
     Lensing signals (shear, flexion, g-flexion) for NFW halos with per-source redshifts.
