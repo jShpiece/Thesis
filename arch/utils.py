@@ -566,8 +566,9 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6, return_brea
         beta_bar_i = weighted mean of beta_{i,m}
         chi2_i = sum_m |beta_{i,m} - beta_bar_i|^2 / sigma_beta^2
 
-    Here we take sigma_beta = sigma_theta by default (simple + stable). If you later
-    add Jacobian propagation, this is the place to do it.
+    Here we take sigma_beta = sigma_theta by default (simple + stable). This is inaccurate
+    (see Kochanek 2004), and we may want to implement a magnification-weighted sigma_beta in the future, 
+    but this is sufficient for our toy SIS model.
 
     Parameters
     ----------
@@ -621,7 +622,7 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6, return_brea
         wx = 1.0 / np.maximum(sigx, 1.0e-12) ** 2
         wy = 1.0 / np.maximum(sigy, 1.0e-12) ** 2
 
-        bx_bar = np.sum(wx * bx) / np.sum(wx)
+        bx_bar = np.sum(wx * bx) / np.sum(wx) 
         by_bar = np.sum(wy * by) / np.sum(wy)
 
         # Source-plane scatter chi2

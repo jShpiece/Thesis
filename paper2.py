@@ -1,6 +1,3 @@
-# toy_plot_stages_sis_sl.py
-# Run the toy pipeline twice (lambda_sl=0 and lambda_sl>0) and plot stages in 3x2 grids.
-
 from __future__ import annotations
 
 import numpy as np
@@ -15,8 +12,8 @@ import arch.source_obj as source_obj
 # 1) Toy data construction
 # ----------------------------
 
-def make_weak_lensing_catalog(
-    te_true: float,
+def make_weak_lensing_catalog_two_lenses(
+    true_lens_xyte: list[tuple[float, float, float]],
     xmax: float,
     n_sources: int,
     z_source: float = 1.0,
@@ -26,12 +23,20 @@ def make_weak_lensing_catalog(
     rmin: float = 1.0,
     seed: int = 7,
 ) -> source_obj.Source:
+    """
+    Build a WL catalog, lens it with TWO (or more) SIS lenses, add noise.
+    true_lens_xyte: list of (x0, y0, te) in arcsec.
+    """
     rng = np.random.default_rng(seed)
 
     x = rng.uniform(-xmax, xmax, size=n_sources)
     y = rng.uniform(-xmax, xmax, size=n_sources)
-    r = np.hypot(x, y)
-    keep = r > rmin
+
+    # Avoid sampling directly on top of any lens center (prevents singular behavior)
+    keep = np.ones_like(x, dtype=bool)
+    for (x0, y0, _te) in true_lens_xyte:
+        r = np.hypot(x - x0, y - y0)
+        keep &= (r > rmin)
     x, y = x[keep], y[keep]
 
     src = source_obj.Source(
@@ -45,11 +50,15 @@ def make_weak_lensing_catalog(
         redshift=np.full_like(x, z_source),
     )
 
+    xl = np.array([t[0] for t in true_lens_xyte], dtype=float)
+    yl = np.array([t[1] for t in true_lens_xyte], dtype=float)
+    te = np.array([t[2] for t in true_lens_xyte], dtype=float)
+
     lens_true = halo_obj.SIS_Lens(
-        x=np.array([0.0]),
-        y=np.array([0.0]),
-        te=np.array([te_true]),
-        chi2=np.array([0.0]),
+        x=xl,
+        y=yl,
+        te=te,
+        chi2=np.zeros_like(xl),
     )
 
     src.apply_lensing(lens_true, lens_type="SIS")
@@ -58,25 +67,39 @@ def make_weak_lensing_catalog(
     return src
 
 
-def make_two_image_sis_system(
+def make_two_image_sis_system_at_lens(
     system_id: str,
+    lens_center_xy: tuple[float, float],
     te_true: float,
-    beta_xy: tuple[float, float],
+    beta_rel_xy: tuple[float, float],
     sigma_theta: float = 0.05,
     z_source: float = 2.0,
 ):
-    # NOTE: this generator guarantees consistency for an axisymmetric SIS toy lens at (0,0)
-    bx, by = beta_xy
+    """
+    2-image SIS system constructed around a specified lens center (x0,y0).
+
+    We choose a source-plane position beta = (x0,y0) + beta_rel,
+    with |beta_rel| < te_true to ensure a 2-image regime for a pure SIS.
+
+    For an axisymmetric SIS:
+        r1 = te + |beta_rel|, r2 = te - |beta_rel|
+        theta1 = center + r1 * ehat, theta2 = center + r2 * ehat
+        where ehat = beta_rel / |beta_rel|.
+
+    This guarantees both images back-project to the SAME beta under the correct lens.
+    """
+    x0, y0 = lens_center_xy
+    bx, by = beta_rel_xy
     b = float(np.hypot(bx, by))
     if not (0.0 < b < te_true):
-        raise ValueError("Need 0 < |beta| < te_true for a 2-image SIS system.")
+        raise ValueError("Need 0 < |beta_rel| < te_true for a 2-image SIS system.")
 
     ehatx, ehaty = bx / b, by / b
     r1 = te_true + b
     r2 = te_true - b
 
-    theta_x = np.array([r1 * ehatx, r2 * ehatx], dtype=float)
-    theta_y = np.array([r1 * ehaty, r2 * ehaty], dtype=float)
+    theta_x = np.array([x0 + r1 * ehatx, x0 + r2 * ehatx], dtype=float)
+    theta_y = np.array([y0 + r1 * ehaty, y0 + r2 * ehaty], dtype=float)
 
     StrongLensingSystem = getattr(source_obj, "StrongLensingSystem")
     return StrongLensingSystem(
@@ -85,7 +108,12 @@ def make_two_image_sis_system(
         theta_y=theta_y,
         z_source=float(z_source),
         sigma_theta=float(sigma_theta),
-        meta={"toy": True, "beta_true": (bx, by), "te_true": te_true},
+        meta={
+            "toy": True,
+            "lens_center": (x0, y0),
+            "beta_rel": (bx, by),
+            "te_true": te_true,
+        },
     )
 
 
@@ -114,7 +142,6 @@ STAGE_NAMES = [
 ]
 
 def _copy_lenses_sis(lenses: halo_obj.SIS_Lens) -> halo_obj.SIS_Lens:
-    # Make a lightweight copy so later mutations don't overwrite earlier snapshots
     return halo_obj.SIS_Lens(
         x=np.array(lenses.x, dtype=float).copy(),
         y=np.array(lenses.y, dtype=float).copy(),
@@ -126,35 +153,40 @@ def _copy_lenses_sis(lenses: halo_obj.SIS_Lens) -> halo_obj.SIS_Lens:
 def run_pipeline_capture_stages(
     src: source_obj.Source,
     xmax: float,
-    lambda_sl: float,
+    use_strong_lensing: bool,
     z_lens: float = 0.5,
 ):
     """
-    Runs the SIS pipeline through the major stages and returns a dict stage->lenses snapshot.
-    Assumes you patched pipeline funcs to accept lambda_sl where relevant.
+    Runs SIS pipeline through major stages; returns dict stage->lenses snapshot.
+    Assumes your pipeline functions accept lambda_sl where relevant.
     """
-    use_flags = [True, True, False]  # shear + flexion; adjust to match your conventions
+    use_flags = [True, True, False]  # shear + flexion
 
     stages = {}
 
     lenses = pipeline.generate_initial_guess(src, lens_type="SIS", z_l=z_lens)
+    _ = pipeline.update_chi2_values(src, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing)
     stages["initial_guess"] = _copy_lenses_sis(lenses)
 
-    lenses = pipeline.optimize_lens_positions(src, lenses, xmax, use_flags, lens_type="SIS", lambda_sl=lambda_sl)
+    lenses = pipeline.optimize_lens_positions(src, lenses, xmax, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing)
+    _ = pipeline.update_chi2_values(src, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing)
     stages["optimization"] = _copy_lenses_sis(lenses)
 
     lenses = pipeline.filter_lens_positions(src, lenses, xmax, lens_type="SIS")
+    _ = pipeline.update_chi2_values(src, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing)
     stages["filter"] = _copy_lenses_sis(lenses)
 
-    lenses, _best = pipeline.forward_lens_selection(src, lenses, use_flags, lens_type="SIS", lambda_sl=lambda_sl)
+    lenses, _best = pipeline.forward_lens_selection(src, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing)
+    _ = pipeline.update_chi2_values(src, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing)
     stages["forward_selection"] = _copy_lenses_sis(lenses)
 
-    # same merge threshold heuristic used in your main driver
     merger_threshold = (len(src.x) / (2 * xmax) ** 2) ** (-0.5) if len(src.x) > 0 else 1.0
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold, "SIS")
+    _ = pipeline.update_chi2_values(src, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing)
     stages["merging"] = _copy_lenses_sis(lenses)
 
-    lenses = pipeline.optimize_lens_strength(src, lenses, use_flags, lens_type="SIS", lambda_sl=lambda_sl)
+    lenses = pipeline.optimize_lens_strength(src, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing)
+    _ = pipeline.update_chi2_values(src, lenses, [True, True, True], lens_type="SIS", use_strong_lensing=use_strong_lensing)
     stages["opt_strength"] = _copy_lenses_sis(lenses)
 
     return stages
@@ -164,46 +196,43 @@ def run_pipeline_capture_stages(
 # 3) Plotting (3x2 grid)
 # ----------------------------
 
-def plot_stage_grid(
+def plot_stage_grid_two_truth(
     stages: dict,
-    true_xy: tuple[float, float],
+    true_lens_xyte: list[tuple[float, float, float]],
     xmax: float,
     title: str,
     savepath: str | None = None,
 ):
     """
-    3x2 grid; each panel shows:
-      - true lens position (star)
+    3x2 grid (2 rows x 3 cols); each panel shows:
+      - true lens positions (stars)
       - all candidate/selected lenses at that stage (circles)
     """
-    fig, axes = plt.subplots(2, 3, figsize=(10, 12), dpi=150, constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8), dpi=150, constrained_layout=True)
     axes = axes.ravel()
 
-    true_x, true_y = true_xy
+    true_x = np.array([t[0] for t in true_lens_xyte], dtype=float)
+    true_y = np.array([t[1] for t in true_lens_xyte], dtype=float)
 
     for ax, stage_name in zip(axes, STAGE_NAMES):
         L = stages.get(stage_name, None)
 
-        ax.scatter([true_x], [true_y], marker="*", s=180, label="true lens")
+        # True lenses
+        ax.scatter(true_x, true_y, marker="*", s=220, label="true lenses")
 
+        # Candidate/selected lenses
         if L is not None and len(np.atleast_1d(L.x)) > 0:
             ax.scatter(L.x, L.y, s=35, alpha=0.9, label="candidates")
-            nL = len(np.atleast_1d(L.x))
-            # Label the lenses with their Einstein radii
-            # Only for final stage
+            # Optional: label Einstein radii at final stage
             if stage_name == STAGE_NAMES[-1]:
                 for (lx, ly, lte) in zip(L.x, L.y, L.te):
                     ax.text(lx, ly, f"{lte:.2f}", fontsize=8, ha="center", va="center")
-        else:
-            nL = 0
-
-        ax.set_title(f"{stage_name}  (N={nL})")
+        ax.set_title(stage_name)
         ax.set_xlim(-xmax, xmax)
         ax.set_ylim(-xmax, xmax)
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True, alpha=0.3)
 
-    # One legend for the whole figure
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper right")
     fig.suptitle(title, fontsize=14)
@@ -214,40 +243,58 @@ def plot_stage_grid(
 
 
 def main():
-    # Truth
-    te_true = 10.0
+    # ----------------------------
+    # Truth: TWO SIS lenses
+    # ----------------------------
+    true_lens_xyte = [
+        (-15.0,  0.0, 5.0),   # lens A: (x, y, te)
+        ( 18.0, 12.0, 3.5),   # lens B
+    ]
+
     xmax = 50.0
-    n_sources = 50
+    n_sources = 100
 
-    # Build WL catalog
-    src = make_weak_lensing_catalog(te_true=te_true, xmax=xmax, n_sources=n_sources, seed=12)
+    # Build WL catalog lensed by BOTH true lenses
+    src = make_weak_lensing_catalog_two_lenses(
+        true_lens_xyte=true_lens_xyte,
+        xmax=xmax,
+        n_sources=n_sources,
+        seed=12,
+    )
 
-    # Add one SL system
-    sys1 = make_two_image_sis_system(
-        system_id="toy_sys1",
-        te_true=te_true,
-        beta_xy=(0.6, 0.2),
+    # Add one SL system per lens (optional but recommended for the test)
+    sysA = make_two_image_sis_system_at_lens(
+        system_id="toy_sys_A",
+        lens_center_xy=(true_lens_xyte[0][0], true_lens_xyte[0][1]),
+        te_true=true_lens_xyte[0][2],
+        beta_rel_xy=(0.6, 0.2),
         sigma_theta=0.03,
         z_source=2.0,
     )
-    attach_strong_systems(src, [sys1])
-
-    # Run both variants
-    stages_nosl = run_pipeline_capture_stages(src, xmax=xmax, lambda_sl=0.0)
-    stages_sl   = run_pipeline_capture_stages(src, xmax=xmax, lambda_sl=1.0)
-
-    # Plot: two separate 3x2 figures (cleanest interpretation of your “3x2 grid” request)
-    plot_stage_grid(
-        stages_nosl, true_xy=(0.0, 0.0), xmax=xmax,
-        title="ARCH SIS toy run (no strong lensing term, lambda_sl=0)",
-        savepath="stages_nosl.png",
-    )
-    plot_stage_grid(
-        stages_sl, true_xy=(0.0, 0.0), xmax=xmax,
-        title="ARCH SIS toy run (with strong lensing term, lambda_sl=1)",
-        savepath="stages_sl.png",
+    sysB = make_two_image_sis_system_at_lens(
+        system_id="toy_sys_B",
+        lens_center_xy=(true_lens_xyte[1][0], true_lens_xyte[1][1]),
+        te_true=true_lens_xyte[1][2],
+        beta_rel_xy=(-0.4, 0.25),
+        sigma_theta=0.03,
+        z_source=2.2,
     )
 
+    attach_strong_systems(src, [sysA, sysB])
+
+    # ----------------------------
+    # Run and plot
+    # ----------------------------
+    use_strong_lensing = True
+    stages_sl = run_pipeline_capture_stages(src, xmax=xmax, use_strong_lensing=use_strong_lensing)
+
+    plot_stage_grid_two_truth(
+        stages_sl,
+        true_lens_xyte=true_lens_xyte,
+        xmax=xmax,
+        title=f"ARCH SIS toy run",
+        savepath="stages_two_lens_sl.png",
+    )
     plt.show()
 
 
