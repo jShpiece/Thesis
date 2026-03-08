@@ -557,7 +557,140 @@ def backproject_source_positions_sis(lenses, theta_x, theta_y, eps=1.0e-6):
     return tx - ax, ty - ay
 
 
-def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6, return_breakdown=False):
+def magnification_sis(lenses, theta_x, theta_y, eps=1.0e-6):
+    """
+    Scalar magnification |mu| at arbitrary image-plane positions for a
+    composite SIS deflector.
+
+    For a single SIS halo j at angular separation r_j from the evaluation
+    point, the deflection gradient (2x2 matrix) is:
+
+        (d alpha_j / d theta)_ab = (theta_E,j / r_j) * P_ab(phi_j)
+
+    where P_ab is the rank-1 projector along the lens-image direction:
+
+        P = [[sin^2 phi,  -sin phi cos phi],
+             [-sin phi cos phi,  cos^2 phi]]
+
+    with phi_j = arctan2(dy_j, dx_j) measured from the lens centre.
+
+    For N_lens SIS halos the total Jacobian is:
+
+        A = I - sum_j (d alpha_j / d theta)
+
+    and the signed magnification is mu = 1 / det(A).
+    We return |mu| = 1 / |det(A)|.
+
+    Analytic check (single SIS):
+        det(A) = 1 - theta_E / r  =>  |mu| = 1 / |1 - theta_E / r|
+
+    Parameters
+    ----------
+    lenses : SIS_Lens-like
+        Must have array-like attributes x, y, te.
+    theta_x, theta_y : array-like
+        Image-plane positions in arcsec, shape (N_pts,).
+    eps : float
+        Softening length (arcsec) to avoid the r = 0 singularity.
+
+    Returns
+    -------
+    abs_mu : ndarray, shape (N_pts,)
+        Absolute magnification |mu| at each evaluation point.
+    det_A : ndarray, shape (N_pts,)
+        Signed determinant of the Jacobian (useful for parity checks).
+    """
+    tx = np.atleast_1d(theta_x).astype(float)
+    ty = np.atleast_1d(theta_y).astype(float)
+
+    xl = np.atleast_1d(lenses.x).astype(float)
+    yl = np.atleast_1d(lenses.y).astype(float)
+    te = np.atleast_1d(lenses.te).astype(float)
+
+    # Broadcast: shape (N_lens, N_pts)
+    dx = tx[None, :] - xl[:, None]
+    dy = ty[None, :] - yl[:, None]
+    r = np.hypot(dx, dy)
+    r = np.where(r < eps, eps, r)
+
+    # Trig factors (N_lens, N_pts)
+    cos_phi = dx / r
+    sin_phi = dy / r
+
+    # Prefactor theta_E / r for each lens-image pair
+    te_over_r = te[:, None] / r  # (N_lens, N_pts)
+
+    # Accumulate the four Jacobian components A = I - sum_j dα_j/dθ
+    #   dα_x/dθ_x = (θ_E/r) sin²φ      dα_x/dθ_y = -(θ_E/r) sinφ cosφ
+    #   dα_y/dθ_x = -(θ_E/r) sinφ cosφ  dα_y/dθ_y = (θ_E/r) cos²φ
+    sum_dax_dtx = np.sum(te_over_r * sin_phi ** 2, axis=0)          # (N_pts,)
+    sum_dax_dty = np.sum(-te_over_r * sin_phi * cos_phi, axis=0)    # (N_pts,)
+    sum_day_dtx = sum_dax_dty                                       # symmetric
+    sum_day_dty = np.sum(te_over_r * cos_phi ** 2, axis=0)          # (N_pts,)
+
+    A11 = 1.0 - sum_dax_dtx
+    A12 = -sum_dax_dty
+    A21 = -sum_day_dtx
+    A22 = 1.0 - sum_day_dty
+
+    det_A = A11 * A22 - A12 * A21
+
+    abs_mu = 1.0 / np.maximum(np.abs(det_A), 1.0e-30)
+
+    return abs_mu, det_A
+
+
+def sigma_beta_from_magnification(sigma_theta, abs_mu, mu_floor=0.01):
+    """
+    Convert image-plane positional uncertainty to source-plane uncertainty
+    using the magnification.
+
+    The lensing Jacobian maps image-plane displacements to source-plane
+    displacements:  d(beta) = A * d(theta).  For isotropic image-plane
+    errors sigma_theta, the scalar source-plane error is approximately:
+
+        sigma_beta ≈ sigma_theta / |mu|
+
+    where |mu| = 1/|det A|.  This is exact when the Jacobian is close
+    to a scalar multiple of the identity (i.e. shear is subdominant
+    compared to convergence), and remains a good approximation for the
+    SIS profile where the tangential eigenvalue is unity.
+
+    A floor on |mu| is imposed to prevent sigma_beta from diverging at
+    the critical curve, where |mu| -> infinity and sigma_beta -> 0.
+    Physically, images very close to the critical curve are smeared into
+    arcs and their centroid uncertainty does not actually shrink to zero;
+    the floor absorbs finite-source-size and PSF effects that regularise
+    the divergence.
+
+    Parameters
+    ----------
+    sigma_theta : float or ndarray
+        Image-plane positional uncertainty (arcsec).
+    abs_mu : ndarray
+        Absolute magnification |mu| at each image position.
+    mu_floor : float
+        Minimum allowed inverse-magnification |1/mu|, i.e. maximum
+        effective |mu| = 1/mu_floor.  Default 0.01 corresponds to
+        |mu|_max = 100.
+
+    Returns
+    -------
+    sigma_beta : ndarray
+        Source-plane uncertainty at each image position (arcsec).
+    """
+    sigma_theta = np.atleast_1d(sigma_theta).astype(float)
+    abs_mu = np.atleast_1d(abs_mu).astype(float)
+
+    # inv_mu = 1/|mu|, floored to prevent divergence
+    inv_mu = np.maximum(1.0 / np.maximum(abs_mu, 1.0e-30), mu_floor)
+
+    return sigma_theta * inv_mu
+
+
+def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6,
+                                 return_breakdown=False,
+                                 use_magnification_correction=True):
     """
     Source-plane scatter chi^2 for multiply-imaged systems under SIS lenses.
 
@@ -566,9 +699,15 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6, return_brea
         beta_bar_i = weighted mean of beta_{i,m}
         chi2_i = sum_m |beta_{i,m} - beta_bar_i|^2 / sigma_beta^2
 
-    Here we take sigma_beta = sigma_theta by default (simple + stable). This is inaccurate
-    (see Kochanek 2004), and we may want to implement a magnification-weighted sigma_beta in the future, 
-    but this is sufficient for our toy SIS model.
+    When use_magnification_correction is True (default), sigma_beta is
+    computed via the magnification tensor:
+
+        sigma_beta_m = sigma_theta_m / |mu_m|
+
+    This accounts for the compression of source-plane errors near the
+    critical curve, giving highly magnified images their proper
+    statistical weight.  When False, sigma_beta = sigma_theta (the
+    original, approximate behaviour).
 
     Parameters
     ----------
@@ -585,6 +724,10 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6, return_brea
         Softening for r=0 in deflection (arcsec).
     return_breakdown : bool
         If True, also return a dict keyed by system_id with per-system chi2 and metadata.
+    use_magnification_correction : bool
+        If True (default), convert sigma_theta to sigma_beta via the
+        magnification.  If False, use sigma_theta directly as sigma_beta
+        (original behaviour, retained for comparison tests).
 
     Returns
     -------
@@ -606,17 +749,26 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6, return_brea
         # Back-project to source plane
         bx, by = backproject_source_positions_sis(lenses, tx, ty, eps=eps)
 
-        # Sigma handling
+        # ── Sigma handling ──────────────────────────────────────────
+        # Start from image-plane positional uncertainty
         sig = getattr(sys, "sigma_theta", 0.1)
         if np.isscalar(sig):
-            sigx = np.full_like(bx, float(sig), dtype=float)
-            sigy = np.full_like(by, float(sig), dtype=float)
+            sig_theta = np.full_like(bx, float(sig), dtype=float)
         else:
-            sig_arr = np.atleast_1d(sig).astype(float)
-            if sig_arr.shape != bx.shape:
+            sig_theta = np.atleast_1d(sig).astype(float)
+            if sig_theta.shape != bx.shape:
                 raise ValueError(f"[{getattr(sys, 'system_id', 'unknown')}] sigma_theta shape mismatch.")
-            sigx = sig_arr
-            sigy = sig_arr
+
+        if use_magnification_correction:
+            # Compute magnification at each image position
+            abs_mu, det_A = magnification_sis(lenses, tx, ty, eps=eps)
+            # Convert to source-plane uncertainty: sigma_beta = sigma_theta / |mu|
+            sigx = sigma_beta_from_magnification(sig_theta, abs_mu)
+            sigy = sigma_beta_from_magnification(sig_theta, abs_mu)
+        else:
+            # Original behaviour: sigma_beta = sigma_theta (no correction)
+            sigx = sig_theta
+            sigy = sig_theta
 
         # Weighted mean source position
         wx = 1.0 / np.maximum(sigx, 1.0e-12) ** 2
@@ -632,12 +784,19 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6, return_brea
 
         if return_breakdown:
             sid = getattr(sys, "system_id", "unknown")
-            breakdown[sid] = {
+            bd = {
                 "chi2": float(chi2_i),
                 "n_images": int(bx.size),
                 "beta_bar": (float(bx_bar), float(by_bar)),
                 "beta": np.column_stack([bx, by]),
+                "sigma_beta_x": sigx.copy(),
+                "sigma_beta_y": sigy.copy(),
             }
+            if use_magnification_correction:
+                bd["abs_mu"] = abs_mu.copy()
+                bd["det_A"] = det_A.copy()
+                bd["sigma_theta"] = sig_theta.copy()
+            breakdown[sid] = bd
 
     if return_breakdown:
         return chi2_total, breakdown

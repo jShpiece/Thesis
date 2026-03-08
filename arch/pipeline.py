@@ -5,6 +5,9 @@ This module provides functions to generate initial guesses for lens positions,
 optimize lens positions and strengths, filter and merge lens positions,
 and other utilities used in gravitational lensing analysis.
 
+Statistical functions (calculate_total_chi2, compute_lambda_sl, calc_strong_dof)
+live in arch.metric.
+
 Functions:
     - generate_initial_guess
     - optimize_lens_positions
@@ -128,7 +131,8 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
-def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS', use_strong_lensing: bool = False):
+def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
+                           use_strong_lensing: bool = False, lambda_sl: float = None):
     """
     Optimizes lens positions via local minimization.
     Currently only minimizes relative to sources within a certain distance of the lens.
@@ -138,6 +142,8 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS', u
         lenses (SIS_Lens or NFW_Lens): Initial lens object with estimated positions and parameters.
         use_flags (list): Flags indicating which data to use in optimization.
         lens_type (str): Type of lens model ('SIS' or 'NFW').
+        use_strong_lensing (bool): Whether to include strong lensing in the objective.
+        lambda_sl (float or None): Pre-computed SL weight. If None, fallback is used.
 
     Returns:
         SIS_Lens or NFW_Lens: Lenses with optimized positions.
@@ -154,10 +160,11 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS', u
                 sources.g1[i], sources.g2[i],
                 sources.sigs[i], sources.sigf[i], sources.sigg[i],
                 sources.redshift[i],
-                strong_systems=getattr(sources, "strong_systems", None),  # <-- keeps SL available to objective
+                strong_systems=getattr(sources, "strong_systems", None),
             )
             guess = [lenses.x[i], lenses.y[i], lenses.te[i]]
-            params = ['SIS', 'unconstrained', one_source, use_flags, {"use_strong_lensing": use_strong_lensing}]  # <-- ADD opts dict
+            opts = {"use_strong_lensing": use_strong_lensing, "lambda_sl": lambda_sl}
+            params = ['SIS', 'unconstrained', one_source, use_flags, opts]
             result = minimize(
                 chi2wrapper, guess, args=params, method='L-BFGS-B',
                 options={'maxiter': int(1e6), 'ftol': 1e-6}
@@ -324,7 +331,7 @@ def merge_close_lenses(lenses, merger_threshold=5, lens_type='SIS'):
 def forward_lens_selection(
     sources, candidate_lenses, use_flags, lens_type='NFW',
     base_tolerance=0.003, mass_scale=1e13, exponent=-1.0,
-    use_strong_lensing: bool = False
+    use_strong_lensing: bool = False, lambda_sl: float = None
     ):
     """
     Selects the best combination of lenses by iteratively adding lenses
@@ -339,6 +346,8 @@ def forward_lens_selection(
         base_tolerance (float): Base tolerance for improvement. Default is 0.003.
         mass_scale (float): Mass scale for adaptive tolerance (e.g., 1e13 solar masses).
         exponent (float): Exponent for mass dependence. Negative values increase tolerance for lower masses.
+        use_strong_lensing (bool): Whether to include strong lensing in the objective.
+        lambda_sl (float or None): Pre-computed SL weight. If None, fallback is used.
     
     Returns:
         selected_lenses (Lens): Lens object with selected lenses that minimize the reduced chi-squared.
@@ -397,8 +406,9 @@ def forward_lens_selection(
                 )
 
             # Compute chi-squared and reduced chi-squared (Include SL if applicable)
-            chi2, dof, _ = calculate_total_chi2(
-                sources, test_lenses, use_flags, lens_type=lens_type, use_strong_lensing=use_strong_lensing
+            chi2, dof, _ = metric.calculate_total_chi2(
+                sources, test_lenses, use_flags, lens_type=lens_type,
+                use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
             )
             reduced_chi2 = chi2 / dof if dof > 0 else np.inf
             chi2_list.append(reduced_chi2)
@@ -460,7 +470,8 @@ def forward_lens_selection(
     else:
         return selected_lenses, best_reduced_chi2
 
-def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', use_strong_lensing: bool = False):
+def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS',
+                          use_strong_lensing: bool = False, lambda_sl: float = None):
     """
     Optimizes the strength parameters (Einstein radius or mass) of the lenses.
 
@@ -469,13 +480,17 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', use_stro
         lenses (SIS_Lens or NFW_Lens): Lens object containing lens positions and parameters.
         use_flags (list): Flags indicating which data to use in optimization.
         lens_type (str): Type of lens model ('SIS' or 'NFW').
+        use_strong_lensing (bool): Whether to include strong lensing in the objective.
+        lambda_sl (float or None): Pre-computed SL weight. If None, fallback is used.
 
     Returns:
         SIS_Lens or NFW_Lens: Lenses with optimized strengths.
     """
+    opts = {"use_strong_lensing": use_strong_lensing, "lambda_sl": lambda_sl}
+
     if lens_type == 'SIS':
         guess = lenses.te
-        params = ['SIS', 'constrained', lenses.x, lenses.y, sources, use_flags, {"use_strong_lensing": use_strong_lensing}]  # <-- ADD
+        params = ['SIS', 'constrained', lenses.x, lenses.y, sources, use_flags, opts]
         max_attempts = 5
         best_result = None
         best_params = guess
@@ -499,7 +514,7 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', use_stro
             params = [
                 'NFW', 'constrained',
                 lenses.x[i], lenses.y[i], lenses.redshift,
-                lenses.concentration[i], sources, use_flags, {"use_strong_lensing": use_strong_lensing}
+                lenses.concentration[i], sources, use_flags, opts
             ]
 
             chi2_fn = lambda x: chi2wrapper(x, params)
@@ -517,88 +532,30 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS', use_stro
 
     return lenses
 
-def _calc_strong_dof_from_sources(sources) -> int:
-    """
-    Degrees of freedom contribution for source-plane-scatter SL chi2:
 
-        For each system i with N_i images:
-            data constraints = 2*N_i   (x,y per image)
-            nuisance params  = 2       (beta_x, beta_y)
-            dof_i = 2*(N_i - 1)
-
-        Total dof_sl = 2 * sum_i (N_i - 1)
-
-    Returns 0 if no strong systems exist.
-    """
-    if not hasattr(sources, "strong_systems") or sources.strong_systems is None:
-        return 0
-    if len(sources.strong_systems) == 0:
-        return 0
-    return int(2 * sum((sys.n_images - 1) for sys in sources.strong_systems))
-
-def calculate_total_chi2(
-    sources,
-    lenses,
-    use_flags,
-    lens_type: str = "NFW",
-    use_strong_lensing: bool = False,
-):
-    """
-    Total chi2 = chi2_WL + lambda_sl * chi2_SL  (SL only implemented for SIS currently).
-
-    Returns
-    -------
-    chi2_total : float
-    dof_total  : int
-    components : dict with keys: chi2_wl, chi2_sl, dof_wl, dof_sl
-    """
-    # WL part (existing behavior)
-    chi2_wl = metric.calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
-    dof_wl = metric.calc_degrees_of_freedom(sources, lenses, use_flags)
-
-    chi2_sl = 0.0
-    dof_sl = 0
-
-    # SL part (only if present AND SIS)
-    has_sl = hasattr(sources, "strong_systems") and sources.strong_systems is not None and len(sources.strong_systems) > 0
-    if has_sl and use_strong_lensing:
-        if lens_type != "SIS":
-            # Prototype scope: only SIS supported right now.
-            # Keep this explicit so you don't silently "think" you're using SL in NFW mode.
-            raise NotImplementedError("Strong-lensing chi2 is currently implemented only for SIS.")
-        # Uses the function you added in utils.py
-        chi2_sl = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
-        dof_sl = _calc_strong_dof_from_sources(sources)
-
-    if use_strong_lensing and chi2_sl > 0:
-        chi2_reduced_wl = chi2_wl / dof_wl if dof_wl > 0 else np.inf
-        chi2_reduced_sl = chi2_sl / dof_sl if dof_sl > 0 else np.inf
-        # lambda_sl = chi2_reduced_wl / chi2_reduced_sl if chi2_reduced_sl != 0 else 0.0
-        # Construct a log likelihood ratio-based lambda_sl to avoid extreme scaling
-    else:
-        lambda_sl = 0.0
-
-    chi2_total = float(chi2_wl) + float(lambda_sl) * float(chi2_sl)
-    dof_total = int(dof_wl) + int(dof_sl)
-
-    components = {
-        "chi2_wl": float(chi2_wl),
-        "chi2_sl": float(chi2_sl),
-        "dof_wl": int(dof_wl),
-        "dof_sl": int(dof_sl),
-    }
-    return chi2_total, dof_total, components
-
-def update_chi2_values(sources, lenses, use_flags, lens_type='NFW', use_strong_lensing: bool = False):
+def update_chi2_values(sources, lenses, use_flags, lens_type='NFW',
+                      use_strong_lensing: bool = False, lambda_sl: float = None):
     """
     Updates per-lens chi2 (WL-only per-lens is fine) and returns reduced chi2 for the
     combined WL+SL objective at the global level.
 
+    Parameters:
+        sources (Source): Source object.
+        lenses (SIS_Lens or NFW_Lens): Lens object.
+        use_flags (list of bool): Which lensing signals to use.
+        lens_type (str): 'SIS' or 'NFW'.
+        use_strong_lensing (bool): Whether to include strong lensing.
+        lambda_sl (float or None): Pre-computed SL weight.
+
+    Returns:
+        float: Reduced chi-squared for the combined WL+SL objective.
+
     NOTE: per-lens chi2 is left as WL-only here (prototype). The returned reduced chi2
     is computed from the combined objective.
     """
-    chi2_total, dof_total, comps = calculate_total_chi2(
-        sources, lenses, use_flags, lens_type=lens_type, use_strong_lensing=use_strong_lensing
+    chi2_total, dof_total, comps = metric.calculate_total_chi2(
+        sources, lenses, use_flags, lens_type=lens_type,
+        use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
     )
     reduced_chi2 = chi2_total / dof_total if dof_total != 0 else np.inf
 
@@ -634,7 +591,15 @@ def chi2wrapper(guess, params):
     """
     Wrapper used by scipy optimizers.
 
-    Backwards compatible: if lambda_sl is not passed, defaults to 0.0.
+    Backwards compatible: if lambda_sl is not passed in the opts dict,
+    it defaults to None (which triggers the fallback inside
+    calculate_total_chi2).
+
+    The recommended usage is for callers to pre-compute lambda_sl via
+    ``compute_lambda_sl()`` and inject it into the opts dict:
+
+        opts = {"use_strong_lensing": True, "lambda_sl": 2.3}
+        params = ['SIS', 'unconstrained', sources, use_flags, opts]
     """
     if isinstance(params, tuple):
         params = list(params)
@@ -644,9 +609,11 @@ def chi2wrapper(guess, params):
 
     # Optional options dict as final element (recommended)
     use_strong_lensing = False
+    lambda_sl = None
     if len(tail) > 0 and isinstance(tail[-1], dict):
         opts = tail[-1]
         use_strong_lensing = bool(opts.get("use_strong_lensing", False))
+        lambda_sl = opts.get("lambda_sl", None)
         tail = tail[:-1]
 
     if model_type == 'SIS':
@@ -655,8 +622,10 @@ def chi2wrapper(guess, params):
             sources = tail[0]
             use_flags = tail[1]
             lenses = halo_obj.SIS_Lens(guess[0], guess[1], guess[2], [0])
-            chi2_total, _, _ = calculate_total_chi2(
-                sources, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing
+            chi2_total, _, _ = metric.calculate_total_chi2(
+                sources, lenses, use_flags, lens_type="SIS",
+                use_strong_lensing=use_strong_lensing,
+                lambda_sl=lambda_sl,
             )
             return chi2_total
 
@@ -664,8 +633,10 @@ def chi2wrapper(guess, params):
             # params expected: [x_array, y_array, sources, use_flags]
             xl, yl, sources, use_flags = tail[0], tail[1], tail[2], tail[3]
             lenses = halo_obj.SIS_Lens(xl, yl, guess, np.empty_like(xl))
-            chi2_total, dof_total, _ = calculate_total_chi2(
-                sources, lenses, use_flags, lens_type="SIS", use_strong_lensing=use_strong_lensing
+            chi2_total, dof_total, _ = metric.calculate_total_chi2(
+                sources, lenses, use_flags, lens_type="SIS",
+                use_strong_lensing=use_strong_lensing,
+                lambda_sl=lambda_sl,
             )
             return np.abs(chi2_total / dof_total - 1) if dof_total > 0 else np.inf
 
@@ -681,8 +652,10 @@ def chi2wrapper(guess, params):
                 concentration, 10 ** guess[2], redshift, [0]
             )
             lenses.calculate_concentration()
-            chi2_total, _, _ = calculate_total_chi2(
-                sources, lenses, use_flags, lens_type="NFW", use_strong_lensing=False  # SL not supported for NFW prototype
+            chi2_total, _, _ = metric.calculate_total_chi2(
+                sources, lenses, use_flags, lens_type="NFW",
+                use_strong_lensing=use_strong_lensing,
+                lambda_sl=lambda_sl,
             )
             return chi2_total
 
@@ -694,8 +667,10 @@ def chi2wrapper(guess, params):
                 concentration, 10 ** guess, z_lens, np.empty_like(np.atleast_1d(xl))
             )
             lenses.calculate_concentration()
-            chi2_total, _, _ = calculate_total_chi2(
-                sources, lenses, use_flags, lens_type="NFW", use_strong_lensing=False
+            chi2_total, _, _ = metric.calculate_total_chi2(
+                sources, lenses, use_flags, lens_type="NFW",
+                use_strong_lensing=use_strong_lensing,
+                lambda_sl=lambda_sl,
             )
             return chi2_total
 
@@ -705,72 +680,11 @@ def chi2wrapper(guess, params):
                 xl, yl, np.zeros_like(np.atleast_1d(xl)),
                 guess[1], 10 ** guess[0], z_lens, np.empty_like(np.atleast_1d(xl))
             )
-            chi2_total, _, _ = calculate_total_chi2(
-                sources, lenses, use_flags, lens_type="NFW", use_strong_lensing=False
+            chi2_total, _, _ = metric.calculate_total_chi2(
+                sources, lenses, use_flags, lens_type="NFW",
+                use_strong_lensing=use_strong_lensing,
+                lambda_sl=lambda_sl,
             )
             return chi2_total
 
     raise ValueError(f"Invalid lensing model/constraint: {model_type} / {constraint_type}")
-    """
-    Chi-squared wrapper function for optimization.
-
-    Parameters:
-        guess (list): List of guessed parameters.
-        params (list): List of parameters required for lensing models.
-            - params[0]: Model type ('SIS' or 'NFW').
-            - params[1]: Constraint type ('unconstrained', 'constrained', or 'dual').
-                Unconstrained: optimize all parameters in guess.
-                Constrained: optimize only strength parameters, other params in params.
-                Dual: optimize both mass and concentration (NFW only).
-            - Remaining params depend on model and constraint type.
-
-    Returns:
-        float: Chi-squared value to be minimized.
-    """
-    # Ensure params is a list
-    if isinstance(params, tuple):
-        params = list(params)
-
-    model_type, constraint_type = params[0], params[1]
-    params = params[2:]
-
-    if model_type == 'SIS':
-        if constraint_type == 'unconstrained':
-            # Create lens with guessed parameters
-            lenses = halo_obj.SIS_Lens(guess[0], guess[1], guess[2], [0])
-            return metric.calculate_chi_squared(params[0], lenses, params[1])
-        elif constraint_type == 'constrained':
-            # Optimize strength parameter(s)
-            lenses = halo_obj.SIS_Lens(params[0], params[1], guess, np.empty_like(params[0]))
-            dof = metric.calc_degrees_of_freedom(params[2], lenses, params[3])
-            chi2 = metric.calculate_chi_squared(params[2], lenses, params[3])
-            return np.abs(chi2 / dof - 1)
-
-    elif model_type == 'NFW':
-        if constraint_type == 'unconstrained':
-            lenses = halo_obj.NFW_Lens(
-                guess[0], guess[1], np.zeros_like(guess[0]),
-                params[2], 10 ** guess[2], params[3], [0]
-            )
-            lenses.calculate_concentration()
-            return metric.calculate_chi_squared(params[0], lenses, params[1], lens_type='NFW')
-
-        elif constraint_type == 'constrained':
-            lenses = halo_obj.NFW_Lens(
-                params[0], params[1], np.zeros_like(params[0]),
-                params[3], 10 ** guess, params[2], np.empty_like(params[0])
-            )
-            lenses.calculate_concentration()
-            return metric.calculate_chi_squared(params[4], lenses, params[5], lens_type='NFW')
-        
-        elif constraint_type == 'dual':
-            # Fit both mass and concentration
-            lenses = halo_obj.NFW_Lens(
-                params[0], params[1], np.zeros_like(params[0]),
-                guess[1], 10 ** guess[0], params[2], np.empty_like(params[0])
-            )
-            return metric.calculate_chi_squared(params[3], lenses, params[4], lens_type='NFW')
-
-
-    else:
-        raise ValueError(f"Invalid lensing model: {model_type}")

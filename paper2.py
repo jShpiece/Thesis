@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import arch.pipeline as pipeline
 import arch.halo_obj as halo_obj
 import arch.source_obj as source_obj
+import arch.utils as utils
+import arch.metric as metric
 
 
 # ----------------------------
@@ -98,8 +100,10 @@ def make_two_image_sis_system_at_lens(
     r1 = te_true + b
     r2 = te_true - b
 
-    theta_x = np.array([x0 + r1 * ehatx, x0 + r2 * ehatx], dtype=float)
-    theta_y = np.array([y0 + r1 * ehaty, y0 + r2 * ehaty], dtype=float)
+    # Image 1: same side as source, at distance r1 from lens centre
+    # Image 2: opposite side, at distance r2 from lens centre (negative parity)
+    theta_x = np.array([x0 + r1 * ehatx, x0 - r2 * ehatx], dtype=float)
+    theta_y = np.array([y0 + r1 * ehaty, y0 - r2 * ehaty], dtype=float)
 
     StrongLensingSystem = getattr(source_obj, "StrongLensingSystem")
     return StrongLensingSystem(
@@ -296,7 +300,6 @@ def main():
         savepath="stages_two_lens_sl.png",
     )
     plt.show()
-
 
 if __name__ == "__main__":
     main()
