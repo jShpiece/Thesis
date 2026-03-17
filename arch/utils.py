@@ -803,6 +803,403 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6,
     return chi2_total
 
 
+
+# ────────────────────────────────────────────────────────
+#  NFW strong-lensing functions
+# ────────────────────────────────────────────────────────
+ 
+def _nfw_radial_h(x):
+    """
+    Radial function h(x) for NFW profile (identical to radial_term_5 in
+    calculate_lensing_signals_nfw, extracted here for standalone use).
+ 
+        h(x) = arctanh(sqrt(1-x^2)) / sqrt(1-x^2)   for x < 1
+             = 1                                       for x = 1
+             = arctan(sqrt(x^2-1)) / sqrt(x^2-1)      for x > 1
+ 
+    Parameters
+    ----------
+    x : ndarray
+        Dimensionless radius x = theta / theta_s.
+ 
+    Returns
+    -------
+    h : ndarray
+        Same shape as x.
+    """
+    x = np.asarray(x, dtype=float)
+    sol = np.ones_like(x)
+    m1 = x < 1
+    m3 = x > 1
+    sol[m1] = np.arctanh(np.sqrt(1 - x[m1]**2)) / np.sqrt(1 - x[m1]**2)
+    sol[m3] = np.arctan(np.sqrt(x[m3]**2 - 1)) / np.sqrt(x[m3]**2 - 1)
+    return sol
+ 
+ 
+def _nfw_kappa_and_gamma(kappa_s, x, h_x=None, g_x=None):
+    """
+    Convergence kappa(x) and tangential shear |gamma_t(x)| for an NFW lens.
+ 
+    Parameters
+    ----------
+    kappa_s : ndarray
+        Characteristic convergence rho_s * r_s / Sigma_crit.  Shape broadcastable
+        with x (typically (N_halo, N_pts)).
+    x : ndarray
+        Dimensionless radius theta / theta_s.
+    h_x : ndarray or None
+        Pre-computed h(x).  Computed if None.
+    g_x : ndarray or None
+        Pre-computed g(x) = ln(x/2) + h(x).  Computed if None.
+ 
+    Returns
+    -------
+    kappa : ndarray
+    abs_gamma : ndarray
+        Both same shape as x.
+    """
+    if h_x is None:
+        h_x = _nfw_radial_h(x)
+    if g_x is None:
+        g_x = np.log(x / 2.0) + h_x
+ 
+    # Convergence: kappa(x) = 2 kappa_s (1 - h(x)) / (x^2 - 1)
+    # Needs careful limit at x=1 where both numerator and denominator -> 0.
+    xsq_m1 = x**2 - 1
+    safe_denom = np.where(np.abs(xsq_m1) < 1e-8, 1.0, xsq_m1)
+    kappa_raw = 2 * kappa_s * (1 - h_x) / safe_denom
+    # At x=1: kappa = 2 kappa_s / 3  (L'Hopital)
+    kappa = np.where(np.abs(xsq_m1) < 1e-8, 2 * kappa_s / 3.0, kappa_raw)
+ 
+    # Mean convergence inside x: kbar(x) = (4 kappa_s / x^2) * [g(x)]
+    #   (Bartelmann 1996 eq. 13, Wright & Brainerd 2000 eq. 13)
+    x_safe = np.where(np.abs(x) < 1e-10, 1e-10, x)
+    kbar = (4 * kappa_s / x_safe**2) * g_x
+ 
+    # Tangential shear: |gamma_t| = kbar - kappa
+    abs_gamma = np.abs(kbar - kappa)
+ 
+    return kappa, abs_gamma
+ 
+ 
+def calculate_deflection_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
+    """
+    Compute the total NFW reduced deflection field alpha(theta) for a set of
+    NFW halos at arbitrary image-plane positions.
+ 
+    The reduced deflection for a single NFW halo at dimensionless radius
+    x = |theta - theta_lens| / theta_s is:
+ 
+        |alpha(x)| = 4 kappa_s theta_s g(x) / x
+ 
+    where g(x) = ln(x/2) + h(x), kappa_s = rho_s r_s / Sigma_crit(z_l, z_s),
+    and theta_s = r_s / D_l  (angular scale radius in arcsec).
+ 
+    The deflection is directed radially from each halo centre, and the total
+    deflection is the vector sum over all halos.
+ 
+    Parameters
+    ----------
+    halos : NFW_Lens
+        Halo object with x, y, mass, concentration, redshift attributes.
+    theta_x, theta_y : array-like
+        Image-plane positions (arcsec), shape (N_pts,).
+    z_source : float
+        Source redshift for this set of images (sets Sigma_crit).
+    eps : float
+        Softening to avoid r=0 singularity (arcsec).
+ 
+    Returns
+    -------
+    alpha_x, alpha_y : ndarray, shape (N_pts,)
+        Deflection components (arcsec).
+    """
+    tx = np.atleast_1d(theta_x).astype(float)
+    ty = np.atleast_1d(theta_y).astype(float)
+ 
+    x_l = np.atleast_1d(halos.x).astype(float)
+    y_l = np.atleast_1d(halos.y).astype(float)
+    c_l = np.atleast_1d(halos.concentration).astype(float)
+ 
+    # Lens redshift (scalar)
+    z_l_arr = np.asarray(halos.redshift)
+    z_l = float(z_l_arr.flat[0]) if z_l_arr.ndim > 0 else float(z_l_arr)
+ 
+    # Cosmological distances
+    Dl = cosmo.angular_diameter_distance(z_l).to(u.m).value
+    sigma_crit = critical_surface_density(z_l, z_source)
+ 
+    # Halo structural parameters
+    rho_c = cosmo.critical_density(z_l).to(u.kg / u.m**3).value
+    delta_c = np.atleast_1d(halos.calc_delta_c())
+    rho_s = rho_c * delta_c                              # (N_halo,)
+ 
+    r200_m, r200_arcsec = halos.calc_R200()
+    r200_m = np.atleast_1d(r200_m)
+    r200_arcsec = np.atleast_1d(r200_arcsec)
+    rs_m = r200_m / c_l                                  # (N_halo,) [metres]
+    theta_s = r200_arcsec / c_l                          # (N_halo,) [arcsec]
+ 
+    kappa_s = (rho_s * rs_m) / sigma_crit                # (N_halo,)
+ 
+    # Angular separations: (N_halo, N_pts)
+    dx = tx[None, :] - x_l[:, None]
+    dy = ty[None, :] - y_l[:, None]
+    r = np.hypot(dx, dy)
+    r = np.where(r < eps, eps, r)
+ 
+    # Dimensionless radius x = theta / theta_s
+    x = r / theta_s[:, None]  # (N_halo, N_pts)
+ 
+    # Radial function g(x) = ln(x/2) + h(x)
+    h_x = _nfw_radial_h(x)
+    g_x = np.log(np.maximum(x, 1e-30) / 2.0) + h_x
+ 
+    # Deflection magnitude per halo: 4 kappa_s theta_s g(x) / x
+    x_safe = np.where(x < 1e-10, 1e-10, x)
+    alpha_mag = 4.0 * kappa_s[:, None] * theta_s[:, None] * g_x / x_safe
+    # (N_halo, N_pts)
+ 
+    # Unit radial vector from each halo to evaluation point
+    ux = dx / r
+    uy = dy / r
+ 
+    # Vector sum over halos
+    alpha_x = np.sum(alpha_mag * ux, axis=0)  # (N_pts,)
+    alpha_y = np.sum(alpha_mag * uy, axis=0)
+ 
+    return alpha_x, alpha_y
+ 
+ 
+def backproject_source_positions_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
+    """
+    Back-project image positions to the source plane under an NFW lens model:
+ 
+        beta = theta - alpha(theta)
+ 
+    Parameters
+    ----------
+    halos : NFW_Lens
+        Halo model.
+    theta_x, theta_y : array-like
+        Image-plane positions (arcsec).
+    z_source : float
+        Source redshift.
+    eps : float
+        Softening (arcsec).
+ 
+    Returns
+    -------
+    beta_x, beta_y : ndarray
+        Source-plane positions (arcsec).
+    """
+    ax, ay = calculate_deflection_nfw(halos, theta_x, theta_y, z_source, eps=eps)
+    tx = np.atleast_1d(theta_x).astype(float)
+    ty = np.atleast_1d(theta_y).astype(float)
+    return tx - ax, ty - ay
+ 
+ 
+def magnification_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
+    """
+    Absolute magnification |mu| at image-plane positions for a composite
+    NFW deflector.
+ 
+    Uses the analytic convergence and shear rather than numerical
+    differentiation of the deflection:
+ 
+        det(A) = (1 - kappa)^2 - |gamma|^2
+        |mu| = 1 / |det(A)|
+ 
+    Parameters
+    ----------
+    halos : NFW_Lens
+    theta_x, theta_y : array-like
+        Image-plane positions (arcsec), shape (N_pts,).
+    z_source : float
+        Source redshift (sets Sigma_crit for each halo).
+    eps : float
+        Softening (arcsec).
+ 
+    Returns
+    -------
+    abs_mu : ndarray, shape (N_pts,)
+    det_A  : ndarray, shape (N_pts,)
+    """
+    tx = np.atleast_1d(theta_x).astype(float)
+    ty = np.atleast_1d(theta_y).astype(float)
+ 
+    x_l = np.atleast_1d(halos.x).astype(float)
+    y_l = np.atleast_1d(halos.y).astype(float)
+    c_l = np.atleast_1d(halos.concentration).astype(float)
+ 
+    z_l_arr = np.asarray(halos.redshift)
+    z_l = float(z_l_arr.flat[0]) if z_l_arr.ndim > 0 else float(z_l_arr)
+ 
+    sigma_crit = critical_surface_density(z_l, z_source)
+ 
+    rho_c = cosmo.critical_density(z_l).to(u.kg / u.m**3).value
+    delta_c = np.atleast_1d(halos.calc_delta_c())
+    rho_s = rho_c * delta_c
+ 
+    r200_m, r200_arcsec = halos.calc_R200()
+    r200_m = np.atleast_1d(r200_m)
+    r200_arcsec = np.atleast_1d(r200_arcsec)
+    rs_m = r200_m / c_l
+    theta_s = r200_arcsec / c_l
+ 
+    kappa_s = (rho_s * rs_m) / sigma_crit  # (N_halo,)
+ 
+    # Angular separations
+    dx = tx[None, :] - x_l[:, None]
+    dy = ty[None, :] - y_l[:, None]
+    r = np.hypot(dx, dy)
+    r = np.where(r < eps, eps, r)
+ 
+    x = r / theta_s[:, None]  # (N_halo, N_pts)
+ 
+    # h(x) and g(x)
+    h_x = _nfw_radial_h(x)
+    g_x = np.log(np.maximum(x, 1e-30) / 2.0) + h_x
+ 
+    # Per-halo kappa and |gamma| at each point
+    kappa_per_halo, gamma_per_halo = _nfw_kappa_and_gamma(
+        kappa_s[:, None], x, h_x=h_x, g_x=g_x
+    )
+    # (N_halo, N_pts) each
+ 
+    # The convergence adds linearly; the shear adds as a tensor.
+    # For multiple circularly-symmetric halos centred at different positions,
+    # we must sum the shear *as a spin-2 field* then take the magnitude.
+    cos_phi = dx / r
+    sin_phi = dy / r
+    cos2phi = cos_phi**2 - sin_phi**2
+    sin2phi = 2 * cos_phi * sin_phi
+ 
+    # Tangential shear per halo is negative (γ_t < 0 convention) so
+    # γ₁ = -|γ_t| cos(2φ), γ₂ = -|γ_t| sin(2φ)
+    # (sign convention: tangential shear from a mass overdensity is negative
+    #  in the γ₁ frame aligned with the radial direction)
+    gamma1_per_halo = -gamma_per_halo * cos2phi
+    gamma2_per_halo = -gamma_per_halo * sin2phi
+ 
+    # Sum over halos
+    kappa_total = np.sum(kappa_per_halo, axis=0)   # (N_pts,)
+    gamma1_total = np.sum(gamma1_per_halo, axis=0)
+    gamma2_total = np.sum(gamma2_per_halo, axis=0)
+    gamma_mag_total = np.hypot(gamma1_total, gamma2_total)
+ 
+    # Jacobian determinant
+    det_A = (1 - kappa_total)**2 - gamma_mag_total**2
+    abs_mu = 1.0 / np.maximum(np.abs(det_A), 1.0e-30)
+ 
+    return abs_mu, det_A
+ 
+ 
+def chi2_strong_source_plane_nfw(halos, strong_systems, eps=1.0e-6,
+                                  return_breakdown=False,
+                                  use_magnification_correction=True):
+    """
+    Source-plane scatter chi^2 for multiply-imaged systems under NFW halos.
+ 
+    Exactly parallels chi2_strong_source_plane_sis but uses NFW deflection
+    and magnification.
+ 
+    For each system i with images m:
+        beta_{i,m} = theta_{i,m} - alpha_NFW(theta_{i,m}; z_{s,i})
+        beta_bar_i = weighted mean of beta_{i,m}
+        chi2_i     = sum_m |beta_{i,m} - beta_bar_i|^2 / sigma_beta_m^2
+ 
+    where sigma_beta_m = sigma_theta_m / |mu_m| when magnification
+    correction is enabled, and the deflection and magnification are
+    evaluated at the source redshift of each system individually.
+ 
+    Parameters
+    ----------
+    halos : NFW_Lens
+        Must have x, y, mass, concentration, redshift attributes.
+    strong_systems : iterable of StrongLensingSystem
+        Each system has theta_x, theta_y, sigma_theta, z_source.
+    eps : float
+        Softening (arcsec).
+    return_breakdown : bool
+        If True, also return per-system diagnostics.
+    use_magnification_correction : bool
+        If True, convert sigma_theta -> sigma_beta via |mu|.
+ 
+    Returns
+    -------
+    chi2_sl : float
+    breakdown : dict (optional)
+    """
+    chi2_total = 0.0
+    breakdown = {}
+ 
+    for sys in strong_systems:
+        tx = np.atleast_1d(sys.theta_x).astype(float)
+        ty = np.atleast_1d(sys.theta_y).astype(float)
+        z_s = float(sys.z_source)
+ 
+        if tx.shape != ty.shape:
+            raise ValueError(
+                f"[{getattr(sys, 'system_id', 'unknown')}] theta_x/theta_y shape mismatch."
+            )
+ 
+        # ── Back-project to source plane using NFW deflection ──
+        bx, by = backproject_source_positions_nfw(halos, tx, ty, z_s, eps=eps)
+ 
+        # ── Sigma handling ──
+        sig = getattr(sys, "sigma_theta", 0.1)
+        if np.isscalar(sig):
+            sig_theta = np.full_like(bx, float(sig), dtype=float)
+        else:
+            sig_theta = np.atleast_1d(sig).astype(float)
+            if sig_theta.shape != bx.shape:
+                raise ValueError(
+                    f"[{getattr(sys, 'system_id', 'unknown')}] sigma_theta shape mismatch."
+                )
+ 
+        if use_magnification_correction:
+            abs_mu, det_A = magnification_nfw(halos, tx, ty, z_s, eps=eps)
+            sigx = sigma_beta_from_magnification(sig_theta, abs_mu)
+            sigy = sigma_beta_from_magnification(sig_theta, abs_mu)
+        else:
+            sigx = sig_theta
+            sigy = sig_theta
+            abs_mu = None
+            det_A = None
+ 
+        # ── Weighted mean source position ──
+        wx = 1.0 / np.maximum(sigx, 1.0e-12) ** 2
+        wy = 1.0 / np.maximum(sigy, 1.0e-12) ** 2
+ 
+        bx_bar = np.sum(wx * bx) / np.sum(wx)
+        by_bar = np.sum(wy * by) / np.sum(wy)
+ 
+        # ── Source-plane scatter chi2 ──
+        chi2_i = np.sum(((bx - bx_bar) / sigx) ** 2 + ((by - by_bar) / sigy) ** 2)
+        chi2_total += float(chi2_i)
+ 
+        if return_breakdown:
+            sid = getattr(sys, "system_id", "unknown")
+            bd = {
+                "chi2": float(chi2_i),
+                "n_images": int(bx.size),
+                "beta_bar": (float(bx_bar), float(by_bar)),
+                "beta": np.column_stack([bx, by]),
+                "sigma_beta_x": sigx.copy(),
+                "sigma_beta_y": sigy.copy(),
+            }
+            if use_magnification_correction and abs_mu is not None:
+                bd["abs_mu"] = abs_mu.copy()
+                bd["det_A"] = det_A.copy()
+                bd["sigma_theta"] = sig_theta.copy()
+            breakdown[sid] = bd
+ 
+    if return_breakdown:
+        return chi2_total, breakdown
+    return chi2_total
+
+
 def calculate_lensing_signals_nfw(halos, sources):
     """
     Lensing signals (shear, flexion, g-flexion) for NFW halos with per-source redshifts.

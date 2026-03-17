@@ -44,6 +44,7 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
         return np.inf
     return dof
 
+
 def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
     """
     Calculate the chi-squared statistic for the difference between observed and modeled source properties.
@@ -165,27 +166,28 @@ def calc_strong_dof(sources) -> int:
         return 0
     return int(2 * sum((sys.n_images - 1) for sys in sources.strong_systems))
 
-
+ 
+ 
 def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     """
     Pre-compute the strong-lensing weight lambda_sl at the current
     (typically initial) parameter values.
-
+ 
     This function is intended to be called **once** before an optimiser
     loop begins.  The returned scalar is then passed as a fixed constant
     into every ``calculate_total_chi2`` / ``chi2wrapper`` call so that
     the objective function seen by the optimiser is smooth and
     stationary.
-
+ 
     The weight equalises the reduced chi-squared of the WL and SL
     contributions:
-
+ 
         lambda_sl = (chi2_WL / dof_WL) / (chi2_SL / dof_SL)
-
+ 
     If either dataset has zero degrees of freedom, zero chi-squared,
     or if strong lensing is absent, we return 1.0 (the proper-likelihood
     default, i.e. assume both likelihoods are correctly normalised).
-
+ 
     Parameters
     ----------
     sources : Source
@@ -196,7 +198,7 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
         [use_shear, use_flexion, use_g_flexion].
     lens_type : str
         'SIS' or 'NFW'.
-
+ 
     Returns
     -------
     lambda_sl : float
@@ -205,34 +207,37 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     # ── WL evaluation ──
     chi2_wl = calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
     dof_wl = calc_degrees_of_freedom(sources, lenses, use_flags)
-
+ 
     # ── SL evaluation ──
     has_sl = (hasattr(sources, "strong_systems")
               and sources.strong_systems is not None
               and len(sources.strong_systems) > 0)
-
+ 
     if not has_sl:
         return 1.0  # no SL data — default to proper-likelihood weight
-
-    if lens_type != "SIS":
-        # SL chi2 currently only implemented for SIS
-        return 1.0
-
-    chi2_sl = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+ 
+    if lens_type == "SIS":
+        chi2_sl = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+    elif lens_type == "NFW":
+        chi2_sl = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+    else:
+        return 1.0  # unknown lens type — fall back to proper-likelihood default
     dof_sl = calc_strong_dof(sources)
-
+ 
     # Guard against degenerate cases
     if dof_wl <= 0 or dof_sl <= 0 or chi2_sl <= 0 or chi2_wl <= 0:
         return 1.0
-
+ 
     rchi2_wl = chi2_wl / dof_wl
     rchi2_sl = chi2_sl / dof_sl
-
+ 
     if rchi2_sl <= 0:
         return 1.0
-
+ 
+    print(f"Pre-computed lambda_sl: {rchi2_wl:.3f} / {rchi2_sl:.3f} = {rchi2_wl / rchi2_sl:.3f}")
     return float(rchi2_wl / rchi2_sl)
-
+ 
+ 
 
 def calculate_total_chi2(
     sources,
@@ -243,25 +248,25 @@ def calculate_total_chi2(
     lambda_sl: float = None,
 ):
     """
-    Total chi2 = chi2_WL + lambda_sl * chi2_SL  (SL only implemented for SIS currently).
-
+    Total chi2 = chi2_WL + lambda_sl * chi2_SL  (SL implemented for SIS and NFW).
+ 
     The relative weight lambda_sl between weak and strong lensing can be
     supplied in three ways (in order of precedence):
-
+ 
         1. Explicitly via the ``lambda_sl`` keyword  — used as-is.
            This is the recommended path: the caller pre-computes
            lambda_sl once at the initial parameter values via
            ``compute_lambda_sl()`` and holds it fixed throughout
            the entire optimisation call so the objective is smooth.
-
+ 
         2. If ``lambda_sl is None`` and strong lensing is active,
            a fallback reduced-chi2 ratio is computed at the *current*
            parameter values.  This is provided as a safety net but
            should NOT be relied upon inside an optimiser loop (it
            makes the objective non-stationary).
-
+ 
         3. If strong lensing is inactive, lambda_sl = 0 regardless.
-
+ 
     Returns
     -------
     chi2_total : float
@@ -271,21 +276,26 @@ def calculate_total_chi2(
     # ── WL part (existing behavior) ──
     chi2_wl = calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
     dof_wl = calc_degrees_of_freedom(sources, lenses, use_flags)
-
+ 
     chi2_sl = 0.0
     dof_sl = 0
-
+ 
     # ── SL part (only if present AND requested) ──
     has_sl = (hasattr(sources, "strong_systems")
               and sources.strong_systems is not None
               and len(sources.strong_systems) > 0)
-
+ 
     if has_sl and use_strong_lensing:
-        if lens_type != "SIS":
-            raise NotImplementedError("Strong-lensing chi2 is currently implemented only for SIS.")
-        chi2_sl = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+        if lens_type == "SIS":
+            chi2_sl = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+        elif lens_type == "NFW":
+            chi2_sl = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+        else:
+            raise NotImplementedError(
+                f"Strong-lensing chi2 not implemented for lens_type='{lens_type}'."
+            )
         dof_sl = calc_strong_dof(sources)
-
+ 
     # ── Determine lambda ──
     if lambda_sl is not None:
         # Path 1: caller supplied a pre-computed weight (recommended)
@@ -298,10 +308,10 @@ def calculate_total_chi2(
     else:
         # Path 3: no strong lensing contribution
         _lambda = 0.0
-
+ 
     chi2_total = float(chi2_wl) + _lambda * float(chi2_sl)
     dof_total = int(dof_wl) + int(dof_sl)
-
+ 
     components = {
         "chi2_wl": float(chi2_wl),
         "chi2_sl": float(chi2_sl),
