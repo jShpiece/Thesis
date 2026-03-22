@@ -62,6 +62,8 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None, lens_type='SIS
     log_step("After Filtering:", lenses, reduced_chi2)
 
     # Step 4: Select optimal lens set
+    # forward_lens_selection uses no-magnification-correction chi2_SL internally
+    # (see pipeline.py), which is well-behaved for candidate selection.
     lenses, _ = pipeline.forward_lens_selection(
         sources, lenses, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
@@ -80,6 +82,23 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None, lens_type='SIS
         use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
     )
     log_step("After Merging Lenses:", lenses, reduced_chi2)
+
+    # Step 5b: SL-aware position+mass refinement on selected/merged halos (NFW only).
+    # Uses all WL sources + no-magnification-correction chi2_SL to pull each halo
+    # toward the true position.  Must be done AFTER forward selection (Step 4) so
+    # that the chi2_SL landscape is consistent and has a well-defined minimum.
+    if use_strong_lensing and lens_type == 'NFW':
+        lenses = pipeline.optimize_lens_positions(
+            sources, lenses, xmax, use_flags, lens_type,
+            use_strong_lensing=True, lambda_sl=lambda_sl, all_sources=True
+        )
+        # Step 5c: re-merge halos that converged to the same position
+        lenses = pipeline.merge_close_lenses(lenses, merger_threshold, lens_type)
+        reduced_chi2 = pipeline.update_chi2_values(
+            sources, lenses, use_flags, lens_type,
+            use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
+        )
+        log_step("After SL refinement+merge:", lenses, reduced_chi2)
 
     # Step 6: Final optimization
     lenses = pipeline.optimize_lens_strength(

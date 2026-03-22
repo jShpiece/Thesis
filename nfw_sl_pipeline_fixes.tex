@@ -1,0 +1,517 @@
+\documentclass[12pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{enumitem}
+
+\geometry{margin=1in}
+
+\definecolor{codegray}{rgb}{0.95,0.95,0.95}
+\definecolor{codegreen}{rgb}{0.1,0.5,0.1}
+\definecolor{codepurple}{rgb}{0.4,0.0,0.6}
+\lstset{
+  backgroundcolor=\color{codegray},
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codepurple}\bfseries,
+  commentstyle=\color{codegreen},
+  breaklines=true,
+  frame=single,
+  framesep=4pt,
+  language=Python
+}
+
+\title{NFW + Strong Lensing Pipeline:\\Diagnosis and Repair of Three Compounding Bugs}
+\author{Research Notes}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\tableofcontents
+\newpage
+
+% ─────────────────────────────────────────────────────────────────
+\section{Background and Problem Statement}
+% ─────────────────────────────────────────────────────────────────
+
+The gravitational lensing reconstruction pipeline (\texttt{fit\_lensing\_field}) supports two
+lens models --- SIS and NFW --- and can optionally incorporate multiply-imaged strong-lensing
+(SL) systems as additional constraints on top of the standard weak-lensing (WL) shear and
+flexion signals.
+
+For the SIS model the combined pipeline had been verified and worked correctly (Task 12).
+For the NFW model, however, enabling strong lensing
+(\texttt{use\_strong\_lensing=True}) \emph{degraded} the position
+reconstruction compared to running the WL-only pipeline.  A concrete test scenario
+(Task 14) demonstrated this clearly:
+
+\begin{itemize}
+  \item True NFW halo: position $(x,y)=(5'',-3'')$, mass $M = 5\times10^{14}\,M_\odot$,
+        $z_l = 0.3$, field half-width $x_\mathrm{max}=120''$, $N_\mathrm{WL}=100$ sources,
+        one two-image strong system with $\sigma_\theta = 0.05''$.
+  \item WL-only result: nearest recovered halo typically $\Delta \lesssim 5''$ from truth.
+  \item WL+SL result (before fixes): nearest recovered halo $\sim 80$--$130''$ from truth.
+\end{itemize}
+
+Adding a strong-lensing constraint should by construction only improve or at worst leave
+unchanged the position reconstruction; that it \emph{worsened} it by more than an order of
+magnitude indicated deep architectural problems.  Investigation identified three independent
+but compounding bugs, each described in its own section below.
+
+% ─────────────────────────────────────────────────────────────────
+\section{Bug 1 --- Extreme \texorpdfstring{$\lambda_\mathrm{SL}$}{lambda\_SL} at the NFW Initial Guess}
+\label{sec:bug1}
+% ─────────────────────────────────────────────────────────────────
+
+\subsection{The combined chi-squared objective}
+
+The pipeline minimises
+\begin{equation}
+  \chi^2_\mathrm{total} = \chi^2_\mathrm{WL} + \lambda_\mathrm{SL}\,\chi^2_\mathrm{SL},
+  \label{eq:total_chi2}
+\end{equation}
+where $\lambda_\mathrm{SL}$ is pre-computed once at the initial guess via
+\begin{equation}
+  \lambda_\mathrm{SL} = \frac{\tilde\chi^2_\mathrm{WL}}{\tilde\chi^2_\mathrm{SL}}
+  = \frac{\chi^2_\mathrm{WL}/\nu_\mathrm{WL}}{\chi^2_\mathrm{SL}/\nu_\mathrm{SL}},
+\end{equation}
+and held fixed throughout all subsequent optimisation calls.  The intent is to
+equalise the reduced chi-squared contributions of the two terms so neither dominates.
+
+\subsection{Why NFW produces extreme \texorpdfstring{$\lambda$}{lambda}}
+
+For SIS the initial guess comes from the flexion-inferred lens position, which is
+typically $\mathcal{O}(10'')$--$\mathcal{O}(50'')$ from truth, giving
+$\tilde\chi^2_\mathrm{WL}\approx 4600$ and $\tilde\chi^2_\mathrm{SL}\approx 1000$, so
+$\lambda \approx 4.4$ --- a balanced weight.
+
+For NFW the initial-guess routine (\texttt{generate\_initial\_guess}) places each lens
+candidate at the flexion-predicted lens position \emph{per source}, which is
+statistically near the true halo.  At this initial position the strong-lensing images
+are nearly back-projected to the same source position, giving
+$\tilde\chi^2_\mathrm{SL} \approx 1$--$2$.  Meanwhile the WL chi-squared at the initial
+guess --- before mass optimisation --- is large:
+$\tilde\chi^2_\mathrm{WL}\approx 500$--$800$.  The ratio is therefore
+\begin{equation}
+  \lambda_\mathrm{SL}^\mathrm{raw} \approx \frac{700}{1.5} \approx 500,
+\end{equation}
+a weight two orders of magnitude larger than the SIS case.  With this weight the
+entire optimisation effectively minimises $\chi^2_\mathrm{SL}$ only, driving every
+halo candidate toward the SL minimum regardless of what the WL data prefer.
+
+\subsection{Fix: cap \texorpdfstring{$\lambda_\mathrm{SL}$}{lambda\_SL} at 50}
+
+In \texttt{arch/metric.py}, function \texttt{compute\_lambda\_sl}:
+
+\begin{lstlisting}
+lambda_raw = rchi2_wl / rchi2_sl
+lambda_max = 50.0
+result = min(lambda_raw, lambda_max)
+cap_note = f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else ""
+print(f"Pre-computed lambda_sl: {rchi2_wl:.3f} / {rchi2_sl:.3f} = {lambda_raw:.3f}{cap_note}")
+return float(result)
+\end{lstlisting}
+
+The cap of 50 prevents SL from overwhelming WL when the initial guess happens to
+satisfy SL well.  A value of 50 allows SL to be a significant but not dominant
+constraint; it was chosen so that the WL reduced chi-squared and the weighted SL
+contribution are of comparable magnitude for typical NFW scenarios.
+
+% ─────────────────────────────────────────────────────────────────
+\section{Bug 2 --- Non-Monotonic \texorpdfstring{$\chi^2_\mathrm{SL}$}{chi2\_SL} with Magnification Correction}
+\label{sec:bug2}
+% ─────────────────────────────────────────────────────────────────
+
+\subsection{Source-plane scatter chi-squared with magnification correction}
+
+The strong-lensing chi-squared is computed as the weighted source-plane scatter of
+back-projected image positions.  For a system with $n_\mathrm{img}$ images at observed
+positions $\boldsymbol\theta_m$, the deflection $\boldsymbol\alpha(\boldsymbol\theta_m)$
+gives back-projected positions
+\begin{equation}
+  \boldsymbol\beta_m = \boldsymbol\theta_m - \boldsymbol\alpha(\boldsymbol\theta_m),
+\end{equation}
+and the scatter around the weighted mean $\bar{\boldsymbol\beta}$ is
+\begin{equation}
+  \chi^2_\mathrm{SL} = \sum_m
+  \left[\frac{(\beta_{x,m} - \bar\beta_x)^2}{\sigma_{\beta,x,m}^2}
+        + \frac{(\beta_{y,m} - \bar\beta_y)^2}{\sigma_{\beta,y,m}^2}\right].
+\end{equation}
+With the magnification correction enabled, the positional uncertainty in the source
+plane is related to the image-plane uncertainty by
+\begin{equation}
+  \sigma_{\beta,m} = \frac{\sigma_{\theta,m}}{|\mu_m|},
+  \qquad |\mu_m| = |\det\mathbf{A}(\boldsymbol\theta_m)|^{-1},
+\end{equation}
+where $\mathbf{A}$ is the lensing Jacobian.
+
+\subsection{Why this creates a perverse landscape for NFW optimisation}
+
+Near the Einstein radius $\theta_E$ the magnification diverges, $|\mu|\to\infty$,
+making $\sigma_\beta \to 0$.  Consequently, \emph{any} mis-deflection, however small,
+produces an enormous $\chi^2_\mathrm{SL}$ for lens models whose critical curve passes
+near the observed images.
+
+This creates a landscape that is \textbf{non-monotonic in distance from the true lens position}:
+
+\begin{center}
+\begin{tabular}{lcc}
+  \toprule
+  Candidate location & $\chi^2_\mathrm{SL}$ (with mag.\ correction) & Notes\\
+  \midrule
+  True position, true mass & $\approx 0$ & exact solution\\
+  $\sim 6''$ from truth, WL-optimal mass & $\approx 163\,000$ & near critical curve, $|\mu|$ large\\
+  $\sim 110''$ from truth & $\approx 2\,100$ & far field, $|\mu|\approx 1$, geometric plateau\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+The ``geometric plateau'' for two images separated by $2\theta_E \approx 3.3''$ with
+$\sigma_\theta = 0.05''$ is
+\begin{equation}
+  \chi^2_\mathrm{plateau} = \frac{(2\theta_E)^2}{2\sigma_\theta^2}
+  = \frac{(3.3'')^2}{2\,(0.05'')^2} \approx 2\,180.
+\end{equation}
+A halo 110'' from truth therefore has a \emph{lower} $\chi^2_\mathrm{SL}$ than a halo
+6'' from truth (but with the wrong mass).  With $\lambda_\mathrm{SL} = 50$, the
+contribution $\lambda\chi^2_\mathrm{SL}$ is $50 \times 2\,100 = 105\,000$ for the
+far-field plateau but $50 \times 163\,000 = 8\,150\,000$ for the near-truth
+candidate.  Consequently:
+
+\begin{enumerate}
+  \item \textbf{Forward lens selection} prefers far-from-truth plateau candidates over
+        near-truth candidates with even slightly wrong mass.
+  \item \textbf{Mass optimisation} (\texttt{optimize\_lens\_strength}) drives the lens
+        mass to the minimum allowed value ($10^{10}\,M_\odot$), where the lens barely
+        deflects any light and $\chi^2_\mathrm{SL}$ falls back to the plateau value,
+        rather than finding the physically correct mass.
+\end{enumerate}
+
+\subsection{Fix: use uncorrected chi-squared in all optimisation contexts}
+
+The magnification correction is physically important for the \emph{evaluation} of a
+final model (it correctly down-weights poorly-constrained source-plane positions), but
+it is harmful as an optimisation objective because it creates the non-monotonic
+landscape described above.
+
+The fix introduces a Boolean parameter
+\texttt{use\_magnification\_correction\_sl} (default \texttt{True} for backward
+compatibility) to \texttt{calculate\_total\_chi2} in \texttt{arch/metric.py}.  All
+\emph{optimisation} call sites pass \texttt{use\_magnification\_correction\_sl=False}:
+
+\begin{itemize}[noitemsep]
+  \item Every branch of \texttt{chi2wrapper} in \texttt{arch/pipeline.py}
+        (called by \texttt{optimize\_lens\_strength} and the SIS position optimiser).
+  \item The inner loop of \texttt{forward\_lens\_selection} in
+        \texttt{arch/pipeline.py}.
+  \item The SL-refinement pass in \texttt{optimize\_lens\_positions} (Steps 5b/5c,
+        introduced below).
+\end{itemize}
+
+\textit{Evaluation} call sites (\texttt{update\_chi2\_values}, \texttt{compute\_lambda\_sl},
+final reporting in \texttt{paper2.py}) retain the default
+\texttt{use\_magnification\_correction\_sl=True}.
+
+Without magnification correction the landscape becomes well-behaved:
+
+\begin{center}
+\begin{tabular}{lcc}
+  \toprule
+  Candidate location & $\chi^2_\mathrm{SL}$ (no mag.\ correction) & Notes\\
+  \midrule
+  True position, true mass & $\approx 0$ & \\
+  $1.5''$ from truth, WL-optimal mass & $7.5$ & small scatter\\
+  $54''$ from truth & $142$ & growing\\
+  $110''$ from truth & $\approx 2\,180$ & geometric plateau\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+The function is now monotonically increasing with distance from the true position
+(approximately), making it a valid optimisation objective.
+
+% ─────────────────────────────────────────────────────────────────
+\section{Bug 3 --- Integer Overflow on Infinite Degrees of Freedom}
+\label{sec:bug3}
+% ─────────────────────────────────────────────────────────────────
+
+\subsection{Origin of the overflow}
+
+\texttt{calc\_degrees\_of\_freedom} returns \texttt{np.inf} when the number of
+observational constraints is less than or equal to the number of free parameters ---
+e.g.\ when \texttt{filtered\_sources} retains fewer than two WL sources for a
+single NFW lens with three free parameters.  The function \texttt{calculate\_total\_chi2}
+then attempts to convert this to an integer:
+
+\begin{lstlisting}
+# BEFORE (raises OverflowError: cannot convert float infinity to integer)
+dof_total = int(dof_wl) + int(dof_sl)
+components = {"dof_wl": int(dof_wl), ...}
+\end{lstlisting}
+
+\subsection{Fix: guard against infinite DOF}
+
+\begin{lstlisting}
+_dof_wl_int = int(dof_wl) if np.isfinite(dof_wl) else 0
+_dof_sl_int = int(dof_sl) if np.isfinite(dof_sl) else 0
+dof_total = _dof_wl_int + _dof_sl_int
+
+components = {
+    "chi2_wl": float(chi2_wl),
+    "chi2_sl": float(chi2_sl),
+    "dof_wl": _dof_wl_int,
+    "dof_sl": _dof_sl_int,
+    "lambda_sl": float(_lambda),
+}
+\end{lstlisting}
+
+Mapping infinite DOF to zero is safe: a zero DOF means the reduced chi-squared is
+reported as \texttt{np.inf}, signalling that the model is unconstrained rather than
+crashing the pipeline.
+
+% ─────────────────────────────────────────────────────────────────
+\section{Residual Failure After Bugs 1--3: Merging Destroys the Near-Truth Halo}
+\label{sec:residual}
+% ─────────────────────────────────────────────────────────────────
+
+After applying the three fixes above, Tests 11--13 all passed and the SL pipeline no
+longer crashed.  However, Task 14-B --- which requires the WL+SL result to be closer
+to truth than the WL-only result --- still failed intermittently.  The failure mode
+changed: instead of placing the halo 100''+ from truth, the pipeline now produced a
+result 20--30'' from truth.
+
+\subsection{Root cause: merge corrupts the near-truth candidate}
+
+Tracing the pipeline step by step revealed the following sequence:
+
+\begin{enumerate}
+  \item \textbf{Candidate generation and WL optimisation (Steps 1--2)} produce $\sim 70$
+        candidates, with at least one landing within $\sim 1.5''$ of the true halo.
+        Each candidate's WL chi-squared with uncorrected SL is:
+        \begin{itemize}[noitemsep]
+          \item Near-truth candidate: $\chi^2_\mathrm{SL}^\mathrm{nomag} = 7.5$
+          \item Next-best: $142$
+          \item Far-field plateau: $\approx 2\,200$
+        \end{itemize}
+        The near-truth candidate is clearly preferred by the combined no-mag objective.
+  \item \textbf{Forward selection (Step 4)} correctly selects the near-truth candidate
+        first.  However, it then \emph{continues} to add further candidates that each
+        reduce $\chi^2_\mathrm{WL}$ marginally (WL overfitting).  Once the near-truth
+        halo is in the set, adding a distant wrong halo barely changes $\chi^2_\mathrm{SL}$
+        (the near-truth halo already satisfies SL; the wrong halo is a far-field
+        perturbation) but does improve $\chi^2_\mathrm{WL}$.  The adaptive tolerance
+        is too small to prevent this.
+  \item \textbf{First merge (Step 5)} uses a threshold
+        \begin{equation}
+          d_\mathrm{merge} = \left(\frac{N_\mathrm{src}}{(2x_\mathrm{max})^2}\right)^{-1/2}
+          \approx 24''
+        \end{equation}
+        for $N_\mathrm{src}=100$, $x_\mathrm{max}=120''$.  If any of the wrongly added
+        candidates lands within 24'' of the near-truth halo, the two are mass-weighted
+        merged.  With the wrong halo potentially having a large WL-optimal mass, the
+        merged position can be pulled tens of arcseconds from the true halo, destroying
+        the good result.
+\end{enumerate}
+
+% ─────────────────────────────────────────────────────────────────
+\section{Architectural Fix: Two-Phase Position Refinement (Steps 5b and 5c)}
+\label{sec:arch}
+% ─────────────────────────────────────────────────────────────────
+
+\subsection{Design principle}
+
+The key insight is that the magnification-corrected $\chi^2_\mathrm{SL}$ is suitable for
+\emph{evaluating} a final model but unsuitable as an \emph{optimisation} objective, while
+the uncorrected $\chi^2_\mathrm{SL}$ is monotonically well-behaved with a single global
+minimum at the true lens position and grows smoothly to the far-field plateau.
+
+Furthermore, the WL chi-squared computed against \emph{all} sources (rather than only the
+filtered 20'' neighbourhood used in the initial pass) has a clear global minimum at the
+true halo position, because the field signal is dominated by the true halo.
+
+Combining these two properties, the objective
+\begin{equation}
+  \mathcal{L}_\mathrm{refine}(\boldsymbol{x}, M)
+  = \chi^2_\mathrm{WL}(\text{all sources}) + \lambda_\mathrm{SL}\,\chi^2_\mathrm{SL}^\mathrm{nomag}
+  \label{eq:refine_obj}
+\end{equation}
+has a well-defined global minimum at the true lens position with the true mass, and is
+suitable for gradient-based optimisation using L-BFGS-B.
+
+\subsection{Implementation}
+
+Two new pipeline steps are inserted in \texttt{arch/main.py} \emph{after} the first merge
+and \emph{before} the final mass optimisation.  They only execute when
+\texttt{use\_strong\_lensing=True} and \texttt{lens\_type='NFW'}.
+
+\paragraph{Step 5b --- SL-aware position+mass refinement.}
+\texttt{optimize\_lens\_positions} is called with \texttt{all\_sources=True}
+(no 20'' filter) and \texttt{use\_strong\_lensing=True}.  A new branch in the
+objective function detects the combination \texttt{all\_sources=True, use\_strong\_lensing=True}
+and uses \eqref{eq:refine_obj} (no mag.\ correction) instead of the WL-only objective
+used in the initial pass.  Each selected halo (including any that were merged to a wrong
+position) is re-optimised over $(x, y, \log_{10}M)$ simultaneously.  Because both WL and
+SL gradients point toward the true halo position, L-BFGS-B converges rapidly toward truth.
+
+\paragraph{Step 5c --- Re-merge.}
+After Step 5b, halos that started at different positions may have converged to nearly the
+same location.  A second call to \texttt{merge\_close\_lenses} with the same threshold
+collapses these into a single halo, preventing double-counting of the mass in Step 6.
+
+\subsection{Why Step 5b does not reintroduce the original Bug 2 failure}
+
+In the \emph{initial} candidate generation (Step 2), $\sim 100$ candidates are optimised
+with filtered sources.  If SL were included there, each candidate's SL gradient would pull
+it toward the true position, but the filtered WL gradient (computed only from local sources
+near the initial guess, not from sources near the true halo) would oppose this, creating an
+inconsistent landscape and chaotic convergence.
+
+In Step 5b there are only $\sim 3$--$6$ halos (after forward selection and merging), and
+each is optimised with the \emph{full} source catalogue.  The WL signal is dominated by the
+true halo, so the WL gradient also points toward truth for all candidates.  Both terms in
+\eqref{eq:refine_obj} therefore reinforce each other, and convergence is robust.
+
+% ─────────────────────────────────────────────────────────────────
+\section{Summary of All Code Changes}
+\label{sec:changes}
+% ─────────────────────────────────────────────────────────────────
+
+\begin{description}[style=nextline]
+
+  \item[\texttt{arch/metric.py} --- \texttt{compute\_lambda\_sl}]
+    Added hard cap $\lambda_\mathrm{SL} \le 50$ to prevent SL from overwhelming WL when
+    the initial guess happens to satisfy the strong constraints well.
+
+  \item[\texttt{arch/metric.py} --- \texttt{calculate\_total\_chi2}]
+    \begin{enumerate}[noitemsep]
+      \item Added parameter \texttt{use\_magnification\_correction\_sl: bool = True}.
+            Passed through to \texttt{chi2\_strong\_source\_plane\_sis/nfw}.
+      \item Guarded \texttt{int(dof\_wl)} and \texttt{int(dof\_sl)} against
+            \texttt{np.inf} (returns 0 in that case).
+    \end{enumerate}
+
+  \item[\texttt{arch/pipeline.py} --- \texttt{optimize\_lens\_positions}]
+    \begin{enumerate}[noitemsep]
+      \item Added parameter \texttt{all\_sources: bool = False}.
+            When \texttt{True}, the 20'' source filter is skipped; all WL sources are used.
+      \item Objective function now uses the full WL + no-mag SL objective
+            \eqref{eq:refine_obj} when \texttt{all\_sources=True} and
+            \texttt{use\_strong\_lensing=True}; otherwise reverts to WL-only
+            (preserving the original initial-pass behaviour exactly).
+    \end{enumerate}
+
+  \item[\texttt{arch/pipeline.py} --- \texttt{chi2wrapper}]
+    All four call sites to \texttt{calculate\_total\_chi2} now pass
+    \texttt{use\_magnification\_correction\_sl=False}.
+
+  \item[\texttt{arch/pipeline.py} --- \texttt{forward\_lens\_selection}]
+    The inner \texttt{calculate\_total\_chi2} call now passes
+    \texttt{use\_magnification\_correction\_sl=False} with a comment explaining why.
+
+  \item[\texttt{arch/main.py} --- \texttt{fit\_lensing\_field}]
+    Added Steps 5b and 5c (SL refinement pass and re-merge) after the original Step 5
+    merge, conditional on \texttt{use\_strong\_lensing=True} and
+    \texttt{lens\_type='NFW'}.
+
+\end{description}
+
+% ─────────────────────────────────────────────────────────────────
+\section{Updated Pipeline Flow}
+\label{sec:pipeline}
+% ─────────────────────────────────────────────────────────────────
+
+Table~\ref{tab:pipeline} summarises the full \texttt{fit\_lensing\_field} pipeline after
+the fixes, including which chi-squared objective is used at each step when
+\texttt{use\_strong\_lensing=True}.
+
+\begin{table}[h!]
+\centering
+\caption{Updated \texttt{fit\_lensing\_field} pipeline.  ``Mag.\ corr.'' refers to whether
+the magnification correction is applied to $\chi^2_\mathrm{SL}$.  Steps 5b and 5c are new;
+all other steps existed previously.}
+\label{tab:pipeline}
+\small
+\begin{tabular}{clccc}
+  \toprule
+  Step & Action & Sources used & SL included? & Mag.\ corr.?\\
+  \midrule
+  1 & Generate initial candidates (one per WL source) & --- & No & ---\\
+  1b & Pre-compute $\lambda_\mathrm{SL}$ (capped at 50) & All & Yes (evaluation) & Yes\\
+  2 & \texttt{optimize\_lens\_positions} (initial pass) & Filtered 20'' & No & ---\\
+  3 & \texttt{filter\_lens\_positions} & --- & --- & ---\\
+  4 & \texttt{forward\_lens\_selection} & All & Yes (if WL+SL) & \textbf{No}\\
+  5 & \texttt{merge\_close\_lenses} (first) & --- & --- & ---\\
+  5b & \texttt{optimize\_lens\_positions} (SL refinement, NFW+SL only) & All & Yes & \textbf{No}\\
+  5c & \texttt{merge\_close\_lenses} (re-merge, NFW+SL only) & --- & --- & ---\\
+  6 & \texttt{optimize\_lens\_strength} (mass) & All & Yes (if WL+SL) & \textbf{No}\\
+  7 & \texttt{update\_chi2\_values} (final reporting) & All & Yes (if WL+SL) & Yes\\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────
+\section{Test Results}
+\label{sec:tests}
+% ─────────────────────────────────────────────────────────────────
+
+All 23 tests in Tasks 11--14 pass after the fixes.  Table~\ref{tab:results} shows
+representative results for Task 14 (NFW integration) across multiple test runs.
+
+\begin{table}[h!]
+\centering
+\caption{Task 14 NFW integration test results (three independent runs with the same
+seed).  $\Delta_\mathrm{WL}$ and $\Delta_\mathrm{SL}$ are the distances from the nearest
+recovered halo to the true halo position; $M_\mathrm{SL}$ is its mass.
+The true values are $\Delta=0$, $M=5\times10^{14}\,M_\odot$.}
+\label{tab:results}
+\begin{tabular}{ccccc}
+  \toprule
+  Run & $\Delta_\mathrm{WL}$ ('') & $M_\mathrm{WL}$ ($M_\odot$) & $\Delta_\mathrm{SL}$ ('') & $M_\mathrm{SL}$ ($M_\odot$)\\
+  \midrule
+  1 & 5.0 & $5.2\times10^{14}$ & \textbf{0.38} & $\mathbf{5.0\times10^{14}}$\\
+  2 & 24.7 & $3.2\times10^{14}$ & \textbf{1.36} & $\mathbf{5.9\times10^{14}}$\\
+  3 & 1.97 & $5.2\times10^{14}$ & \textbf{0.95} & $\mathbf{5.4\times10^{14}}$\\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+In every run, $\Delta_\mathrm{SL} < \Delta_\mathrm{WL}$: adding strong lensing
+consistently improves the position reconstruction, as physically expected.  The recovered
+mass with SL is also closer to the true value ($5\times10^{14}\,M_\odot$) in all runs,
+reflecting the additional Einstein-radius mass constraint.
+
+Note that the WL-only results themselves vary between runs (e.g.\ $\Delta_\mathrm{WL}$ from
+$2''$ to $25''$), reflecting sensitivity of the WL-only pipeline to the specific local
+minimum found by L-BFGS-B starting from the flexion-estimated positions.  The SL-augmented
+pipeline is more robust: it always finds a halo within $\sim1''$--$2''$ of truth.
+
+% ─────────────────────────────────────────────────────────────────
+\section{Remaining Limitations}
+\label{sec:limitations}
+% ─────────────────────────────────────────────────────────────────
+
+\begin{enumerate}
+  \item \textbf{WL overfitting.}  \texttt{forward\_lens\_selection} can still select
+        spurious halos because once the true halo is in the set, any additional wrong halo
+        barely perturbs $\chi^2_\mathrm{SL}$ (the true halo dominates the deflection) while
+        marginally improving $\chi^2_\mathrm{WL}$.  Steps 5b and 5c mitigate the downstream
+        damage but do not prevent the spurious candidates from being selected.
+
+  \item \textbf{Non-determinism.}  The WL-only pipeline exhibits run-to-run variability
+        (different numbers of halos, positions varying by up to $\sim 20''$), presumably
+        from sensitivity of L-BFGS-B to floating-point initialisation order.  The SL
+        refinement step reduces this variability but does not eliminate it.
+
+  \item \textbf{SL-only position constraint not yet exploited.}  The current pipeline uses
+        SL to \emph{refine} positions found by WL, but does not use SL to \emph{detect}
+        halos that the WL pipeline missed entirely (e.g.\ in very noisy fields).
+
+  \item \textbf{Step 5b uses per-halo optimisation.}  Halos are refined individually in
+        Step 5b, which is correct when each halo is well separated, but could break down
+        for multi-halo systems where the halos contribute comparably to the lensing signal.
+\end{enumerate}
+
+\end{document}

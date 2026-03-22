@@ -234,8 +234,13 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     if rchi2_sl <= 0:
         return 1.0
  
-    print(f"Pre-computed lambda_sl: {rchi2_wl:.3f} / {rchi2_sl:.3f} = {rchi2_wl / rchi2_sl:.3f}")
-    return float(rchi2_wl / rchi2_sl)
+    lambda_raw = rchi2_wl / rchi2_sl
+    lambda_max = 50.0  # cap: prevents SL from overwhelming WL when the initial
+                       # guess happens to satisfy SL well but WL poorly
+    result = min(lambda_raw, lambda_max)
+    cap_note = f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else ""
+    print(f"Pre-computed lambda_sl: {rchi2_wl:.3f} / {rchi2_sl:.3f} = {lambda_raw:.3f}{cap_note}")
+    return float(result)
  
  
 
@@ -246,6 +251,7 @@ def calculate_total_chi2(
     lens_type: str = "NFW",
     use_strong_lensing: bool = False,
     lambda_sl: float = None,
+    use_magnification_correction_sl: bool = True,
 ):
     """
     Total chi2 = chi2_WL + lambda_sl * chi2_SL  (SL implemented for SIS and NFW).
@@ -287,9 +293,15 @@ def calculate_total_chi2(
  
     if has_sl and use_strong_lensing:
         if lens_type == "SIS":
-            chi2_sl = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+            chi2_sl = utils.chi2_strong_source_plane_sis(
+                lenses, sources.strong_systems,
+                use_magnification_correction=use_magnification_correction_sl,
+            )
         elif lens_type == "NFW":
-            chi2_sl = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+            chi2_sl = utils.chi2_strong_source_plane_nfw(
+                lenses, sources.strong_systems,
+                use_magnification_correction=use_magnification_correction_sl,
+            )
         else:
             raise NotImplementedError(
                 f"Strong-lensing chi2 not implemented for lens_type='{lens_type}'."
@@ -310,13 +322,15 @@ def calculate_total_chi2(
         _lambda = 0.0
  
     chi2_total = float(chi2_wl) + _lambda * float(chi2_sl)
-    dof_total = int(dof_wl) + int(dof_sl)
+    _dof_wl_int = int(dof_wl) if np.isfinite(dof_wl) else 0
+    _dof_sl_int = int(dof_sl) if np.isfinite(dof_sl) else 0
+    dof_total = _dof_wl_int + _dof_sl_int
  
     components = {
         "chi2_wl": float(chi2_wl),
         "chi2_sl": float(chi2_sl),
-        "dof_wl": int(dof_wl),
-        "dof_sl": int(dof_sl),
+        "dof_wl": _dof_wl_int,
+        "dof_sl": _dof_sl_int,
         "lambda_sl": float(_lambda),
     }
     return chi2_total, dof_total, components

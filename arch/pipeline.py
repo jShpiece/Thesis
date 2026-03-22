@@ -132,10 +132,11 @@ def generate_initial_guess(sources, lens_type='SIS', z_l=0.5, z_s=0.8):
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
 def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
-                           use_strong_lensing: bool = False, lambda_sl: float = None):
+                           use_strong_lensing: bool = False, lambda_sl: float = None,
+                           all_sources: bool = False):
     """
     Optimizes lens positions via local minimization.
-    Currently only minimizes relative to sources within a certain distance of the lens.
+    By default minimizes relative to sources within 20 arcsec of the lens (NFW).
 
     Parameters:
         sources (Source): Source object containing source positions and lensing signals.
@@ -144,6 +145,8 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
         lens_type (str): Type of lens model ('SIS' or 'NFW').
         use_strong_lensing (bool): Whether to include strong lensing in the objective.
         lambda_sl (float or None): Pre-computed SL weight. If None, fallback is used.
+        all_sources (bool): If True, use all sources (no 20-arcsec filter). Use for
+            SL-aware refinement after forward selection. Default False.
 
     Returns:
         SIS_Lens or NFW_Lens: Lenses with optimized positions.
@@ -183,10 +186,13 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
                 (10, 17)  # Mass bounds in log10(M_sun)
             ]
 
-            # Minimize relative to sources only within a certain distance of the lens
-            filtered_sources = sources.copy()
-            distance = np.hypot(lenses.x[i] - sources.x, lenses.y[i] - sources.y)
-            filtered_sources.remove(np.where(distance > 20)[0])
+            # Select source subset: all sources (SL refinement pass) or within 20" (initial pass)
+            if all_sources:
+                opt_sources = sources
+            else:
+                opt_sources = sources.copy()
+                distance = np.hypot(lenses.x[i] - sources.x, lenses.y[i] - sources.y)
+                opt_sources.remove(np.where(distance > 20)[0])
 
             # Objective function to minimize
             def objective_function(params):
@@ -206,8 +212,17 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
                 # Update concentration based on mass
                 lens.calculate_concentration()
 
-                # Compute chi-squared for this lens and all sources
-                chi2 = metric.calculate_chi_squared(filtered_sources, lens, use_flags, lens_type='NFW')
+                # Compute chi-squared:
+            # - all_sources=False (initial pass): WL-only with filtered local sources
+            # - all_sources=True (refinement pass): WL + no-mag SL with all sources
+                if use_strong_lensing and lambda_sl is not None and all_sources:
+                    chi2, _, _ = metric.calculate_total_chi2(
+                        opt_sources, lens, use_flags, lens_type='NFW',
+                        use_strong_lensing=True, lambda_sl=lambda_sl,
+                        use_magnification_correction_sl=False,
+                    )
+                else:
+                    chi2 = metric.calculate_chi_squared(opt_sources, lens, use_flags, lens_type='NFW')
                 return chi2
 
             # Run the optimizer
@@ -406,9 +421,12 @@ def forward_lens_selection(
                 )
 
             # Compute chi-squared and reduced chi-squared (Include SL if applicable)
+            # No magnification correction: magnification-corrected chi2_SL is
+            # non-monotonic in distance from truth, which would bias selection.
             chi2, dof, _ = metric.calculate_total_chi2(
                 sources, test_lenses, use_flags, lens_type=lens_type,
-                use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
+                use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl,
+                use_magnification_correction_sl=False,
             )
             reduced_chi2 = chi2 / dof if dof > 0 else np.inf
             chi2_list.append(reduced_chi2)
@@ -626,6 +644,7 @@ def chi2wrapper(guess, params):
                 sources, lenses, use_flags, lens_type="SIS",
                 use_strong_lensing=use_strong_lensing,
                 lambda_sl=lambda_sl,
+                use_magnification_correction_sl=False,
             )
             return chi2_total
 
@@ -637,6 +656,7 @@ def chi2wrapper(guess, params):
                 sources, lenses, use_flags, lens_type="SIS",
                 use_strong_lensing=use_strong_lensing,
                 lambda_sl=lambda_sl,
+                use_magnification_correction_sl=False,
             )
             return np.abs(chi2_total / dof_total - 1) if dof_total > 0 else np.inf
 
@@ -656,6 +676,7 @@ def chi2wrapper(guess, params):
                 sources, lenses, use_flags, lens_type="NFW",
                 use_strong_lensing=use_strong_lensing,
                 lambda_sl=lambda_sl,
+                use_magnification_correction_sl=False,
             )
             return chi2_total
 
@@ -671,6 +692,7 @@ def chi2wrapper(guess, params):
                 sources, lenses, use_flags, lens_type="NFW",
                 use_strong_lensing=use_strong_lensing,
                 lambda_sl=lambda_sl,
+                use_magnification_correction_sl=False,
             )
             return chi2_total
 
@@ -684,6 +706,7 @@ def chi2wrapper(guess, params):
                 sources, lenses, use_flags, lens_type="NFW",
                 use_strong_lensing=use_strong_lensing,
                 lambda_sl=lambda_sl,
+                use_magnification_correction_sl=False,
             )
             return chi2_total
 

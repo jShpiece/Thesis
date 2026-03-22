@@ -807,7 +807,55 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6,
 # ────────────────────────────────────────────────────────
 #  NFW strong-lensing functions
 # ────────────────────────────────────────────────────────
- 
+
+def _nfw_radial_g(x):
+    """
+    Numerically stable g(x) = ln(x/2) + h(x) for the NFW deflection integral.
+
+    The direct formula g = ln(x/2) + h(x) suffers catastrophic cancellation
+    for x << 1, where both terms are O(ln(1/x)) with opposite signs.
+
+    For x < 1 we instead use the equivalent form:
+
+        g(x) = f(sqrt(1-x^2)) / (2*sqrt(1-x^2))
+        f(s)  = (s+1)*ln(1+s) + (s-1)*ln(1-s) - 2*s*ln(2)
+
+    which avoids the large cancellation and is accurate to ~15 significant
+    figures for all x in (0, 1).
+
+    For x > 1 the direct formula ln(x/2) + arctan(sqrt(x^2-1))/sqrt(x^2-1)
+    has no cancellation and is computed directly.
+
+    Limiting values: g(0) = 0, g(1) = 1 - ln(2) ≈ 0.307.
+    """
+    x = np.asarray(x, dtype=float)
+    g = np.empty_like(x)
+    ln2 = np.log(2.0)
+
+    m_lt1 = x < 1
+    m_eq1 = np.abs(x - 1) < 1e-8
+    m_gt1 = x > 1 + 1e-8
+
+    # x < 1: stable formula
+    xs = x[m_lt1]
+    xs_safe = np.where(xs < 1e-10, 1e-10, xs)  # avoid underflow in 1-x^2
+    s = np.sqrt(np.maximum(1.0 - xs_safe**2, 0.0))
+    s_safe = np.where(s < 1e-300, 1e-300, s)
+    one_minus_s = np.maximum(1.0 - s, 1e-300)
+    f_s = (s + 1) * np.log(1 + s) + (s - 1) * np.log(one_minus_s) - 2 * s * ln2
+    g[m_lt1] = f_s / (2 * s_safe)
+
+    # x ≈ 1: limit g(1) = 1 - ln(2)
+    g[m_eq1] = 1.0 - ln2
+
+    # x > 1: direct formula (no cancellation)
+    xg = x[m_gt1]
+    h_g = np.arctan(np.sqrt(xg**2 - 1)) / np.sqrt(xg**2 - 1)
+    g[m_gt1] = np.log(xg / 2.0) + h_g
+
+    return g
+
+
 def _nfw_radial_h(x):
     """
     Radial function h(x) for NFW profile (identical to radial_term_5 in
@@ -951,10 +999,10 @@ def calculate_deflection_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     # Dimensionless radius x = theta / theta_s
     x = r / theta_s[:, None]  # (N_halo, N_pts)
  
-    # Radial function g(x) = ln(x/2) + h(x)
+    # Radial function g(x) = ln(x/2) + h(x)  [stable at all x]
     h_x = _nfw_radial_h(x)
-    g_x = np.log(np.maximum(x, 1e-30) / 2.0) + h_x
- 
+    g_x = _nfw_radial_g(x)
+
     # Deflection magnitude per halo: 4 kappa_s theta_s g(x) / x
     x_safe = np.where(x < 1e-10, 1e-10, x)
     alpha_mag = 4.0 * kappa_s[:, None] * theta_s[:, None] * g_x / x_safe
@@ -1057,10 +1105,10 @@ def magnification_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
  
     x = r / theta_s[:, None]  # (N_halo, N_pts)
  
-    # h(x) and g(x)
+    # h(x) and g(x)  [stable at all x]
     h_x = _nfw_radial_h(x)
-    g_x = np.log(np.maximum(x, 1e-30) / 2.0) + h_x
- 
+    g_x = _nfw_radial_g(x)
+
     # Per-halo kappa and |gamma| at each point
     kappa_per_halo, gamma_per_halo = _nfw_kappa_and_gamma(
         kappa_s[:, None], x, h_x=h_x, g_x=g_x
