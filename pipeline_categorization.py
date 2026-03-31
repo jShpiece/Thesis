@@ -343,13 +343,13 @@ def main() -> None:
 
     # Axis labels/titles
     #ax.set_xlabel("Mass Representation  (Parametric  $\u2192$  Hybrid  $\u2192$  Field-based)")
-    ax.set_ylabel("Inference Strategy  (Iterative / Local  $\u2192$  Global)")
-    ax.set_title("Taxonomy of Cluster Lensing Reconstruction Pipelines")
+    ax.set_ylabel("Inference Strategy  (Iterative / Local  $\u2192$  Global)", fontsize=16)
+    ax.set_title("Taxonomy of Cluster Lensing Reconstruction Pipelines", fontsize=16, weight="bold", pad=20)
 
     # Category labels beneath x-axis
-    ax.text(-0.72, -1.18, "Parametric Reconstruction",  ha="center", va="top", fontsize=10)
-    ax.text( 0.00, -1.18, "Hybrid Reconstruction",      ha="center", va="top", fontsize=10)
-    ax.text( 0.72, -1.18, "Field-based Reconstruction", ha="center", va="top", fontsize=10)
+    ax.text(-0.72, -1.18, "Parametric Reconstruction",  ha="center", va="top", fontsize=14)
+    ax.text( 0.00, -1.18, "Hybrid Reconstruction",      ha="center", va="top", fontsize=14)
+    ax.text( 0.72, -1.18, "Field-based Reconstruction", ha="center", va="top", fontsize=14)
 
     # ----------------------------
     # Labeling (stable + thesis-friendly)
