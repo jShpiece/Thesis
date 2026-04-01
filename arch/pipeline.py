@@ -172,6 +172,18 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
             lenses.x[i], lenses.y[i], lenses.te[i] = result.x[0], result.x[1], result.x[2]
 
     elif lens_type == 'NFW':
+        # NOTE: Strong lensing is intentionally excluded from per-lens
+        # position optimization.  SL constrains the total enclosed mass
+        # within the Einstein radius — a property of the composite
+        # deflection field, not of any individual halo.  Applying it
+        # here would force every candidate to independently satisfy a
+        # global constraint, driving them all toward the SL images and
+        # destroying the positional diversity the pipeline needs.
+        #
+        # SL enters the objective at physically appropriate stages:
+        #   - forward_lens_selection (evaluates composite models)
+        #   - optimize_lens_strength (refines masses of the final set)
+
         for i in range(len(lenses.x)):
             # Initial guess: [x, y, log10(mass)] - optimize in log-space for mass
             initial_guess = [lenses.x[i], lenses.y[i], np.log10(lenses.mass[i])]
@@ -188,7 +200,7 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
             distance = np.hypot(lenses.x[i] - sources.x, lenses.y[i] - sources.y)
             filtered_sources.remove(np.where(distance > 20)[0])
 
-            # Objective function to minimize
+            # Objective function: WL-only (local shear + flexion signal)
             def objective_function(params):
                 xi, yi, log_mass = params
                 mass = 10 ** log_mass
@@ -216,7 +228,7 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
                 initial_guess,
                 method='L-BFGS-B',
                 bounds=bounds,
-                options={'maxiter': num_iterations, 'ftol': 1e-6}
+                options={'maxiter': int(num_iterations), 'ftol': 1e-6}
             )
             optimized_params = result.x
             lenses.x[i] = optimized_params[0]

@@ -310,13 +310,19 @@ def calculate_total_chi2(
         _lambda = 0.0
  
     chi2_total = float(chi2_wl) + _lambda * float(chi2_sl)
-    dof_total = int(dof_wl) + int(dof_sl)
+
+    # Guard against np.inf from calc_degrees_of_freedom (returned when
+    # num_source_params <= num_lens_params, e.g. very few sources near
+    # a candidate lens during per-lens optimization).
+    _dof_wl = int(dof_wl) if np.isfinite(dof_wl) else 0
+    _dof_sl = int(dof_sl) if np.isfinite(dof_sl) else 0
+    dof_total = _dof_wl + _dof_sl
  
     components = {
         "chi2_wl": float(chi2_wl),
         "chi2_sl": float(chi2_sl),
-        "dof_wl": int(dof_wl),
-        "dof_sl": int(dof_sl),
+        "dof_wl": _dof_wl,
+        "dof_sl": _dof_sl,
         "lambda_sl": float(_lambda),
     }
     return chi2_total, dof_total, components
