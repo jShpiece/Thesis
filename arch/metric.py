@@ -139,14 +139,25 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
 
 def calc_strong_dof(sources) -> int:
     """
-    Degrees of freedom contribution from strong-lensing source-plane scatter.
+    Degrees of freedom contribution from strong-lensing constraints.
 
-    For each multiply-imaged system i with N_i images:
-        data constraints = 2 * N_i   (x, y per image)
-        nuisance params  = 2         (beta_x, beta_y)
-        dof_i = 2 * (N_i - 1)
+    Two independent observables per multiply-imaged system:
 
-    Total dof_sl = 2 * sum_i (N_i - 1)
+    1. Source-plane scatter (positional):
+        For system i with N_i images:
+            data constraints = 2 * N_i   (x, y per image)
+            nuisance params  = 2         (beta_x, beta_y)
+            dof_scatter_i    = 2 * (N_i - 1)
+
+    2. Flux ratios (when flux data is available):
+        For system i with N_i images:
+            data constraints = N_i - 1   (ratios relative to reference)
+            nuisance params  = 0         (F_source cancels)
+            dof_flux_i       = N_i - 1
+
+    Total dof_sl = sum_i [ 2*(N_i - 1) + flux_dof_i ]
+
+    For a 2-image system: dof = 2 (position) + 1 (flux) = 3.
 
     Returns 0 if no strong systems exist.
 
@@ -164,14 +175,24 @@ def calc_strong_dof(sources) -> int:
         return 0
     if len(sources.strong_systems) == 0:
         return 0
-    return int(2 * sum((sys.n_images - 1) for sys in sources.strong_systems))
+
+    dof = 0
+    for sys in sources.strong_systems:
+        n = sys.n_images
+        # Positional scatter: always present
+        dof += 2 * (n - 1)
+        # Flux ratios: only if system has flux data
+        if getattr(sys, "has_flux", False):
+            dof += (n - 1)
+
+    return int(dof)
 
  
  
 def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     """
     Pre-compute the strong-lensing weight lambda_sl at the current
-    (typically initial) parameter values.
+    parameter values.
  
     This function is intended to be called **once** before an optimiser
     loop begins.  The returned scalar is then passed as a fixed constant
@@ -183,7 +204,20 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     contributions:
  
         lambda_sl = (chi2_WL / dof_WL) / (chi2_SL / dof_SL)
- 
+
+    NOTE ON NFW PIPELINE BEHAVIOR:
+
+    For NFW, lambda_sl is computed after forward selection (see main.py),
+    where the model typically has 1–4 halos.  If the WL-selected halo
+    positions are >~5" from the true SL system, the source-plane scatter
+    under the wrong model produces rchi2_SL >> 1, giving lambda ≈ 0.
+    This is physically correct: at fixed (wrong) positions, no mass
+    adjustment can fix the source-plane scatter, so SL should not drive
+    mass refinement.  The primary SL benefit in the current architecture
+    is positional — it enters during forward_lens_selection via the
+    dynamic fallback lambda (Path 2 in calculate_total_chi2), where
+    it demonstrably improves halo recovery by ~50–65%.
+
     If either dataset has zero degrees of freedom, zero chi-squared,
     or if strong lensing is absent, we return 1.0 (the proper-likelihood
     default, i.e. assume both likelihoods are correctly normalised).
@@ -193,7 +227,7 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     sources : Source
         Must carry ``strong_systems`` if SL is to contribute.
     lenses : SIS_Lens or NFW_Lens
-        Current (initial) lens model parameters.
+        Current lens model parameters.
     use_flags : list of bool
         [use_shear, use_flexion, use_g_flexion].
     lens_type : str
@@ -216,12 +250,17 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     if not has_sl:
         return 1.0  # no SL data — default to proper-likelihood weight
  
+    # Source-plane scatter
     if lens_type == "SIS":
-        chi2_sl = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+        chi2_scatter = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+        chi2_flux = utils.chi2_flux_sis(lenses, sources.strong_systems)
     elif lens_type == "NFW":
-        chi2_sl = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+        chi2_scatter = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+        chi2_flux = utils.chi2_flux_nfw(lenses, sources.strong_systems)
     else:
         return 1.0  # unknown lens type — fall back to proper-likelihood default
+
+    chi2_sl = chi2_scatter + chi2_flux
     dof_sl = calc_strong_dof(sources)
  
     # Guard against degenerate cases
@@ -249,6 +288,15 @@ def calculate_total_chi2(
 ):
     """
     Total chi2 = chi2_WL + lambda_sl * chi2_SL  (SL implemented for SIS and NFW).
+
+    The SL chi2 has two independent components:
+
+        chi2_SL = chi2_scatter + chi2_flux
+
+    where chi2_scatter is the source-plane positional scatter (existing)
+    and chi2_flux is the flux-ratio residual (new).  Both are weighted
+    by the same lambda_sl since they are both strong-lensing constraints.
+    Systems without flux data contribute chi2_flux = 0 (backward compat).
  
     The relative weight lambda_sl between weak and strong lensing can be
     supplied in three ways (in order of precedence):
@@ -271,12 +319,16 @@ def calculate_total_chi2(
     -------
     chi2_total : float
     dof_total  : int
-    components : dict with keys chi2_wl, chi2_sl, dof_wl, dof_sl, lambda_sl
+    components : dict
+        Keys: chi2_wl, chi2_sl, chi2_scatter, chi2_flux,
+              dof_wl, dof_sl, lambda_sl
     """
     # ── WL part (existing behavior) ──
     chi2_wl = calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
     dof_wl = calc_degrees_of_freedom(sources, lenses, use_flags)
  
+    chi2_scatter = 0.0
+    chi2_flux = 0.0
     chi2_sl = 0.0
     dof_sl = 0
  
@@ -286,14 +338,23 @@ def calculate_total_chi2(
               and len(sources.strong_systems) > 0)
  
     if has_sl and use_strong_lensing:
+        # Source-plane scatter (positional constraint)
         if lens_type == "SIS":
-            chi2_sl = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
         elif lens_type == "NFW":
-            chi2_sl = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
         else:
             raise NotImplementedError(
                 f"Strong-lensing chi2 not implemented for lens_type='{lens_type}'."
             )
+
+        # Flux ratios (mass constraint — only for systems with flux data)
+        if lens_type == "SIS":
+            chi2_flux = utils.chi2_flux_sis(lenses, sources.strong_systems)
+        elif lens_type == "NFW":
+            chi2_flux = utils.chi2_flux_nfw(lenses, sources.strong_systems)
+
+        chi2_sl = chi2_scatter + chi2_flux
         dof_sl = calc_strong_dof(sources)
  
     # ── Determine lambda ──
@@ -321,6 +382,8 @@ def calculate_total_chi2(
     components = {
         "chi2_wl": float(chi2_wl),
         "chi2_sl": float(chi2_sl),
+        "chi2_scatter": float(chi2_scatter),
+        "chi2_flux": float(chi2_flux),
         "dof_wl": _dof_wl,
         "dof_sl": _dof_sl,
         "lambda_sl": float(_lambda),

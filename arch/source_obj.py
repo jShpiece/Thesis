@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,13 +15,54 @@ class StrongLensingSystem:
     A single multiply-imaged source (one background galaxy / transient / knot family).
 
     All positions are in the same coordinate frame/units as Source.x/y (typically arcsec offsets).
+
+    Flux data (optional) enables flux-ratio constraints.  For a
+    gravitationally lensed source, surface brightness is conserved,
+    so the flux of each image is amplified by the magnification:
+
+        F_i = |μ_i| × F_source
+
+    The source flux cancels in the ratio:
+
+        R_ij = F_i / F_j = |μ_i| / |μ_j|
+
+    Image positions alone constrain one combination of (halo position,
+    mass) via the deflection field α.  Flux ratios constrain a second,
+    independent combination via the magnification μ = 1/|det(A)|, which
+    depends on convergence and shear (κ, γ) rather than α directly.
+    Together they break the position–mass degeneracy inherent in
+    source-plane scatter alone.
+
+    Attributes
+    ----------
+    system_id : str
+        Unique identifier for the strong lensing system.
+    theta_x, theta_y : ndarray
+        Image-plane positions (arcsec).
+    z_source : float
+        Redshift of the background source.
+    sigma_theta : float or ndarray
+        Positional uncertainty per image (arcsec).
+    flux : ndarray or None
+        Observed flux per image in arbitrary units.  Only ratios matter
+        (the source flux is unknown), so the units cancel.
+        None means no flux data — the system contributes only positional
+        constraints.
+    sigma_flux : float or ndarray
+        Flux uncertainty.  If scalar, treated as *fractional* uncertainty
+        (σ_F / F) applied uniformly to all images.  If array, treated as
+        *absolute* uncertainty per image (same units as ``flux``).
+    meta : dict
+        Additional metadata.
     """
-    system_id: str # Unique identifier for the strong lensing system
-    theta_x: np.ndarray # x-positions of the multiple images
-    theta_y: np.ndarray # y-positions of the multiple images
-    z_source: float # Redshift of the source
-    sigma_theta: float | np.ndarray = 0.1 # Positional uncertainty per image (scalar or per-image array)
-    meta: dict = field(default_factory=dict) # Additional metadata for the system
+    system_id: str
+    theta_x: np.ndarray
+    theta_y: np.ndarray
+    z_source: float
+    sigma_theta: float | np.ndarray = 0.1
+    flux: np.ndarray | None = None
+    sigma_flux: float | np.ndarray = 0.1
+    meta: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.theta_x = np.atleast_1d(self.theta_x).astype(float)
@@ -36,9 +76,73 @@ class StrongLensingSystem:
             if self.sigma_theta.shape not in ((), self.theta_x.shape):
                 raise ValueError("sigma_theta must be scalar or same shape as theta_x/theta_y.")
 
+        # ── Flux validation ──
+        if self.flux is not None:
+            self.flux = np.atleast_1d(self.flux).astype(float)
+            if self.flux.shape != self.theta_x.shape:
+                raise ValueError("flux must have the same shape as theta_x/theta_y.")
+            if np.any(self.flux <= 0):
+                raise ValueError("All flux values must be positive.")
+            if isinstance(self.sigma_flux, np.ndarray):
+                self.sigma_flux = np.atleast_1d(self.sigma_flux).astype(float)
+                if self.sigma_flux.shape != self.flux.shape:
+                    raise ValueError("sigma_flux array must have the same shape as flux.")
+
     @property
     def n_images(self) -> int:
         return int(self.theta_x.size)
+
+    @property
+    def has_flux(self) -> bool:
+        """True if observed flux data is available for this system."""
+        return self.flux is not None
+
+    @property
+    def ref_image(self) -> int:
+        """Index of the reference (brightest) image for flux ratios."""
+        if self.flux is None:
+            return 0
+        return int(np.argmax(self.flux))
+
+    @property
+    def flux_ratios(self) -> Tuple[np.ndarray, np.ndarray] | None:
+        """
+        Observed flux ratios relative to the brightest image.
+
+        Returns None if no flux data.
+
+        Returns
+        -------
+        R_obs : ndarray, shape (n_images,)
+            R_i = F_i / F_ref.  R[ref] = 1.0.
+        sigma_R : ndarray, shape (n_images,)
+            Uncertainty on each ratio, propagated from flux uncertainties.
+            σ_R / R = sqrt((σ_i/F_i)² + (σ_ref/F_ref)²).
+            sigma_R[ref] = 0.0 (the reference is exact by definition).
+        """
+        if self.flux is None:
+            return None
+
+        ref = self.ref_image
+        F = self.flux
+        F_ref = F[ref]
+
+        R_obs = F / F_ref
+
+        # Propagate flux uncertainties to ratio uncertainties
+        if isinstance(self.sigma_flux, np.ndarray):
+            # Absolute uncertainties
+            frac_i = self.sigma_flux / np.maximum(F, 1e-30)
+            frac_ref = self.sigma_flux[ref] / max(F_ref, 1e-30)
+        else:
+            # Scalar fractional uncertainty applied to all images
+            frac_i = np.full_like(F, float(self.sigma_flux))
+            frac_ref = float(self.sigma_flux)
+
+        sigma_R = R_obs * np.sqrt(frac_i**2 + frac_ref**2)
+        sigma_R[ref] = 0.0  # reference is exact
+
+        return R_obs, sigma_R
 
     def iter_images(self) -> Iterator[Tuple[float, float, float]]:
         """
@@ -110,6 +214,8 @@ class Source:
                 theta_y=s.theta_y.copy(),
                 z_source=float(s.z_source),
                 sigma_theta=s.sigma_theta.copy() if isinstance(s.sigma_theta, np.ndarray) else float(s.sigma_theta),
+                flux=s.flux.copy() if s.flux is not None else None,
+                sigma_flux=s.sigma_flux.copy() if isinstance(s.sigma_flux, np.ndarray) else float(s.sigma_flux),
                 meta=dict(s.meta),
             )
             for s in self.strong_systems

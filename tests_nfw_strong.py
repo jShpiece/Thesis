@@ -223,6 +223,9 @@ def make_nfw_strong_system(
     z_source: float = 2.0,
     sigma_theta: float = 0.05,
     theta_range: tuple[float, float] | None = None,
+    include_flux: bool = True,
+    sigma_flux_frac: float = 0.05,
+    flux_noise_seed: int | None = None,
 ) -> source_obj.StrongLensingSystem:
     """
     Construct a multiply-imaged strong-lensing system for an NFW halo
@@ -231,6 +234,16 @@ def make_nfw_strong_system(
     The source is placed at radial offset `beta_offset` (arcsec) from
     the halo centre along the x-axis.  All images along this axis are
     found via root-finding.
+
+    Optionally generates synthetic flux data from the true magnification
+    at each image position:
+
+        F_i = |mu_i| * F_source
+
+    where F_source is an arbitrary constant (set to 1.0; only ratios
+    matter).  This provides the second constraint needed to break the
+    position-mass degeneracy: image separation constrains alpha_1 - alpha_2,
+    while the flux ratio constrains |mu_1| / |mu_2|.
 
     Parameters
     ----------
@@ -247,6 +260,17 @@ def make_nfw_strong_system(
         Positional uncertainty per image (arcsec).
     theta_range : tuple or None
         Search range for image finding.  None → auto from halo params.
+    include_flux : bool
+        If True (default), compute synthetic flux from true magnifications.
+        If False, create a position-only system (backward compatible).
+    sigma_flux_frac : float
+        Fractional flux uncertainty per image (default 5%).
+        sigma_flux_i = sigma_flux_frac * F_true_i.
+        Typical HST photometry: 3-10%.
+    flux_noise_seed : int or None
+        If not None, add Gaussian noise to the flux values using this
+        seed.  If None, flux is noiseless (F_i = |mu_i| exactly),
+        suitable for perfect-model unit tests where chi2_flux should be 0.
 
     Returns
     -------
@@ -282,12 +306,54 @@ def make_nfw_strong_system(
             f"Image finder may have found spurious roots."
         )
 
+    # ── Synthetic flux from true magnifications ──
+    flux = None
+    sigma_flux = None
+    flux_meta = {}
+
+    if include_flux:
+        # Compute true magnification at each image position
+        abs_mu, det_A = utils.magnification_nfw(halo, theta_x, theta_y, z_source)
+
+        # Flux = |mu| * F_source (F_source = 1 in arbitrary units)
+        F_source = 1.0
+        flux_true = abs_mu * F_source
+
+        # Measurement uncertainty: fractional
+        sigma_flux = sigma_flux_frac * flux_true
+
+        # Optionally add noise
+        if flux_noise_seed is not None:
+            rng = np.random.default_rng(flux_noise_seed)
+            flux = flux_true + rng.normal(0, sigma_flux)
+            # Ensure flux stays positive (re-draw if necessary)
+            for attempt in range(10):
+                neg = flux <= 0
+                if not np.any(neg):
+                    break
+                flux[neg] = flux_true[neg] + rng.normal(0, sigma_flux[neg])
+            # Last resort: clip to a small positive value
+            flux = np.maximum(flux, 0.01 * flux_true)
+        else:
+            flux = flux_true.copy()
+
+        flux_meta = {
+            "flux_true": flux_true.copy(),
+            "abs_mu_true": abs_mu.copy(),
+            "det_A_true": det_A.copy(),
+            "sigma_flux_frac": sigma_flux_frac,
+            "flux_noise_seed": flux_noise_seed,
+            "flux_ratio_true": abs_mu / abs_mu[np.argmax(abs_mu)],
+        }
+
     return source_obj.StrongLensingSystem(
         system_id=system_id,
         theta_x=theta_x,
         theta_y=theta_y,
         z_source=float(z_source),
         sigma_theta=float(sigma_theta),
+        flux=flux,
+        sigma_flux=sigma_flux,
         meta={
             "toy": True,
             "lens_center": (x0, y0),
@@ -297,6 +363,7 @@ def make_nfw_strong_system(
             "n_images_found": len(images),
             "image_radii": [abs(img) for img in images],
             "source_plane_spread": float(spread),
+            **flux_meta,
         },
     )
 
@@ -730,10 +797,12 @@ def _test_nfw_compute_lambda_sl(R: _TestResults):
 
     lam = metric.compute_lambda_sl(src, halo_init, use_flags, lens_type='NFW')
 
-    # Manual calculation
+    # Manual calculation (must include both scatter and flux to match compute_lambda_sl)
     chi2_wl = metric.calculate_chi_squared(src, halo_init, use_flags, lens_type='NFW')
     dof_wl = metric.calc_degrees_of_freedom(src, halo_init, use_flags)
-    chi2_sl = utils.chi2_strong_source_plane_nfw(halo_init, src.strong_systems)
+    chi2_scatter = utils.chi2_strong_source_plane_nfw(halo_init, src.strong_systems)
+    chi2_flux = utils.chi2_flux_nfw(halo_init, src.strong_systems)
+    chi2_sl = chi2_scatter + chi2_flux
     dof_sl = metric.calc_strong_dof(src)
 
     expected = (chi2_wl / dof_wl) / (chi2_sl / dof_sl) if (chi2_sl > 0 and dof_sl > 0) else 1.0
@@ -937,6 +1006,122 @@ def _test_nfw_full_toy_geometry(R: _TestResults):
 
     ok_all = ok_finite_true and ok_wrong_larger and ok_sum and ok_meta
     R.record("13-G  Full NFW toy geometry", ok_all)
+
+
+# ── 13-H  Flux-ratio chi2 ────────────────────────────────────────────────
+
+def _test_nfw_flux_ratio_chi2(R: _TestResults):
+    """
+    Unit tests for chi2_flux_nfw: the flux-ratio constraint that breaks
+    the position-mass degeneracy.
+
+    Sub-tests:
+      1. Perfect model (noiseless flux, true halo) → chi2_flux = 0
+      2. Perturbed position → chi2_flux > 0
+      3. Wrong mass at correct position → chi2_flux > 0  (mass sensitivity)
+      4. Hand computation matches function output
+      5. Breakdown metadata correct
+      6. No-flux system → chi2_flux = 0  (backward compatibility)
+    """
+    R.header("13-H  Flux-ratio chi2")
+
+    # Build a strong system WITH flux (default: include_flux=True, noiseless)
+    halo_true = make_nfw_halo(x=5.0, y=-3.0, mass=1e15, concentration=8.0, redshift=0.3)
+    z_source = 2.0
+
+    sys_flux = make_nfw_strong_system(
+        system_id="flux_test",
+        halo=halo_true,
+        beta_offset=1.0,
+        z_source=z_source,
+        sigma_theta=0.04,
+        include_flux=True,
+        flux_noise_seed=None,  # noiseless
+    )
+
+    # Verify flux was generated
+    ok_has_flux = sys_flux.has_flux
+    print(f"  has_flux: {'OK' if ok_has_flux else 'FAIL'}")
+    print(f"  flux = {sys_flux.flux}")
+    print(f"  sigma_flux = {sys_flux.sigma_flux}")
+    print(f"  true magnifications = {sys_flux.meta.get('abs_mu_true', 'N/A')}")
+
+    # ── Sub-test 1: Perfect model → chi2_flux = 0 ──
+    chi2_perf = utils.chi2_flux_nfw(halo_true, [sys_flux])
+    ok_zero = np.isclose(chi2_perf, 0.0, atol=1e-10)
+    print(f"  Perfect model: chi2_flux = {chi2_perf:.6e}  "
+          f"{'OK' if ok_zero else 'FAIL'}")
+
+    # ── Sub-test 2: Perturbed position → chi2_flux > 0 ──
+    halo_shift = make_nfw_halo(x=8.0, y=-3.0, mass=1e15, concentration=8.0, redshift=0.3)
+    chi2_shift = utils.chi2_flux_nfw(halo_shift, [sys_flux])
+    ok_shift = chi2_shift > 0
+    print(f"  Shifted position: chi2_flux = {chi2_shift:.4f}  "
+          f"{'OK' if ok_shift else 'FAIL'}")
+
+    # ── Sub-test 3: Wrong mass at correct position → chi2_flux > 0 ──
+    # This is the KEY test: source-plane scatter cannot detect mass errors
+    # at the correct position (the images still converge to the same beta),
+    # but flux ratios CAN because mu depends on kappa and gamma.
+    halo_wrong_mass = make_nfw_halo(x=5.0, y=-3.0, mass=5e14, concentration=8.0, redshift=0.3)
+    chi2_mass = utils.chi2_flux_nfw(halo_wrong_mass, [sys_flux])
+
+    # Also compute source-plane scatter at the same wrong-mass halo
+    chi2_scatter_mass = utils.chi2_strong_source_plane_nfw(halo_wrong_mass, [sys_flux])
+
+    ok_mass = chi2_mass > 0
+    print(f"  Wrong mass (correct pos): chi2_flux = {chi2_mass:.4f}  "
+          f"chi2_scatter = {chi2_scatter_mass:.4f}  "
+          f"{'OK' if ok_mass else 'FAIL'}")
+    print(f"    → flux is mass-sensitive: {'YES' if ok_mass else 'NO'}")
+
+    # ── Sub-test 4: Hand computation matches function ──
+    chi2_bd, bd = utils.chi2_flux_nfw(halo_shift, [sys_flux], return_breakdown=True)
+    sid = "flux_test"
+    info = bd[sid]
+
+    # Recompute by hand from breakdown data
+    R_obs, sigma_R, ref_idx = sys_flux.flux_ratios()
+    R_model = info["R_model"]
+    mask = np.arange(sys_flux.n_images) != ref_idx
+    chi2_hand = float(np.sum(((R_obs[mask] - R_model[mask]) / sigma_R[mask])**2))
+    ok_hand = np.isclose(chi2_bd, chi2_hand, rtol=1e-10)
+    print(f"  Hand chi2 = {chi2_hand:.4f}  function = {chi2_bd:.4f}  "
+          f"{'OK' if ok_hand else 'FAIL'}")
+
+    # ── Sub-test 5: Breakdown metadata correct ──
+    expected_keys = {"chi2", "n_images", "ref_index",
+                     "R_obs", "R_model", "sigma_R", "abs_mu", "det_A"}
+    ok_keys = expected_keys.issubset(info.keys())
+    ok_n = info["n_images"] == sys_flux.n_images
+    ok_shapes = (info["R_obs"].shape == (sys_flux.n_images,)
+                 and info["R_model"].shape == (sys_flux.n_images,)
+                 and info["abs_mu"].shape == (sys_flux.n_images,))
+    # For perfect model, R_obs == R_model (check at true halo)
+    _, bd_perf = utils.chi2_flux_nfw(halo_true, [sys_flux], return_breakdown=True)
+    R_match = np.allclose(bd_perf[sid]["R_obs"], bd_perf[sid]["R_model"], rtol=1e-8)
+    ok_meta = ok_keys and ok_n and ok_shapes and R_match
+    print(f"  Breakdown: keys={'OK' if ok_keys else 'MISS'}  n_images={'OK' if ok_n else 'BAD'}  "
+          f"shapes={'OK' if ok_shapes else 'BAD'}  R_match@truth={'OK' if R_match else 'FAIL'}")
+
+    # ── Sub-test 6: No-flux system → chi2_flux = 0 ──
+    sys_noflux = make_nfw_strong_system(
+        system_id="no_flux",
+        halo=halo_true,
+        beta_offset=1.0,
+        z_source=z_source,
+        sigma_theta=0.04,
+        include_flux=False,
+    )
+    ok_noflux_attr = not sys_noflux.has_flux
+    chi2_noflux = utils.chi2_flux_nfw(halo_true, [sys_noflux])
+    ok_noflux = chi2_noflux == 0.0 and ok_noflux_attr
+    print(f"  No-flux system: has_flux={sys_noflux.has_flux}  chi2={chi2_noflux}  "
+          f"{'OK' if ok_noflux else 'FAIL'}")
+
+    ok_all = (ok_has_flux and ok_zero and ok_shift and ok_mass
+              and ok_hand and ok_meta and ok_noflux)
+    R.record("13-H  Flux-ratio chi2", ok_all)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1271,6 +1456,7 @@ def run_nfw_unit_tests() -> bool:
     _test_nfw_compute_lambda_sl(R)
     _test_nfw_total_chi2(R)
     _test_nfw_full_toy_geometry(R)
+    _test_nfw_flux_ratio_chi2(R)
     return R.summary()
 
 
@@ -1304,8 +1490,7 @@ def run_nfw_integration_tests() -> bool:
 
 def run_all_nfw_tests() -> bool:
     """Run Task 13 + Task 14 tests.  Returns True if everything passes."""
-    # ok_13 = run_nfw_unit_tests()
-    ok_13 = True  # Unit tests have passed in development; skip for now to save time
+    ok_13 = run_nfw_unit_tests()
     ok_14 = run_nfw_integration_tests()
     if ok_13 and ok_14:
         print("\n  ✓ ALL TASK 13 + TASK 14 (NFW) TESTS PASSED\n")
