@@ -177,12 +177,12 @@ def calc_strong_dof(sources) -> int:
         return 0
 
     dof = 0
-    for sys in sources.strong_systems:
-        n = sys.n_images
+    for sls in sources.strong_systems:
+        n = sls.n_images
         # Positional scatter: always present
         dof += 2 * (n - 1)
         # Flux ratios: only if system has flux data
-        if getattr(sys, "has_flux", False):
+        if getattr(sls, "has_flux", False):
             dof += (n - 1)
 
     return int(dof)

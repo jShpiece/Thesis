@@ -410,6 +410,9 @@ def run_single_realization(
                 beta_offset=0.8,
                 z_source=z_source_sl,
                 sigma_theta=0.04,
+                include_flux=True,
+                sigma_flux_frac=0.05,
+                flux_noise_seed=seed * 10 + i,  # unique per halo, deterministic
             )
             systems.append(sys_i)
         except ValueError:
@@ -627,21 +630,49 @@ def run_monte_carlo(
         # Paired comparison (same realization, same halo)
         paired_wl = []
         paired_sl = []
+        paired_mass_ratio_wl = []
+        paired_mass_ratio_sl = []
         for r in results:
             if r.ok_wl and r.ok_sl:
-                for dw, ds in zip(r.delta_wl, r.delta_sl):
+                for dw, ds, mt, mw, ms in zip(
+                    r.delta_wl, r.delta_sl,
+                    r.true_mass, r.mass_rec_wl, r.mass_rec_sl,
+                ):
                     if np.isfinite(dw) and np.isfinite(ds):
                         paired_wl.append(dw)
                         paired_sl.append(ds)
+                        if mt > 0 and np.isfinite(mw) and np.isfinite(ms):
+                            paired_mass_ratio_wl.append(mw / mt)
+                            paired_mass_ratio_sl.append(ms / mt)
         paired_wl = np.array(paired_wl)
         paired_sl = np.array(paired_sl)
         if len(paired_wl) > 0:
-            improved = np.sum(paired_sl < paired_wl)
-            print(f"\n  Paired comparison ({len(paired_wl)} halo-pairs):")
-            print(f"    SL improved: {improved}/{len(paired_wl)} "
-                  f"({100*improved/len(paired_wl):.0f}%)")
-            print(f"    Median improvement: "
+            improved_pos = np.sum(paired_sl < paired_wl)
+            print(f"\n  Paired positional comparison ({len(paired_wl)} halo-pairs):")
+            print(f"    SL improved position: {improved_pos}/{len(paired_wl)} "
+                  f"({100*improved_pos/len(paired_wl):.0f}%)")
+            print(f"    Median Δ improvement: "
                   f"{np.median(paired_wl - paired_sl):.1f}\"")
+
+        paired_mass_ratio_wl = np.array(paired_mass_ratio_wl)
+        paired_mass_ratio_sl = np.array(paired_mass_ratio_sl)
+        if len(paired_mass_ratio_wl) > 0:
+            # Mass accuracy: |log10(M_rec/M_true)| — 0 = perfect
+            log_err_wl = np.abs(np.log10(np.maximum(paired_mass_ratio_wl, 1e-10)))
+            log_err_sl = np.abs(np.log10(np.maximum(paired_mass_ratio_sl, 1e-10)))
+            improved_mass = np.sum(log_err_sl < log_err_wl)
+            print(f"\n  Mass recovery (M_rec / M_true):")
+            print(f"    WL:    median={np.median(paired_mass_ratio_wl):.2f}  "
+                  f"mean={np.mean(paired_mass_ratio_wl):.2f}  "
+                  f"std={np.std(paired_mass_ratio_wl):.2f}")
+            print(f"    WL+SL: median={np.median(paired_mass_ratio_sl):.2f}  "
+                  f"mean={np.mean(paired_mass_ratio_sl):.2f}  "
+                  f"std={np.std(paired_mass_ratio_sl):.2f}")
+            print(f"    SL improved mass: {improved_mass}/{len(log_err_wl)} "
+                  f"({100*improved_mass/len(log_err_wl):.0f}%)")
+            print(f"    Median |log10(M_rec/M_true)| : "
+                  f"WL={np.median(log_err_wl):.3f}  "
+                  f"WL+SL={np.median(log_err_sl):.3f}")
 
     # ── Summary figure ──
     fig = _plot_mc_summary(

@@ -710,11 +710,14 @@ def _test_nfw_chi2_perturbed(R: _TestResults):
     halo_pert = make_nfw_halo(x=1.5, y=-0.8, mass=0.95e15, concentration=8.0, redshift=0.3)
 
     # ── Sub-test 1: chi2 > 0 ──
+    # delta_n=0 isolates magnification correction from profile uncertainty
     chi2_corr, bd_corr = utils.chi2_strong_source_plane_nfw(
-        halo_pert, [sys], return_breakdown=True, use_magnification_correction=True
+        halo_pert, [sys], return_breakdown=True,
+        use_magnification_correction=True, delta_n=0,
     )
     chi2_uncorr, bd_uncorr = utils.chi2_strong_source_plane_nfw(
-        halo_pert, [sys], return_breakdown=True, use_magnification_correction=False
+        halo_pert, [sys], return_breakdown=True,
+        use_magnification_correction=False, delta_n=0,
     )
     ok_nonzero = chi2_corr > 0 and chi2_uncorr > 0
     print(f"  chi2_corr   = {chi2_corr:.4f}  chi2_uncorr = {chi2_uncorr:.4f}  "
@@ -1081,7 +1084,13 @@ def _test_nfw_flux_ratio_chi2(R: _TestResults):
     info = bd[sid]
 
     # Recompute by hand from breakdown data
-    R_obs, sigma_R, ref_idx = sys_flux.flux_ratios()
+    F = sys_flux.flux
+    ref_idx = int(np.argmax(F))
+    R_obs = F / F[ref_idx]
+    frac_i = sys_flux.sigma_flux / np.maximum(F, 1e-30)
+    frac_ref = sys_flux.sigma_flux[ref_idx] / max(F[ref_idx], 1e-30)
+    sigma_R = R_obs * np.sqrt(frac_i**2 + frac_ref**2)
+    sigma_R[ref_idx] = 0.0
     R_model = info["R_model"]
     mask = np.arange(sys_flux.n_images) != ref_idx
     chi2_hand = float(np.sum(((R_obs[mask] - R_model[mask]) / sigma_R[mask])**2))
