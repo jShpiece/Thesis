@@ -82,11 +82,16 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None, lens_type='SIS
 
     # Step 4: Select optimal lens set
     #
-    # For NFW, lambda_sl is still None here.  forward_selection calls
-    # calculate_total_chi2, which falls back to a dynamic lambda at the
-    # current parameters.  With ~40 filtered lenses the fallback lambda
-    # is tiny (~0.002), so selection is effectively WL-driven — which
-    # is physically correct: WL locates substructure, SL calibrates mass.
+    # For NFW, lambda_sl is still None here.  Forward selection is driven
+    # purely by WL: shear and flexion identify WHERE substructure is.
+    # SL's role is to calibrate HOW MUCH MASS via strength optimization.
+    #
+    # Computing lambda at the filtered model (~45 lenses) and injecting
+    # it here was tested and found to hurt both position and mass recovery
+    # (MC: 23% mass improvement vs 70% with post-selection lambda).
+    # The composite deflection field of ~45 random candidates has no
+    # physical relationship to the multiply-imaged system, so the SL
+    # prediction is noise that corrupts the selection.
     lenses, _ = pipeline.forward_lens_selection(
         sources, lenses, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
@@ -100,9 +105,10 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None, lens_type='SIS
     # ── Deferred lambda_sl for NFW (and any future lens types) ──
     #
     # Now that forward selection has identified a physically plausible
-    # model (1–4 halos that explain the WL data), the reduced-χ²
-    # ratio is meaningful: rχ²_WL reflects measurement noise, not
-    # gross model error.  This lambda is frozen for Steps 5–6.
+    # model (1–4 halos that explain the WL data), the reduced-chi2
+    # ratio is meaningful.  This lambda is frozen for Steps 5–6
+    # (merge + strength optimization), where SL constrains mass
+    # via flux ratios and source-plane scatter.
     if use_strong_lensing and lambda_sl is None:
         lambda_sl = metric.compute_lambda_sl(sources, lenses, use_flags, lens_type)
         if flags:

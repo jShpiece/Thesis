@@ -520,7 +520,14 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS',
         lenses.te = best_params
 
     elif lens_type == 'NFW':
-        # Optimize mass for each lens individually
+        # Per-halo mass optimization.  Each halo's mass is optimized
+        # independently via minimize_scalar over log10(M).
+        #
+        # When use_strong_lensing=True, the SL term (source-plane scatter
+        # + flux ratios, weighted by lambda_sl) enters through the opts
+        # dict → chi2wrapper → calculate_total_chi2.  This is the same
+        # code path as WL-only, ensuring any improvement from SL is
+        # attributable to the data, not to a different optimizer.
         for i in range(len(lenses.x)):
             guess = [np.log10(lenses.mass[i])]
             params = [
@@ -530,7 +537,6 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS',
             ]
 
             chi2_fn = lambda x: chi2wrapper(x, params)
-            # Robust 1-D bounded search over log10(M)
             res = minimize_scalar(
                 chi2_fn,
                 bounds=(10.0, 17.0),
@@ -672,11 +678,33 @@ def chi2wrapper(guess, params):
             return chi2_total
 
         elif constraint_type == 'constrained':
-            # params: [x, y, z_lens, concentration, sources, use_flags]
+            # Original per-halo path: scalar x, y, concentration, scalar guess
+            # This is the validated WL code path — do not modify.
             xl, yl, z_lens, concentration, sources, use_flags = tail[0], tail[1], tail[2], tail[3], tail[4], tail[5]
             lenses = halo_obj.NFW_Lens(
                 xl, yl, np.zeros_like(xl),
                 concentration, 10 ** guess, z_lens, np.empty_like(np.atleast_1d(xl))
+            )
+            lenses.calculate_concentration()
+            chi2_total, _, _ = metric.calculate_total_chi2(
+                sources, lenses, use_flags, lens_type="NFW",
+                use_strong_lensing=use_strong_lensing,
+                lambda_sl=lambda_sl,
+            )
+            return chi2_total
+
+        elif constraint_type == 'constrained_joint':
+            # Joint mass optimization for WL+SL: array x, y, concentration
+            # guess = [log10(M_1), ..., log10(M_N)]
+            xl, yl, z_lens, concentration, sources, use_flags = tail[0], tail[1], tail[2], tail[3], tail[4], tail[5]
+            log_masses = np.atleast_1d(guess)
+            xl = np.atleast_1d(xl)
+            yl = np.atleast_1d(yl)
+            concentration = np.atleast_1d(concentration)
+            lenses = halo_obj.NFW_Lens(
+                xl, yl, np.zeros_like(xl),
+                concentration, 10.0 ** log_masses, z_lens,
+                np.zeros_like(xl),
             )
             lenses.calculate_concentration()
             chi2_total, _, _ = metric.calculate_total_chi2(

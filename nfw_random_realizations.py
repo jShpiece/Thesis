@@ -304,6 +304,8 @@ class RealizationResult:
     true_x: np.ndarray
     true_y: np.ndarray
     true_mass: np.ndarray
+    true_concentration: np.ndarray
+    n_sl_systems: int          # how many SL systems were created (0 if subcritical)
     # WL-only
     n_rec_wl: int
     delta_wl: np.ndarray       # per-true-halo offset (arcsec)
@@ -325,6 +327,15 @@ class RealizationResult:
 def _draw_random_cluster(rng, n_halos=1, z_lens=0.3):
     """
     Draw a random cluster configuration.
+
+    Concentrations are drawn from the Duffy et al. (2008) mass-concentration
+    relation with log-normal intrinsic scatter (sigma_ln_c ~ 0.25).
+    This matches the pipeline's internal M-c relation, so the initial
+    guess starts close to truth — the validated WL regime.
+
+    Halos that scatter to high concentration (c > ~5) will be supercritical
+    and produce strong lensing.  This is physically correct: real SL clusters
+    are concentration outliers.
 
     Parameters
     ----------
@@ -350,12 +361,16 @@ def _draw_random_cluster(rng, n_halos=1, z_lens=0.3):
 
     # Masses: primary 5e14–2e15, secondary 2e14–8e14
     mass = np.zeros(n_halos)
-    mass[0] = 10 ** rng.uniform(14.7, 15.3)  # ~5e14 to 2e15
+    mass[0] = 10 ** rng.uniform(14.7, 15.3)
     if n_halos > 1:
-        mass[1] = 10 ** rng.uniform(14.3, 14.9)  # ~2e14 to 8e14
+        mass[1] = 10 ** rng.uniform(14.3, 14.9)
 
-    # Concentration: fixed at 8 (supercritical regime)
-    concentration = np.full(n_halos, 8.0)
+    # Concentration from Duffy et al. (2008) with log-normal scatter
+    # c_Duffy = 5.71 * (M / 2e12)^(-0.084) * (1+z)^(-0.47)
+    sigma_ln_c = 0.25   # intrinsic scatter in ln(c)
+    c_mean = 5.71 * (mass / 2e12) ** (-0.084) * (1 + z_lens) ** (-0.47)
+    concentration = c_mean * np.exp(rng.normal(0, sigma_ln_c, size=n_halos))
+    concentration = np.maximum(concentration, 1.0)  # floor at c=1
 
     return x, y, mass, concentration
 
@@ -376,7 +391,7 @@ def run_single_realization(
     run both pipelines, collect results.
     """
     if use_flags is None:
-        use_flags = [True, True, False]
+        use_flags = [True, True, True]  # shear + flexion + g-flexion
 
     rng = np.random.default_rng(seed)
 
@@ -470,13 +485,15 @@ def run_single_realization(
 
     if verbose:
         for i in range(n_halos):
-            print(f"  Seed {seed}, halo {i}: "
+            print(f"  Seed {seed}, halo {i}: c={tc[i]:.2f}  SL={'yes' if len(systems) > i else 'no'}  "
                   f"Δ_WL={delta_wl[i]:.1f}\" Δ_SL={delta_sl[i]:.1f}\" "
                   f"M_true={tmass[i]:.1e} M_WL={mass_wl[i]:.1e} M_SL={mass_sl[i]:.1e}")
 
     return RealizationResult(
         seed=seed, n_true_halos=n_halos,
         true_x=tx, true_y=ty, true_mass=tmass,
+        true_concentration=tc,
+        n_sl_systems=len(systems),
         n_rec_wl=len(lenses_wl.x), delta_wl=delta_wl, mass_rec_wl=mass_wl, rchi2_wl=rchi2_wl,
         n_rec_sl=len(lenses_sl.x), delta_sl=delta_sl, mass_rec_sl=mass_sl, rchi2_sl=rchi2_sl,
         time_wl=time_wl, time_sl=time_sl,
@@ -607,12 +624,18 @@ def run_monte_carlo(
     n_fail_sl = np.sum(~np.array([r.ok_sl for r in results]))
 
     # ── Print summary ──
+    n_with_sl = sum(1 for r in results if r.n_sl_systems > 0)
+    all_conc = np.concatenate([r.true_concentration for r in results])
     print(f"\n{'='*60}")
     print(f"  MONTE CARLO SUMMARY")
     print(f"  {n_realizations} realizations, {n_halos} halo(s) each")
     print(f"  {n_workers} worker(s), {t_total:.1f}s total "
           f"({t_total/n_realizations:.1f}s/realization)")
     print(f"{'='*60}")
+    print(f"  True concentration: median={np.median(all_conc):.2f}  "
+          f"mean={np.mean(all_conc):.2f}  range=[{np.min(all_conc):.2f}, {np.max(all_conc):.2f}]")
+    print(f"  Realizations with SL: {n_with_sl}/{n_realizations} "
+          f"({100*n_with_sl/n_realizations:.0f}%)")
     print(f"  Pipeline failures:  WL={n_fail_wl}  WL+SL={n_fail_sl}")
     print(f"  Matched halos:      WL={n_ok_wl}  WL+SL={n_ok_sl}")
 
@@ -673,6 +696,44 @@ def run_monte_carlo(
             print(f"    Median |log10(M_rec/M_true)| : "
                   f"WL={np.median(log_err_wl):.3f}  "
                   f"WL+SL={np.median(log_err_sl):.3f}")
+
+        # ── SL-subset: only realizations where SL was available ──
+        sl_paired_wl = []
+        sl_paired_sl = []
+        sl_mass_ratio_wl = []
+        sl_mass_ratio_sl = []
+        for r in results:
+            if r.ok_wl and r.ok_sl and r.n_sl_systems > 0:
+                for dw, ds, mt, mw, ms in zip(
+                    r.delta_wl, r.delta_sl,
+                    r.true_mass, r.mass_rec_wl, r.mass_rec_sl,
+                ):
+                    if np.isfinite(dw) and np.isfinite(ds):
+                        sl_paired_wl.append(dw)
+                        sl_paired_sl.append(ds)
+                        if mt > 0 and np.isfinite(mw) and np.isfinite(ms):
+                            sl_mass_ratio_wl.append(mw / mt)
+                            sl_mass_ratio_sl.append(ms / mt)
+        if len(sl_paired_wl) > 0:
+            sl_pw = np.array(sl_paired_wl)
+            sl_ps = np.array(sl_paired_sl)
+            sl_mrw = np.array(sl_mass_ratio_wl)
+            sl_mrs = np.array(sl_mass_ratio_sl)
+            print(f"\n  SL-SUBSET ({len(sl_pw)} halo-pairs with SL data):")
+            pos_imp = np.sum(sl_ps < sl_pw)
+            print(f"    Position: SL improved {pos_imp}/{len(sl_pw)} "
+                  f"({100*pos_imp/len(sl_pw):.0f}%)")
+            if len(sl_mrw) > 0:
+                le_wl = np.abs(np.log10(np.maximum(sl_mrw, 1e-10)))
+                le_sl = np.abs(np.log10(np.maximum(sl_mrs, 1e-10)))
+                mass_imp = np.sum(le_sl < le_wl)
+                print(f"    Mass M_rec/M_true:  WL median={np.median(sl_mrw):.2f}  "
+                      f"WL+SL median={np.median(sl_mrs):.2f}")
+                print(f"    Mass: SL improved {mass_imp}/{len(le_wl)} "
+                      f"({100*mass_imp/len(le_wl):.0f}%)")
+                print(f"    |log10(M_rec/M_true)| : "
+                      f"WL={np.median(le_wl):.3f}  "
+                      f"WL+SL={np.median(le_sl):.3f}")
 
     # ── Summary figure ──
     fig = _plot_mc_summary(
