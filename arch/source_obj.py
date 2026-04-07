@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,15 +15,23 @@ class StrongLensingSystem:
     A single multiply-imaged source (one background galaxy / transient / knot family).
 
     All positions are in the same coordinate frame/units as Source.x/y (typically arcsec offsets).
+
+    Flux data (optional): observed flux per image in arbitrary but consistent
+    units.  Only ratios matter (F_source cancels).  When present, the
+    chi2_flux_* functions in utils.py use these to constrain the magnification
+    ratio |mu_i|/|mu_ref|, breaking the position-mass degeneracy.
     """
     system_id: str # Unique identifier for the strong lensing system
     theta_x: np.ndarray # x-positions of the multiple images
     theta_y: np.ndarray # y-positions of the multiple images
     z_source: float # Redshift of the source
     sigma_theta: float | np.ndarray = 0.1 # Positional uncertainty per image (scalar or per-image array)
+    flux: np.ndarray | None = None # Observed flux per image (arbitrary units, None = no flux data)
+    sigma_flux: float | np.ndarray | None = None # Flux uncertainty per image
     meta: dict = field(default_factory=dict) # Additional metadata for the system
 
     def __post_init__(self) -> None:
+        # ── Positions ──
         self.theta_x = np.atleast_1d(self.theta_x).astype(float)
         self.theta_y = np.atleast_1d(self.theta_y).astype(float)
         if self.theta_x.shape != self.theta_y.shape:
@@ -36,9 +43,31 @@ class StrongLensingSystem:
             if self.sigma_theta.shape not in ((), self.theta_x.shape):
                 raise ValueError("sigma_theta must be scalar or same shape as theta_x/theta_y.")
 
+        # ── Flux (optional) ──
+        if self.flux is not None:
+            self.flux = np.atleast_1d(self.flux).astype(float)
+            if self.flux.shape != self.theta_x.shape:
+                raise ValueError("flux must have the same shape as theta_x/theta_y.")
+            if np.any(self.flux <= 0):
+                raise ValueError("All flux values must be positive.")
+            # Default sigma_flux: 10% of each image's flux
+            if self.sigma_flux is None:
+                self.sigma_flux = 0.10 * self.flux
+            elif np.isscalar(self.sigma_flux):
+                self.sigma_flux = np.full_like(self.flux, float(self.sigma_flux))
+            else:
+                self.sigma_flux = np.atleast_1d(self.sigma_flux).astype(float)
+                if self.sigma_flux.shape != self.flux.shape:
+                    raise ValueError("sigma_flux must be scalar or same shape as flux.")
+
     @property
     def n_images(self) -> int:
         return int(self.theta_x.size)
+
+    @property
+    def has_flux(self) -> bool:
+        """Whether this system has observed flux data."""
+        return self.flux is not None
 
     def iter_images(self) -> Iterator[Tuple[float, float, float]]:
         """
@@ -110,6 +139,8 @@ class Source:
                 theta_y=s.theta_y.copy(),
                 z_source=float(s.z_source),
                 sigma_theta=s.sigma_theta.copy() if isinstance(s.sigma_theta, np.ndarray) else float(s.sigma_theta),
+                flux=s.flux.copy() if s.flux is not None else None,
+                sigma_flux=s.sigma_flux.copy() if isinstance(s.sigma_flux, np.ndarray) else (float(s.sigma_flux) if s.sigma_flux is not None else None),
                 meta=dict(s.meta),
             )
             for s in self.strong_systems

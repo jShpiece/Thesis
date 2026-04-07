@@ -34,11 +34,30 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None, lens_type='SIS
     reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type)
     log_step("Initial Guesses:", lenses, reduced_chi2)
 
-    # ── Pre-compute lambda_sl once, before any optimiser runs ──
+    # ── Pre-compute lambda_sl ──
+    #
+    # The weight λ_SL equalises the reduced-χ² of the WL and SL terms:
+    #     λ = (χ²_WL / dof_WL) / (χ²_SL / dof_SL)
+    #
+    # This ratio is meaningful only when the model is physically plausible,
+    # so that rχ² reflects measurement noise rather than gross model error.
+    #
+    # SIS: the initial guess (θ_E from γ/F) is close enough that rχ²_WL
+    #   is representative.  Compute now, before position optimisation.
+    #
+    # NFW: the initial mass estimate is crude (100 random candidates give
+    #   rχ²_WL ~ O(1000)), so λ computed here would be far too large.
+    #   Defer to after filtering (Step 3), where implausible candidates
+    #   are removed and rχ²_WL reflects the actual WL information content.
+    #   NFW position optimisation is WL-only, so λ_SL is not needed
+    #   until forward selection (Step 4).
     if use_strong_lensing:
-        lambda_sl = metric.compute_lambda_sl(sources, lenses, use_flags, lens_type)
-        if flags:
-            print(f"Pre-computed lambda_sl = {lambda_sl:.6f}")
+        if lens_type == 'SIS':
+            lambda_sl = metric.compute_lambda_sl(sources, lenses, use_flags, lens_type)
+            if flags:
+                print(f"Pre-computed lambda_sl = {lambda_sl:.6f}")
+        else:
+            lambda_sl = None   # deferred — computed after filtering below
     else:
         lambda_sl = None
 
@@ -62,8 +81,17 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None, lens_type='SIS
     log_step("After Filtering:", lenses, reduced_chi2)
 
     # Step 4: Select optimal lens set
-    # forward_lens_selection uses no-magnification-correction chi2_SL internally
-    # (see pipeline.py), which is well-behaved for candidate selection.
+    #
+    # For NFW, lambda_sl is still None here.  Forward selection is driven
+    # purely by WL: shear and flexion identify WHERE substructure is.
+    # SL's role is to calibrate HOW MUCH MASS via strength optimization.
+    #
+    # Computing lambda at the filtered model (~45 lenses) and injecting
+    # it here was tested and found to hurt both position and mass recovery
+    # (MC: 23% mass improvement vs 70% with post-selection lambda).
+    # The composite deflection field of ~45 random candidates has no
+    # physical relationship to the multiply-imaged system, so the SL
+    # prediction is noise that corrupts the selection.
     lenses, _ = pipeline.forward_lens_selection(
         sources, lenses, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
@@ -73,6 +101,18 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None, lens_type='SIS
         use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl
     )
     log_step("After Forward Selection:", lenses, reduced_chi2)
+
+    # ── Deferred lambda_sl for NFW (and any future lens types) ──
+    #
+    # Now that forward selection has identified a physically plausible
+    # model (1–4 halos that explain the WL data), the reduced-chi2
+    # ratio is meaningful.  This lambda is frozen for Steps 5–6
+    # (merge + strength optimization), where SL constrains mass
+    # via flux ratios and source-plane scatter.
+    if use_strong_lensing and lambda_sl is None:
+        lambda_sl = metric.compute_lambda_sl(sources, lenses, use_flags, lens_type)
+        if flags:
+            print(f"Pre-computed lambda_sl = {lambda_sl:.6f}  (post-selection)")
 
     # Step 5: Merge nearby lenses
     merger_threshold = (len(sources.x) / (2 * xmax) ** 2) ** (-0.5) if len(sources.x) > 0 else 1.0
