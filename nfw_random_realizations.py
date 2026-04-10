@@ -111,12 +111,28 @@ def build_two_halo_scenario(
     return src, halo_true, xmax
 
 
-def _match_halos(recovered, true_x, true_y):
+def _match_halos(recovered, true_x, true_y, max_distance=40.0):
     """
-    For each true halo, find the nearest recovered halo.
+    For each true halo, find the nearest recovered halo within max_distance.
 
-    Returns list of dicts with keys: true_idx, rec_idx, distance, mass_rec.
-    If no recovered halo is within 40", returns distance=inf.
+    Parameters
+    ----------
+    recovered : NFW_Lens
+        Recovered halo set.
+    true_x, true_y : array
+        True halo positions.
+    max_distance : float
+        Maximum match distance in arcsec.  Recovered halos farther than
+        this are considered unmatched (no real association with the true
+        halo) and the match is reported as distance=inf, mass=nan.
+        Without this filter, distant spurious halos contaminate the
+        statistics by being paired with true halos they don't physically
+        explain.
+
+    Returns
+    -------
+    list of dicts with keys: true_idx, rec_idx, distance, mass_rec.
+    Unmatched true halos have rec_idx=None, distance=inf, mass_rec=nan.
     """
     matches = []
     for i in range(len(true_x)):
@@ -126,12 +142,18 @@ def _match_halos(recovered, true_x, true_y):
             continue
         dists = np.hypot(recovered.x - true_x[i], recovered.y - true_y[i])
         j = int(np.argmin(dists))
-        matches.append({
-            "true_idx": i,
-            "rec_idx": j,
-            "distance": float(dists[j]),
-            "mass_rec": float(recovered.mass[j]),
-        })
+        d = float(dists[j])
+        if d > max_distance:
+            # Nearest recovered halo is too far to be a real match
+            matches.append({"true_idx": i, "rec_idx": None, "distance": np.inf,
+                            "mass_rec": np.nan})
+        else:
+            matches.append({
+                "true_idx": i,
+                "rec_idx": j,
+                "distance": d,
+                "mass_rec": float(recovered.mass[j]),
+            })
     return matches
 
 
@@ -404,6 +426,10 @@ def run_single_realization(
         redshift=z_lens,
         chi2=np.zeros(n_halos),
     )
+    # Lock concentration to the M-c relation used by the pipeline.
+    # This overwrites the scattered draw from _draw_random_cluster, so
+    # the data-generation model matches the pipeline's assumed relation.
+    halo_true.calculate_concentration()
 
     # WL catalog
     src = make_weak_lensing_catalog_nfw(
@@ -419,6 +445,7 @@ def run_single_realization(
                 x=tx[i], y=ty[i], mass=tmass[i],
                 concentration=tc[i], redshift=z_lens,
             )
+            halo_iso.calculate_concentration()
             sys_i = make_nfw_strong_system(
                 system_id=f"sys_{i}",
                 halo=halo_iso,
@@ -485,14 +512,15 @@ def run_single_realization(
 
     if verbose:
         for i in range(n_halos):
-            print(f"  Seed {seed}, halo {i}: c={tc[i]:.2f}  SL={'yes' if len(systems) > i else 'no'}  "
+            print(f"  Seed {seed}, halo {i}: c={halo_true.concentration[i]:.2f}  "
+                  f"SL={'yes' if len(systems) > i else 'no'}  "
                   f"Δ_WL={delta_wl[i]:.1f}\" Δ_SL={delta_sl[i]:.1f}\" "
                   f"M_true={tmass[i]:.1e} M_WL={mass_wl[i]:.1e} M_SL={mass_sl[i]:.1e}")
 
     return RealizationResult(
         seed=seed, n_true_halos=n_halos,
         true_x=tx, true_y=ty, true_mass=tmass,
-        true_concentration=tc,
+        true_concentration=halo_true.concentration.copy(),
         n_sl_systems=len(systems),
         n_rec_wl=len(lenses_wl.x), delta_wl=delta_wl, mass_rec_wl=mass_wl, rchi2_wl=rchi2_wl,
         n_rec_sl=len(lenses_sl.x), delta_sl=delta_sl, mass_rec_sl=mass_sl, rchi2_sl=rchi2_sl,
@@ -754,78 +782,150 @@ def _plot_mc_summary(
     finite_wl, finite_sl, n_halos,
     savepath=None,
 ):
-    """Four-panel summary figure for Monte Carlo results."""
+    """
+    Three-panel summary figure highlighting the SL-subset.
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10), dpi=150, constrained_layout=True)
+    For realizations without SL systems, WL and WL+SL pipelines are
+    identical by construction, so including them would dilute the
+    visible SL signal.  Each panel distinguishes:
 
-    # ── Panel 1: Positional offset histograms ──
-    ax = axes[0, 0]
-    bins = np.linspace(0, 50, 25)
-    if np.any(finite_wl):
-        ax.hist(all_delta_wl[finite_wl], bins=bins, alpha=0.6, color="C0",
-                label=f"WL (med={np.median(all_delta_wl[finite_wl]):.1f}\")")
-    if np.any(finite_sl):
-        ax.hist(all_delta_sl[finite_sl], bins=bins, alpha=0.6, color="C2",
-                label=f"WL+SL (med={np.median(all_delta_sl[finite_sl]):.1f}\")")
-    ax.set_xlabel("Positional offset (arcsec)")
-    ax.set_ylabel("Count")
-    ax.set_title("Nearest-halo offset distribution")
-    ax.legend()
+    - "no SL"       : realizations where no multiply-imaged system exists
+                      (subcritical halo → flux only, both pipelines identical)
+    - "SL available": realizations where SL data entered the WL+SL pipeline
 
-    # ── Panel 2: Paired offset scatter ──
-    ax = axes[0, 1]
-    paired_wl, paired_sl = [], []
+    Panel 1: Paired positional offset (Δ_WL vs Δ_WL+SL)
+    Panel 2: Mass recovery (M_rec / M_true) — bar offset shows SL effect
+    Panel 3: Positional offset distributions in SL subset (histogram)
+    """
+
+    # ── Collect paired data, split by SL availability ──
+    pair = {"sl": {"dw": [], "ds": [], "mt": [], "mw": [], "ms": []},
+            "no": {"dw": [], "ds": [], "mt": [], "mw": [], "ms": []}}
+
     for r in results:
-        if r.ok_wl and r.ok_sl:
-            for dw, ds in zip(r.delta_wl, r.delta_sl):
-                if np.isfinite(dw) and np.isfinite(ds):
-                    paired_wl.append(dw)
-                    paired_sl.append(ds)
-    if paired_wl:
-        pw, ps = np.array(paired_wl), np.array(paired_sl)
-        ax.scatter(pw, ps, s=15, alpha=0.6, c="0.3")
-        lim = max(pw.max(), ps.max()) * 1.1
-        ax.plot([0, lim], [0, lim], "k--", lw=0.8, alpha=0.5, label="1:1")
-        ax.set_xlabel("Δ WL-only (arcsec)")
-        ax.set_ylabel("Δ WL+SL (arcsec)")
-        ax.set_title("Paired positional offset")
-        ax.set_aspect("equal", adjustable="box")
-        ax.legend()
+        if not (r.ok_wl and r.ok_sl):
+            continue
+        key = "sl" if r.n_sl_systems > 0 else "no"
+        for dw, ds, mt, mw, ms in zip(
+            r.delta_wl, r.delta_sl,
+            r.true_mass, r.mass_rec_wl, r.mass_rec_sl,
+        ):
+            if not (np.isfinite(dw) and np.isfinite(ds)):
+                continue
+            pair[key]["dw"].append(dw)
+            pair[key]["ds"].append(ds)
+            if mt > 0 and np.isfinite(mw) and np.isfinite(ms):
+                pair[key]["mt"].append(mt)
+                pair[key]["mw"].append(mw)
+                pair[key]["ms"].append(ms)
 
-    # ── Panel 3: Mass recovery scatter ──
-    ax = axes[1, 0]
-    if np.any(finite_wl):
-        mt = all_mass_true[finite_wl]
-        mr_wl = all_mass_wl[finite_wl]
-        ax.scatter(mt, mr_wl, s=15, alpha=0.5, c="C0", label="WL")
-    if np.any(finite_sl):
-        mt_sl = np.concatenate([r.true_mass for r in results if r.ok_sl])[finite_sl]
-        mr_sl = all_mass_sl[finite_sl]
-        ax.scatter(mt_sl, mr_sl, s=15, alpha=0.5, c="C2", label="WL+SL")
+    for k in pair:
+        for key in pair[k]:
+            pair[k][key] = np.array(pair[k][key])
+
+    n_sl = len(pair["sl"]["dw"])
+    n_no = len(pair["no"]["dw"])
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.5), dpi=150, constrained_layout=True)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel 1: Paired positional offset — Δ_WL vs Δ_WL+SL
+    # ══════════════════════════════════════════════════════════════════════
+    ax = axes[0]
+
+    # no-SL: faint grey background (always on diagonal by construction)
+    if n_no > 0:
+        ax.scatter(pair["no"]["dw"], pair["no"]["ds"],
+                   s=18, alpha=0.25, c="0.6", edgecolors="none",
+                   label=f"no SL (N={n_no})", zorder=2)
+
+    # SL-subset: highlighted, colour-coded by whether SL helped
+    if n_sl > 0:
+        pw, ps = pair["sl"]["dw"], pair["sl"]["ds"]
+        helped = ps < pw
+        ax.scatter(pw[helped], ps[helped],
+                   s=45, alpha=0.85, c="C2", edgecolors="k", linewidths=0.6,
+                   label=f"SL helped ({int(helped.sum())}/{n_sl})", zorder=4)
+        ax.scatter(pw[~helped], ps[~helped],
+                   s=45, alpha=0.85, c="C3", edgecolors="k", linewidths=0.6,
+                   label=f"SL hurt ({int((~helped).sum())}/{n_sl})", zorder=4)
+
     # 1:1 line
-    mass_range = np.array([1e13, 3e15])
-    ax.plot(mass_range, mass_range, "k--", lw=0.8, alpha=0.5)
-    ax.set_xscale("log")
+    all_d = np.concatenate([pair["sl"]["dw"], pair["sl"]["ds"],
+                            pair["no"]["dw"], pair["no"]["ds"]])
+    if len(all_d) > 0:
+        lim = max(all_d.max() * 1.1, 1.0)
+        ax.plot([0, lim], [0, lim], "k--", lw=0.8, alpha=0.5, zorder=1)
+        ax.set_xlim(0, lim)
+        ax.set_ylim(0, lim)
+    ax.set_xlabel("Δ WL-only  (arcsec)")
+    ax.set_ylabel("Δ WL+SL  (arcsec)")
+    ax.set_title("Paired positional offset")
+    ax.set_aspect("equal", adjustable="box")
+    ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel 2: Mass recovery — M_rec / M_true
+    # ══════════════════════════════════════════════════════════════════════
+    ax = axes[1]
+
+    if n_sl > 0 and len(pair["sl"]["mt"]) > 0:
+        mr_wl_sl = pair["sl"]["mw"] / pair["sl"]["mt"]
+        mr_sl_sl = pair["sl"]["ms"] / pair["sl"]["mt"]
+
+        # Paired line segments: WL on left, WL+SL on right
+        n_pts = len(mr_wl_sl)
+        x_wl = np.zeros(n_pts)
+        x_sl = np.ones(n_pts)
+        for i in range(n_pts):
+            colour = "C2" if abs(np.log10(mr_sl_sl[i])) < abs(np.log10(mr_wl_sl[i])) else "C3"
+            ax.plot([x_wl[i], x_sl[i]], [mr_wl_sl[i], mr_sl_sl[i]],
+                    "-", color=colour, alpha=0.4, lw=1.0, zorder=2)
+        ax.scatter(x_wl, mr_wl_sl, s=35, c="C0", alpha=0.8,
+                   edgecolors="k", linewidths=0.5, zorder=4,
+                   label=f"WL  (med={np.median(mr_wl_sl):.2f})")
+        ax.scatter(x_sl, mr_sl_sl, s=35, c="C2", alpha=0.8,
+                   edgecolors="k", linewidths=0.5, zorder=4,
+                   label=f"WL+SL  (med={np.median(mr_sl_sl):.2f})")
+
+    ax.axhline(1.0, color="k", linestyle="--", lw=0.8, alpha=0.5)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["WL", "WL+SL"])
+    ax.set_xlim(-0.4, 1.4)
+    ax.set_ylabel(r"$M_{\rm rec} / M_{\rm true}$")
+    ax.set_title(f"Mass recovery (SL subset, N={n_sl})")
     ax.set_yscale("log")
-    ax.set_xlabel("True mass ($M_\\odot$)")
-    ax.set_ylabel("Recovered mass ($M_\\odot$)")
-    ax.set_title("Mass recovery")
-    ax.legend()
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
 
-    # ── Panel 4: Per-realization timing ──
-    ax = axes[1, 1]
-    seeds = [r.seed for r in results]
-    t_wl = [r.time_wl for r in results]
-    t_sl = [r.time_sl for r in results]
-    ax.bar(np.arange(len(seeds)) - 0.15, t_wl, 0.3, alpha=0.7, color="C0", label="WL")
-    ax.bar(np.arange(len(seeds)) + 0.15, t_sl, 0.3, alpha=0.7, color="C2", label="WL+SL")
-    ax.set_xlabel("Realization")
-    ax.set_ylabel("Wall time (s)")
-    ax.set_title("Pipeline timing")
-    ax.legend()
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel 3: Positional offset histograms (SL subset only)
+    # ══════════════════════════════════════════════════════════════════════
+    ax = axes[2]
 
-    fig.suptitle(f"NFW Monte Carlo:  {len(results)} realizations, "
-                 f"{n_halos} halo(s)/cluster", fontsize=13)
+    if n_sl > 0:
+        d_max = max(pair["sl"]["dw"].max(), pair["sl"]["ds"].max())
+        bins = np.linspace(0, d_max * 1.05, 16)
+        med_wl = np.median(pair["sl"]["dw"])
+        med_sl = np.median(pair["sl"]["ds"])
+        ax.hist(pair["sl"]["dw"], bins=bins, alpha=0.55, color="C0",
+                edgecolor="k", linewidth=0.5,
+                label=f"WL  (med={med_wl:.2f}\")")
+        ax.hist(pair["sl"]["ds"], bins=bins, alpha=0.55, color="C2",
+                edgecolor="k", linewidth=0.5,
+                label=f"WL+SL  (med={med_sl:.2f}\")")
+        ax.axvline(med_wl, color="C0", linestyle="--", lw=1.2, alpha=0.8)
+        ax.axvline(med_sl, color="C2", linestyle="--", lw=1.2, alpha=0.8)
+
+    ax.set_xlabel("Positional offset  (arcsec)")
+    ax.set_ylabel("Count")
+    ax.set_title(f"Offset distribution (SL subset, N={n_sl})")
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+
+    fig.suptitle(
+        f"NFW Monte Carlo: {len(results)} realizations "
+        f"({n_sl} with SL, {n_no} without)",
+        fontsize=13,
+    )
 
     if savepath:
         fig.savefig(savepath, bbox_inches="tight")
