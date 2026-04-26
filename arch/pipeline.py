@@ -172,18 +172,6 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
             lenses.x[i], lenses.y[i], lenses.te[i] = result.x[0], result.x[1], result.x[2]
 
     elif lens_type == 'NFW':
-        # NOTE: Strong lensing is intentionally excluded from per-lens
-        # position optimization.  SL constrains the total enclosed mass
-        # within the Einstein radius — a property of the composite
-        # deflection field, not of any individual halo.  Applying it
-        # here would force every candidate to independently satisfy a
-        # global constraint, driving them all toward the SL images and
-        # destroying the positional diversity the pipeline needs.
-        #
-        # SL enters the objective at physically appropriate stages:
-        #   - forward_lens_selection (evaluates composite models)
-        #   - optimize_lens_strength (refines masses of the final set)
-
         for i in range(len(lenses.x)):
             # Initial guess: [x, y, log10(mass)] - optimize in log-space for mass
             initial_guess = [lenses.x[i], lenses.y[i], np.log10(lenses.mass[i])]
@@ -200,7 +188,7 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
             distance = np.hypot(lenses.x[i] - sources.x, lenses.y[i] - sources.y)
             filtered_sources.remove(np.where(distance > 20)[0])
 
-            # Objective function: WL-only (local shear + flexion signal)
+            # Objective function to minimize
             def objective_function(params):
                 xi, yi, log_mass = params
                 mass = 10 ** log_mass
@@ -228,7 +216,7 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
                 initial_guess,
                 method='L-BFGS-B',
                 bounds=bounds,
-                options={'maxiter': int(num_iterations), 'ftol': 1e-6}
+                options={'maxiter': num_iterations, 'ftol': 1e-6}
             )
             optimized_params = result.x
             lenses.x[i] = optimized_params[0]
@@ -520,31 +508,64 @@ def optimize_lens_strength(sources, lenses, use_flags, lens_type='SIS',
         lenses.te = best_params
 
     elif lens_type == 'NFW':
-        # Per-halo mass optimization.  Each halo's mass is optimized
-        # independently via minimize_scalar over log10(M).
-        #
-        # When use_strong_lensing=True, the SL term (source-plane scatter
-        # + flux ratios, weighted by lambda_sl) enters through the opts
-        # dict → chi2wrapper → calculate_total_chi2.  This is the same
-        # code path as WL-only, ensuring any improvement from SL is
-        # attributable to the data, not to a different optimizer.
-        for i in range(len(lenses.x)):
-            guess = [np.log10(lenses.mass[i])]
-            params = [
-                'NFW', 'constrained',
-                lenses.x[i], lenses.y[i], lenses.redshift,
-                lenses.concentration[i], sources, use_flags, opts
-            ]
+        if use_strong_lensing:
+            # ── Joint (M, c) optimization per halo when SL is active ──
+            #
+            # M is constrained primarily by WL (shear/flexion amplitude),
+            # c primarily by SL flux ratios (∂κ/∂n ≠ 0 at theta_E).
+            # Holding c slaved to the M-c relation wastes the SL information.
+            #
+            # Uses Nelder-Mead (no gradients) since L-BFGS-B's finite-
+            # difference gradients are noisy in the c-direction when WL
+            # leverage on c is weak.  Bounds are enforced as a penalty
+            # since Nelder-Mead doesn't accept native bounds.
+            log_m_lo, log_m_hi = 10.0, 17.0
+            c_lo, c_hi = 2.0, 15.0
 
-            chi2_fn = lambda x: chi2wrapper(x, params)
-            res = minimize_scalar(
-                chi2_fn,
-                bounds=(10.0, 17.0),
-                method="bounded",
-                options={"xatol": 1e-6, "maxiter": 2000}
-            )
-            lenses.mass[i] = 10 ** res.x
-            lenses.calculate_concentration()
+            for i in range(len(lenses.x)):
+                guess = np.array([np.log10(lenses.mass[i]),
+                                  float(np.clip(lenses.concentration[i], c_lo, c_hi))])
+                params = [
+                    'NFW', 'dual',
+                    lenses.x[i], lenses.y[i], lenses.redshift,
+                    sources, use_flags, opts
+                ]
+
+                def bounded_chi2(g):
+                    if not (log_m_lo <= g[0] <= log_m_hi):
+                        return 1e30
+                    if not (c_lo <= g[1] <= c_hi):
+                        return 1e30
+                    return chi2wrapper(g, params)
+
+                result = minimize(
+                    bounded_chi2, guess,
+                    method='Nelder-Mead',
+                    options={'xatol': 1e-4, 'fatol': 1e-6, 'maxiter': 2000},
+                )
+                # Clip in case the simplex landed exactly on a boundary
+                lenses.mass[i] = 10 ** float(np.clip(result.x[0], log_m_lo, log_m_hi))
+                lenses.concentration[i] = float(np.clip(result.x[1], c_lo, c_hi))
+            # Do NOT call calculate_concentration() — c is a fitted parameter now
+        else:
+            # ── Per-halo mass optimization (WL-only, validated) ──
+            for i in range(len(lenses.x)):
+                guess = [np.log10(lenses.mass[i])]
+                params = [
+                    'NFW', 'constrained',
+                    lenses.x[i], lenses.y[i], lenses.redshift,
+                    lenses.concentration[i], sources, use_flags, opts
+                ]
+
+                chi2_fn = lambda x: chi2wrapper(x, params)
+                res = minimize_scalar(
+                    chi2_fn,
+                    bounds=(10.0, 17.0),
+                    method="bounded",
+                    options={"xatol": 1e-6, "maxiter": 2000}
+                )
+                lenses.mass[i] = 10 ** res.x
+                lenses.calculate_concentration()
     else:
         raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
 
@@ -678,8 +699,7 @@ def chi2wrapper(guess, params):
             return chi2_total
 
         elif constraint_type == 'constrained':
-            # Original per-halo path: scalar x, y, concentration, scalar guess
-            # This is the validated WL code path — do not modify.
+            # params: [x, y, z_lens, concentration, sources, use_flags]
             xl, yl, z_lens, concentration, sources, use_flags = tail[0], tail[1], tail[2], tail[3], tail[4], tail[5]
             lenses = halo_obj.NFW_Lens(
                 xl, yl, np.zeros_like(xl),
@@ -693,33 +713,19 @@ def chi2wrapper(guess, params):
             )
             return chi2_total
 
-        elif constraint_type == 'constrained_joint':
-            # Joint mass optimization for WL+SL: array x, y, concentration
-            # guess = [log10(M_1), ..., log10(M_N)]
-            xl, yl, z_lens, concentration, sources, use_flags = tail[0], tail[1], tail[2], tail[3], tail[4], tail[5]
-            log_masses = np.atleast_1d(guess)
-            xl = np.atleast_1d(xl)
-            yl = np.atleast_1d(yl)
-            concentration = np.atleast_1d(concentration)
-            lenses = halo_obj.NFW_Lens(
-                xl, yl, np.zeros_like(xl),
-                concentration, 10.0 ** log_masses, z_lens,
-                np.zeros_like(xl),
-            )
-            lenses.calculate_concentration()
-            chi2_total, _, _ = metric.calculate_total_chi2(
-                sources, lenses, use_flags, lens_type="NFW",
-                use_strong_lensing=use_strong_lensing,
-                lambda_sl=lambda_sl,
-            )
-            return chi2_total
-
         elif constraint_type == 'dual':
+            # Joint (M, c) optimization: guess = [log10(M), c]
             xl, yl, z_lens, sources, use_flags = tail[0], tail[1], tail[2], tail[3], tail[4]
+            xl_arr = np.atleast_1d(xl)
+            yl_arr = np.atleast_1d(yl)
+            log_mass = float(guess[0])
+            conc = float(guess[1])
             lenses = halo_obj.NFW_Lens(
-                xl, yl, np.zeros_like(np.atleast_1d(xl)),
-                guess[1], 10 ** guess[0], z_lens, np.empty_like(np.atleast_1d(xl))
+                xl_arr, yl_arr, np.zeros_like(xl_arr),
+                np.array([conc]), np.array([10.0 ** log_mass]),
+                z_lens, np.zeros_like(xl_arr),
             )
+            # Do NOT call calculate_concentration() — c is the fit parameter
             chi2_total, _, _ = metric.calculate_total_chi2(
                 sources, lenses, use_flags, lens_type="NFW",
                 use_strong_lensing=use_strong_lensing,

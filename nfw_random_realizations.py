@@ -111,27 +111,49 @@ def build_two_halo_scenario(
     return src, halo_true, xmax
 
 
-def _match_halos(recovered, true_x, true_y):
+def _match_halos(recovered, true_x, true_y, max_distance=40.0):
     """
-    For each true halo, find the nearest recovered halo.
+    For each true halo, find the nearest recovered halo within max_distance.
 
-    Returns list of dicts with keys: true_idx, rec_idx, distance, mass_rec.
-    If no recovered halo is within 40", returns distance=inf.
+    Parameters
+    ----------
+    recovered : NFW_Lens
+        Recovered halo set.
+    true_x, true_y : array
+        True halo positions.
+    max_distance : float
+        Maximum match distance in arcsec.  Recovered halos farther than
+        this are considered unmatched (no real association with the true
+        halo) and the match is reported as distance=inf, mass=nan.
+        Without this filter, distant spurious halos contaminate the
+        statistics by being paired with true halos they don't physically
+        explain.
+
+    Returns
+    -------
+    list of dicts with keys: true_idx, rec_idx, distance, mass_rec.
+    Unmatched true halos have rec_idx=None, distance=inf, mass_rec=nan.
     """
     matches = []
     for i in range(len(true_x)):
         if len(recovered.x) == 0:
             matches.append({"true_idx": i, "rec_idx": None, "distance": np.inf,
-                            "mass_rec": np.nan})
+                            "mass_rec": np.nan, "conc_rec": np.nan})
             continue
         dists = np.hypot(recovered.x - true_x[i], recovered.y - true_y[i])
         j = int(np.argmin(dists))
-        matches.append({
-            "true_idx": i,
-            "rec_idx": j,
-            "distance": float(dists[j]),
-            "mass_rec": float(recovered.mass[j]),
-        })
+        d = float(dists[j])
+        if d > max_distance:
+            matches.append({"true_idx": i, "rec_idx": None, "distance": np.inf,
+                            "mass_rec": np.nan, "conc_rec": np.nan})
+        else:
+            matches.append({
+                "true_idx": i,
+                "rec_idx": j,
+                "distance": d,
+                "mass_rec": float(recovered.mass[j]),
+                "conc_rec": float(recovered.concentration[j]),
+            })
     return matches
 
 
@@ -310,11 +332,13 @@ class RealizationResult:
     n_rec_wl: int
     delta_wl: np.ndarray       # per-true-halo offset (arcsec)
     mass_rec_wl: np.ndarray    # per-true-halo recovered mass
+    conc_rec_wl: np.ndarray    # per-true-halo recovered concentration (slaved to M-c)
     rchi2_wl: float
     # WL+SL
     n_rec_sl: int
     delta_sl: np.ndarray
     mass_rec_sl: np.ndarray
+    conc_rec_sl: np.ndarray    # per-true-halo recovered concentration (jointly fit)
     rchi2_sl: float
     # Timing
     time_wl: float
@@ -404,6 +428,9 @@ def run_single_realization(
         redshift=z_lens,
         chi2=np.zeros(n_halos),
     )
+    # Concentration is left at the scattered draw — the data are
+    # generated with the true c, while the pipeline assumes c_Duffy(M).
+    # This M-c mismatch is what flux ratios should correct.
 
     # WL catalog
     src = make_weak_lensing_catalog_nfw(
@@ -419,6 +446,7 @@ def run_single_realization(
                 x=tx[i], y=ty[i], mass=tmass[i],
                 concentration=tc[i], redshift=z_lens,
             )
+            # Use the scattered c directly — supercriticality reflects truth
             sys_i = make_nfw_strong_system(
                 system_id=f"sys_{i}",
                 halo=halo_iso,
@@ -482,20 +510,26 @@ def run_single_realization(
     delta_sl = np.array([m["distance"] for m in matches_sl])
     mass_wl = np.array([m["mass_rec"] for m in matches_wl])
     mass_sl = np.array([m["mass_rec"] for m in matches_sl])
+    conc_wl = np.array([m["conc_rec"] for m in matches_wl])
+    conc_sl = np.array([m["conc_rec"] for m in matches_sl])
 
     if verbose:
         for i in range(n_halos):
-            print(f"  Seed {seed}, halo {i}: c={tc[i]:.2f}  SL={'yes' if len(systems) > i else 'no'}  "
+            print(f"  Seed {seed}, halo {i}: c_true={tc[i]:.2f}  "
+                  f"SL={'yes' if len(systems) > i else 'no'}  "
                   f"Δ_WL={delta_wl[i]:.1f}\" Δ_SL={delta_sl[i]:.1f}\" "
-                  f"M_true={tmass[i]:.1e} M_WL={mass_wl[i]:.1e} M_SL={mass_sl[i]:.1e}")
+                  f"M_WL={mass_wl[i]:.1e}/c={conc_wl[i]:.1f}  "
+                  f"M_SL={mass_sl[i]:.1e}/c={conc_sl[i]:.1f}")
 
     return RealizationResult(
         seed=seed, n_true_halos=n_halos,
         true_x=tx, true_y=ty, true_mass=tmass,
-        true_concentration=tc,
+        true_concentration=tc.copy(),
         n_sl_systems=len(systems),
-        n_rec_wl=len(lenses_wl.x), delta_wl=delta_wl, mass_rec_wl=mass_wl, rchi2_wl=rchi2_wl,
-        n_rec_sl=len(lenses_sl.x), delta_sl=delta_sl, mass_rec_sl=mass_sl, rchi2_sl=rchi2_sl,
+        n_rec_wl=len(lenses_wl.x), delta_wl=delta_wl,
+        mass_rec_wl=mass_wl, conc_rec_wl=conc_wl, rchi2_wl=rchi2_wl,
+        n_rec_sl=len(lenses_sl.x), delta_sl=delta_sl,
+        mass_rec_sl=mass_sl, conc_rec_sl=conc_sl, rchi2_sl=rchi2_sl,
         time_wl=time_wl, time_sl=time_sl,
         ok_wl=ok_wl, ok_sl=ok_sl,
     )
@@ -702,11 +736,15 @@ def run_monte_carlo(
         sl_paired_sl = []
         sl_mass_ratio_wl = []
         sl_mass_ratio_sl = []
+        sl_c_true = []
+        sl_c_wl = []
+        sl_c_sl = []
         for r in results:
             if r.ok_wl and r.ok_sl and r.n_sl_systems > 0:
-                for dw, ds, mt, mw, ms in zip(
+                for dw, ds, mt, mw, ms, ct, cw, cs in zip(
                     r.delta_wl, r.delta_sl,
                     r.true_mass, r.mass_rec_wl, r.mass_rec_sl,
+                    r.true_concentration, r.conc_rec_wl, r.conc_rec_sl,
                 ):
                     if np.isfinite(dw) and np.isfinite(ds):
                         sl_paired_wl.append(dw)
@@ -714,6 +752,10 @@ def run_monte_carlo(
                         if mt > 0 and np.isfinite(mw) and np.isfinite(ms):
                             sl_mass_ratio_wl.append(mw / mt)
                             sl_mass_ratio_sl.append(ms / mt)
+                        if np.isfinite(cw) and np.isfinite(cs):
+                            sl_c_true.append(ct)
+                            sl_c_wl.append(cw)
+                            sl_c_sl.append(cs)
         if len(sl_paired_wl) > 0:
             sl_pw = np.array(sl_paired_wl)
             sl_ps = np.array(sl_paired_sl)
@@ -735,6 +777,28 @@ def run_monte_carlo(
                       f"WL={np.median(le_wl):.3f}  "
                       f"WL+SL={np.median(le_sl):.3f}")
 
+            if len(sl_c_true) > 0:
+                ct = np.array(sl_c_true)
+                cw = np.array(sl_c_wl)
+                cs = np.array(sl_c_sl)
+                # |c_rec - c_true| as accuracy metric
+                err_wl = np.abs(cw - ct)
+                err_sl = np.abs(cs - ct)
+                conc_imp = np.sum(err_sl < err_wl)
+                print(f"    Concentration:  c_true median={np.median(ct):.2f}  "
+                      f"WL median={np.median(cw):.2f}  "
+                      f"WL+SL median={np.median(cs):.2f}")
+                print(f"    Concentration: SL improved {conc_imp}/{len(ct)} "
+                      f"({100*conc_imp/len(ct):.0f}%)")
+                print(f"    |c_rec - c_true|:  "
+                      f"WL={np.median(err_wl):.2f}  "
+                      f"WL+SL={np.median(err_sl):.2f}")
+                # How many hit the bounds?
+                n_lo = int(np.sum(cs <= 2.01))
+                n_hi = int(np.sum(cs >= 14.99))
+                if n_lo + n_hi > 0:
+                    print(f"    c_WL+SL bounds: {n_lo} at lower (2.0), {n_hi} at upper (15.0)")
+
     # ── Summary figure ──
     fig = _plot_mc_summary(
         results, all_delta_wl, all_delta_sl,
@@ -754,78 +818,134 @@ def _plot_mc_summary(
     finite_wl, finite_sl, n_halos,
     savepath=None,
 ):
-    """Four-panel summary figure for Monte Carlo results."""
+    """
+    Three-panel summary focused on mass and concentration recovery.
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10), dpi=150, constrained_layout=True)
+    Panel 1: |log10(M_rec/M_true)| histogram for the SL subset.
+             Distribution of mass-recovery error, WL vs WL+SL overlaid.
+    Panel 2: Mass recovery scatter (M_rec vs M_true) — SL subset only,
+             paired blue circle (WL) and green diamond (WL+SL) at same
+             M_true, colour-coded by whether WL+SL improved.
+    Panel 3: Concentration recovery (c_rec vs c_true) — SL subset only,
+             paired points showing whether the joint fit moves c toward
+             truth.  This is the diagnostic for whether SL flux ratios
+             are actually constraining concentration.
+    """
 
-    # ── Panel 1: Positional offset histograms ──
-    ax = axes[0, 0]
-    bins = np.linspace(0, 50, 25)
-    if np.any(finite_wl):
-        ax.hist(all_delta_wl[finite_wl], bins=bins, alpha=0.6, color="C0",
-                label=f"WL (med={np.median(all_delta_wl[finite_wl]):.1f}\")")
-    if np.any(finite_sl):
-        ax.hist(all_delta_sl[finite_sl], bins=bins, alpha=0.6, color="C2",
-                label=f"WL+SL (med={np.median(all_delta_sl[finite_sl]):.1f}\")")
-    ax.set_xlabel("Positional offset (arcsec)")
-    ax.set_ylabel("Count")
-    ax.set_title("Nearest-halo offset distribution")
-    ax.legend()
+    # ── Collect SL-subset data ──
+    mt, mw, ms = [], [], []
+    ct, cw, cs = [], [], []
+    n_no = 0
 
-    # ── Panel 2: Paired offset scatter ──
-    ax = axes[0, 1]
-    paired_wl, paired_sl = [], []
     for r in results:
-        if r.ok_wl and r.ok_sl:
-            for dw, ds in zip(r.delta_wl, r.delta_sl):
-                if np.isfinite(dw) and np.isfinite(ds):
-                    paired_wl.append(dw)
-                    paired_sl.append(ds)
-    if paired_wl:
-        pw, ps = np.array(paired_wl), np.array(paired_sl)
-        ax.scatter(pw, ps, s=15, alpha=0.6, c="0.3")
-        lim = max(pw.max(), ps.max()) * 1.1
-        ax.plot([0, lim], [0, lim], "k--", lw=0.8, alpha=0.5, label="1:1")
-        ax.set_xlabel("Δ WL-only (arcsec)")
-        ax.set_ylabel("Δ WL+SL (arcsec)")
-        ax.set_title("Paired positional offset")
+        if not (r.ok_wl and r.ok_sl):
+            continue
+        if r.n_sl_systems == 0:
+            n_no += 1
+            continue
+        for i in range(len(r.true_mass)):
+            if not (np.isfinite(r.delta_wl[i]) and np.isfinite(r.delta_sl[i])):
+                continue
+            if r.true_mass[i] > 0 and np.isfinite(r.mass_rec_wl[i]) and np.isfinite(r.mass_rec_sl[i]):
+                mt.append(r.true_mass[i])
+                mw.append(r.mass_rec_wl[i])
+                ms.append(r.mass_rec_sl[i])
+            if np.isfinite(r.conc_rec_wl[i]) and np.isfinite(r.conc_rec_sl[i]):
+                ct.append(r.true_concentration[i])
+                cw.append(r.conc_rec_wl[i])
+                cs.append(r.conc_rec_sl[i])
+
+    mt = np.array(mt); mw = np.array(mw); ms = np.array(ms)
+    ct = np.array(ct); cw = np.array(cw); cs = np.array(cs)
+    n_sl = len(mt)
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5.5), dpi=150, constrained_layout=True)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel 1: |log10(M_rec/M_true)| histogram
+    # ══════════════════════════════════════════════════════════════════════
+    ax = axes[0]
+    if n_sl > 0:
+        le_wl = np.abs(np.log10(np.maximum(mw / mt, 1e-10)))
+        le_sl = np.abs(np.log10(np.maximum(ms / mt, 1e-10)))
+        e_max = max(le_wl.max(), le_sl.max())
+        bins = np.linspace(0, e_max * 1.05, 16)
+        ax.hist(le_wl, bins=bins, alpha=0.55, color="C0",
+                edgecolor="k", linewidth=0.5,
+                label=f"WL  (med={np.median(le_wl):.3f})")
+        ax.hist(le_sl, bins=bins, alpha=0.55, color="C2",
+                edgecolor="k", linewidth=0.5,
+                label=f"WL+SL  (med={np.median(le_sl):.3f})")
+        ax.axvline(np.median(le_wl), color="C0", ls="--", lw=1.2, alpha=0.8)
+        ax.axvline(np.median(le_sl), color="C2", ls="--", lw=1.2, alpha=0.8)
+    ax.set_xlabel(r"$|\log_{10}(M_{\rm rec}/M_{\rm true})|$")
+    ax.set_ylabel("Count")
+    ax.set_title(f"Mass error distribution (SL subset, N={n_sl})")
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel 2: Mass recovery — paired, colour by improvement
+    # ══════════════════════════════════════════════════════════════════════
+    ax = axes[1]
+    if n_sl > 0:
+        improved = np.abs(np.log10(ms/mt)) < np.abs(np.log10(mw/mt))
+        for i in range(n_sl):
+            colour = "C2" if improved[i] else "C3"
+            ax.plot([mt[i], mt[i]], [mw[i], ms[i]],
+                    "-", color=colour, alpha=0.4, lw=0.8, zorder=2)
+        ax.scatter(mt, mw, s=40, c="C0", alpha=0.85,
+                   edgecolors="k", linewidths=0.5, zorder=4,
+                   label=f"WL  (med M/M$_t$={np.median(mw/mt):.2f})")
+        ax.scatter(mt, ms, s=40, c="C2", alpha=0.85, marker="D",
+                   edgecolors="k", linewidths=0.5, zorder=5,
+                   label=f"WL+SL  (med M/M$_t$={np.median(ms/mt):.2f})")
+        all_v = np.concatenate([mt, mw, ms])
+        lo, hi = all_v.min() * 0.7, all_v.max() * 1.4
+        ax.plot([lo, hi], [lo, hi], "k--", lw=0.8, alpha=0.5, zorder=1)
+        ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
+        ax.set_xscale("log"); ax.set_yscale("log")
         ax.set_aspect("equal", adjustable="box")
-        ax.legend()
+    ax.set_xlabel(r"$M_{\rm true}$  ($M_\odot$)")
+    ax.set_ylabel(r"$M_{\rm rec}$  ($M_\odot$)")
+    n_imp_m = int(improved.sum()) if n_sl > 0 else 0
+    ax.set_title(f"Mass recovery ({n_imp_m}/{n_sl} improved by SL)")
+    ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
 
-    # ── Panel 3: Mass recovery scatter ──
-    ax = axes[1, 0]
-    if np.any(finite_wl):
-        mt = all_mass_true[finite_wl]
-        mr_wl = all_mass_wl[finite_wl]
-        ax.scatter(mt, mr_wl, s=15, alpha=0.5, c="C0", label="WL")
-    if np.any(finite_sl):
-        mt_sl = np.concatenate([r.true_mass for r in results if r.ok_sl])[finite_sl]
-        mr_sl = all_mass_sl[finite_sl]
-        ax.scatter(mt_sl, mr_sl, s=15, alpha=0.5, c="C2", label="WL+SL")
-    # 1:1 line
-    mass_range = np.array([1e13, 3e15])
-    ax.plot(mass_range, mass_range, "k--", lw=0.8, alpha=0.5)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel("True mass ($M_\\odot$)")
-    ax.set_ylabel("Recovered mass ($M_\\odot$)")
-    ax.set_title("Mass recovery")
-    ax.legend()
+    # ══════════════════════════════════════════════════════════════════════
+    # Panel 3: Concentration recovery — paired
+    # ══════════════════════════════════════════════════════════════════════
+    ax = axes[2]
+    n_c = len(ct)
+    if n_c > 0:
+        c_improved = np.abs(cs - ct) < np.abs(cw - ct)
+        for i in range(n_c):
+            colour = "C2" if c_improved[i] else "C3"
+            ax.plot([ct[i], ct[i]], [cw[i], cs[i]],
+                    "-", color=colour, alpha=0.4, lw=0.8, zorder=2)
+        ax.scatter(ct, cw, s=40, c="C0", alpha=0.85,
+                   edgecolors="k", linewidths=0.5, zorder=4,
+                   label=f"WL  (med={np.median(cw):.2f})")
+        ax.scatter(ct, cs, s=40, c="C2", alpha=0.85, marker="D",
+                   edgecolors="k", linewidths=0.5, zorder=5,
+                   label=f"WL+SL  (med={np.median(cs):.2f})")
+        all_c = np.concatenate([ct, cw, cs])
+        lo, hi = max(all_c.min() - 0.5, 0), all_c.max() + 0.5
+        ax.plot([lo, hi], [lo, hi], "k--", lw=0.8, alpha=0.5, zorder=1)
+        ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
+        ax.set_aspect("equal", adjustable="box")
+        # Show the locked Duffy value as horizontal reference
+        ax.axhline(np.median(cw), color="C0", ls=":", lw=0.8, alpha=0.5)
+    ax.set_xlabel(r"$c_{\rm true}$")
+    ax.set_ylabel(r"$c_{\rm rec}$")
+    n_imp_c = int(c_improved.sum()) if n_c > 0 else 0
+    ax.set_title(f"Concentration recovery ({n_imp_c}/{n_c} improved by SL)")
+    ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
 
-    # ── Panel 4: Per-realization timing ──
-    ax = axes[1, 1]
-    seeds = [r.seed for r in results]
-    t_wl = [r.time_wl for r in results]
-    t_sl = [r.time_sl for r in results]
-    ax.bar(np.arange(len(seeds)) - 0.15, t_wl, 0.3, alpha=0.7, color="C0", label="WL")
-    ax.bar(np.arange(len(seeds)) + 0.15, t_sl, 0.3, alpha=0.7, color="C2", label="WL+SL")
-    ax.set_xlabel("Realization")
-    ax.set_ylabel("Wall time (s)")
-    ax.set_title("Pipeline timing")
-    ax.legend()
-
-    fig.suptitle(f"NFW Monte Carlo:  {len(results)} realizations, "
-                 f"{n_halos} halo(s)/cluster", fontsize=13)
+    fig.suptitle(
+        f"NFW Monte Carlo: {len(results)} realizations "
+        f"({n_sl} with SL, {n_no} without)",
+        fontsize=13,
+    )
 
     if savepath:
         fig.savefig(savepath, bbox_inches="tight")
