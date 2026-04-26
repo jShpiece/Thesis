@@ -273,8 +273,13 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     if rchi2_sl <= 0:
         return 1.0
  
-    print(f"Pre-computed lambda_sl: {rchi2_wl:.3f} / {rchi2_sl:.3f} = {rchi2_wl / rchi2_sl:.3f}")
-    return float(rchi2_wl / rchi2_sl)
+    lambda_raw = rchi2_wl / rchi2_sl
+    lambda_max = 50.0  # cap: prevents SL from overwhelming WL when the initial
+                       # guess happens to satisfy SL well but WL poorly
+    result = min(lambda_raw, lambda_max)
+    cap_note = f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else ""
+    print(f"Pre-computed lambda_sl: {rchi2_wl:.3f} / {rchi2_sl:.3f} = {lambda_raw:.3f}{cap_note}")
+    return float(result)
  
  
 
@@ -285,6 +290,7 @@ def calculate_total_chi2(
     lens_type: str = "NFW",
     use_strong_lensing: bool = False,
     lambda_sl: float = None,
+    use_magnification_correction_sl: bool = True,
 ):
     """
     Total chi2 = chi2_WL + lambda_sl * chi2_SL  (SL implemented for SIS and NFW).

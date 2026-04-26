@@ -111,7 +111,7 @@ def build_two_halo_scenario(
     return src, halo_true, xmax
 
 
-def _match_halos(recovered, true_x, true_y, max_distance=40.0):
+def _match_halos(recovered, true_x, true_y, max_distance=40.0, max_distance=40.0):
     """
     For each true halo, find the nearest recovered halo within max_distance.
 
@@ -447,6 +447,7 @@ def run_single_realization(
                 concentration=tc[i], redshift=z_lens,
             )
             # Use the scattered c directly — supercriticality reflects truth
+            halo_iso.calculate_concentration()
             sys_i = make_nfw_strong_system(
                 system_id=f"sys_{i}",
                 halo=halo_iso,
