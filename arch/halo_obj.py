@@ -1,5 +1,5 @@
 import numpy as np
-from astropy.cosmology import Planck15 as cosmo
+from astropy.cosmology import Planck18 as cosmo
 from astropy import units as u
 
 # Physical constants

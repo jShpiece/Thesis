@@ -250,31 +250,44 @@ class Source:
             setattr(self, attr, getattr(self, attr) + noise)
 
     def apply_lensing(self, lenses, lens_type='SIS', z_source=0.8):
-        """
-        Applies lensing effects to the sources using the specified lens model.
+            """
+            Applies lensing effects to the sources using the specified lens model.
 
-        Parameters:
-            lenses: An object containing lens properties (e.g., positions, masses).
-            lens_type (str): The type of lens model to use ('SIS' or 'NFW'). Default is 'SIS'.
-            z_source (float): Redshift of the sources (used for NFW lensing). Default is 0.8.
-        """
-        if lens_type == 'SIS':
-            shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_sis(
-                lenses, self
-            )
-        elif lens_type == 'NFW':
-            _, shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(
-                lenses, self
-            )
-        else:
-            raise ValueError("Invalid lens type. Use 'SIS' or 'NFW'.")
+            Parameters:
+                lenses: An object containing lens properties (e.g., positions,
+                    masses, kappa_star+slope for power-law).  Must be of a type
+                    consistent with `lens_type`.
+                lens_type (str): The type of lens model to use.  One of:
+                    'SIS', 'NFW', 'POWER_LAW'.  Default is 'SIS'.
+                z_source (float): Redshift of the sources, used by NFW lensing
+                    only.  POWER_LAW reads per-source redshifts from
+                    ``self.redshift`` directly via the lensing-efficiency
+                    factor inside ``calculate_lensing_signals_power_law``.
+                    Default is 0.8.
+            """
+            if lens_type == 'SIS':
+                shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
+                    utils.calculate_lensing_signals_sis(lenses, self)
+                )
+            elif lens_type == 'NFW':
+                _, shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
+                    utils.calculate_lensing_signals_nfw(lenses, self)
+                )
+            elif lens_type == 'POWER_LAW':
+                shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
+                    utils.calculate_lensing_signals_power_law(lenses, self)
+                )
+            else:
+                raise ValueError(
+                    "Invalid lens type. Use 'SIS', 'NFW', or 'POWER_LAW'."
+                )
 
-        # Update lensing properties by adding the calculated signals
-        for attr, delta in zip(
-            ['e1', 'e2', 'f1', 'f2', 'g1', 'g2'],
-            [shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2]
-        ):
-            setattr(self, attr, getattr(self, attr) + delta)
+            # Update lensing properties by adding the calculated signals
+            for attr, delta in zip(
+                ['e1', 'e2', 'f1', 'f2', 'g1', 'g2'],
+                [shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2]
+            ):
+                setattr(self, attr, getattr(self, attr) + delta)
 
     def export_to_csv(self, filename):
         """

@@ -395,3 +395,304 @@ def calculate_total_chi2(
         "lambda_sl": float(_lambda),
     }
     return chi2_total, dof_total, components
+
+# Special functions for WL
+
+def chi2_wl_power_law(halos, sources,
+                      use_flags=(True, True, True),
+                      apply_penalties=True,
+                      penalty_factor=1.0e6):
+    """
+    Weak-lensing chi-squared for a power-law halo model.
+
+    Sums the squared residuals between observed and modeled lensing
+    signal components (shear, first flexion, second flexion), each
+    weighted by its per-source measurement uncertainty.  This is the
+    objective used during per-halo local optimization, forward selection,
+    and strength optimization.
+
+        chi2_WL = sum_s [ (e1_obs - e1_mod)^2 / sigs^2
+                        + (e2_obs - e2_mod)^2 / sigs^2
+                        + (f1_obs - f1_mod)^2 / sigf^2
+                        + (f2_obs - f2_mod)^2 / sigf^2
+                        + (g1_obs - g1_mod)^2 / sigg^2
+                        + (g2_obs - g2_mod)^2 / sigg^2 ]
+
+    Strong-lensing constraints are deliberately excluded; they are
+    handled separately by chi2_strong_source_plane_power_law and
+    combined globally via lambda_sl in calculate_total_chi2.
+
+    Parameters
+    ----------
+    halos : PowerLawHalo
+        Power-law halo model.  Must have x, y, kappa_star, slope arrays
+        plus scalar theta_star and redshift.
+    sources : Source
+        Observed sources, carrying e1, e2, f1, f2, g1, g2 (signals),
+        sigs, sigf, sigg (per-component uncertainties), and per-source
+        redshift.
+    use_flags : tuple of three bool
+        (use_shear, use_flexion, use_g_flexion) — toggle each signal
+        family.  Default: all three on, matching ARCH SIS/NFW conventions.
+    apply_penalties : bool
+        If True, add soft barrier penalties for halos that have drifted
+        outside the physical bounds 0 < n < 2 and kappa_star > 0.  These
+        are intended as a safety net for unconstrained Nelder-Mead steps;
+        when bounded optimizers (e.g. L-BFGS-B) are used, set to False.
+    penalty_factor : float
+        Strength of the soft barrier penalty.
+
+    Returns
+    -------
+    chi2 : float
+        Total weak-lensing chi-squared.
+    """
+    use_shear, use_flexion, use_g_flexion = use_flags
+
+    # --- Predicted signals at every source ---
+    e1_p, e2_p, f1_p, f2_p, g1_p, g2_p = (
+        utils.calculate_lensing_signals_power_law(halos, sources)
+    )
+
+    chi2 = 0.0
+    if use_shear:
+        chi2 += np.sum(
+            ((e1_p - sources.e1) ** 2 + (e2_p - sources.e2) ** 2)
+            / sources.sigs ** 2
+        )
+    if use_flexion:
+        chi2 += np.sum(
+            ((f1_p - sources.f1) ** 2 + (f2_p - sources.f2) ** 2)
+            / sources.sigf ** 2
+        )
+    if use_g_flexion:
+        chi2 += np.sum(
+            ((g1_p - sources.g1) ** 2 + (g2_p - sources.g2) ** 2)
+            / sources.sigg ** 2
+        )
+
+    if apply_penalties:
+        chi2 += _power_law_bound_penalty(halos, penalty_factor=penalty_factor)
+
+    return float(chi2)
+
+
+def posterior_sigma_n(halos, sources,
+                      use_flags=(True, True, True),
+                      relative_step=1.0e-3,
+                      absolute_step_x=0.05,
+                      absolute_step_kappa=5.0e-4,
+                      absolute_step_slope=5.0e-3,
+                      eigval_threshold=1.0e-8,
+                      return_info=False):
+    """
+    Posterior uncertainty on the slope parameter, sigma_n, per halo.
+
+    Computes the full 4N_halo x 4N_halo Hessian H of chi2_wl_power_law at
+    the current parameter values via central finite differences, inverts
+    it via eigendecomposition with small-eigenvalue regularization, and
+    extracts the marginal posterior variance on each halo's slope.
+
+    The relation used is:
+
+        C = 2 * H^{-1}                  (covariance from chi2 Hessian)
+        sigma_n_j = sqrt(C[slope_j, slope_j])
+
+    The factor of 2 comes from chi2 = -2 ln L (up to a constant), so the
+    quadratic expansion (1/2) H delta^T delta of chi2 corresponds to a
+    Gaussian posterior with covariance 2 H^{-1}.
+
+    Marginal vs conditional.  This function returns the MARGINAL sigma_n,
+    which accounts for cross-halo correlations through the full inverse
+    Hessian.  This is the correct quantity for the SL profile-uncertainty
+    term sigma_beta_prof (Phase 0) and is generally larger than the
+    conditional sigma_n that would result from per-halo Hessians.
+
+    Eigenvalue regularization.  Pure central-difference Hessians on
+    multi-halo problems can produce small spurious negative eigenvalues
+    from FP roundoff in cross-derivative cancellations (the cross-term
+    is a difference of four nearly-equal large numbers).  We regularize
+    by eigendecomposing H and clipping eigenvalues from below at
+    `eigval_threshold * max(|eigval|)`, equivalent to the standard
+    pseudoinverse with rcond=eigval_threshold.  Set
+    eigval_threshold=0 to disable.
+
+    Convergence assumed.  This function presumes `halos` is at (or very
+    near) the chi2_wl_power_law minimum.  Away from the minimum the
+    quadratic-approximation interpretation of H breaks down.
+
+    Parameters
+    ----------
+    halos : PowerLawHalo
+        Power-law halo collection at the converged WL minimum.
+    sources : Source
+        Observed sources, must carry e1, e2, f1, f2, g1, g2, sigs, sigf,
+        sigg, redshift.
+    use_flags : (bool, bool, bool)
+        Toggle (use_shear, use_flexion, use_g_flexion) — must match the
+        flags used during the WL fit.
+    relative_step : float
+        Multiplicative factor on parameter magnitude for the FD step.
+        Effective step is max(relative_step * |p|, absolute_step_*).
+    absolute_step_x, absolute_step_kappa, absolute_step_slope : float
+        Floors on the FD step size for x/y, kappa_star, and slope.
+    eigval_threshold : float
+        Minimum allowed eigenvalue, as a fraction of the maximum
+        eigenvalue magnitude.  Default 1e-8.
+    return_info : bool
+        If True, also return a diagnostics dict.
+
+    Returns
+    -------
+    sigma_n : ndarray, shape (N_halo,)
+        Marginal posterior uncertainty on each halo's slope.
+    info : dict (optional)
+        Keys: hessian, covariance, eigvals, eigvals_clipped,
+        n_clipped, condition_number, step_sizes, chi2_at_minimum.
+    """
+    N_h = halos.x.size
+    N_p = 4 * N_h
+
+    # --- Pack parameters into a flat vector: [x..., y..., k_star..., slope...] ---
+    p0 = np.concatenate([halos.x, halos.y, halos.kappa_star, halos.slope]).astype(float)
+
+    # --- Adaptive step sizes ---
+    steps = np.zeros(N_p)
+    for j in range(N_h):
+        steps[0 * N_h + j] = max(relative_step * abs(halos.x[j]),
+                                 absolute_step_x)
+        steps[1 * N_h + j] = max(relative_step * abs(halos.y[j]),
+                                 absolute_step_x)
+        steps[2 * N_h + j] = max(relative_step * abs(halos.kappa_star[j]),
+                                 absolute_step_kappa)
+        steps[3 * N_h + j] = max(relative_step * abs(halos.slope[j]),
+                                 absolute_step_slope)
+
+    # --- chi2 evaluator from flat parameter vector ---
+    def chi2_from_p(p):
+        h = halos.copy()
+        h.x = p[0 * N_h:1 * N_h].copy()
+        h.y = p[1 * N_h:2 * N_h].copy()
+        h.kappa_star = np.abs(p[2 * N_h:3 * N_h]).copy()
+        h.slope = p[3 * N_h:4 * N_h].copy()
+        return chi2_wl_power_law(h, sources, use_flags=use_flags,
+                                 apply_penalties=False)
+
+    chi2_0 = chi2_from_p(p0)
+
+    # --- Hessian via central finite differences ---
+    H = np.zeros((N_p, N_p))
+
+    # Diagonal: H_ii ≈ (f(p+h e_i) - 2 f(p) + f(p-h e_i)) / h^2
+    for i in range(N_p):
+        ei = np.zeros(N_p); ei[i] = 1.0
+        f_p = chi2_from_p(p0 + steps[i] * ei)
+        f_m = chi2_from_p(p0 - steps[i] * ei)
+        H[i, i] = (f_p - 2.0 * chi2_0 + f_m) / steps[i] ** 2
+
+    # Off-diagonal: H_ij ≈ (f++ - f+- - f-+ + f--) / (4 h_i h_j)
+    for i in range(N_p):
+        for j in range(i + 1, N_p):
+            ei = np.zeros(N_p); ei[i] = 1.0
+            ej = np.zeros(N_p); ej[j] = 1.0
+            f_pp = chi2_from_p(p0 + steps[i] * ei + steps[j] * ej)
+            f_pm = chi2_from_p(p0 + steps[i] * ei - steps[j] * ej)
+            f_mp = chi2_from_p(p0 - steps[i] * ei + steps[j] * ej)
+            f_mm = chi2_from_p(p0 - steps[i] * ei - steps[j] * ej)
+            H[i, j] = (f_pp - f_pm - f_mp + f_mm) / (4.0 * steps[i] * steps[j])
+            H[j, i] = H[i, j]
+
+    # --- Eigendecomposition-based pseudoinverse with clipping ---
+    eigvals, eigvecs = np.linalg.eigh(H)
+    max_abs = np.max(np.abs(eigvals))
+    threshold = eigval_threshold * max_abs
+
+    eigvals_clipped = np.where(eigvals < threshold, threshold, eigvals)
+    n_clipped = int(np.sum(eigvals < threshold))
+
+    # H^{-1} = V diag(1/lambda_clipped) V^T;  cov = 2 H^{-1}
+    cov = 2.0 * (eigvecs @ np.diag(1.0 / eigvals_clipped) @ eigvecs.T)
+
+    cond_num = (eigvals_clipped.max() / eigvals_clipped.min()
+                if eigvals_clipped.min() > 0 else np.inf)
+
+    # --- Extract per-halo sigma_n from slope diagonal block ---
+    sigma_n = np.zeros(N_h)
+    for j in range(N_h):
+        slope_idx = 3 * N_h + j
+        var = cov[slope_idx, slope_idx]
+        sigma_n[j] = np.sqrt(var) if (np.isfinite(var) and var > 0) else np.nan
+
+    if not return_info:
+        return sigma_n
+
+    info = {
+        "hessian": H,
+        "covariance": cov,
+        "eigvals": eigvals,
+        "eigvals_clipped": eigvals_clipped,
+        "n_clipped": n_clipped,
+        "condition_number": cond_num,
+        "step_sizes": steps,
+        "chi2_at_minimum": chi2_0,
+        "n_halos": N_h,
+        "n_params": N_p,
+    }
+    return sigma_n, info
+
+
+def _power_law_bound_penalty(halos, penalty_factor=1.0e6):
+    """
+    Soft barrier penalty for halos that have drifted outside the
+    physical parameter bounds.
+
+        slope:       0 < n < 2
+        kappa_star:  kappa_star > 0
+
+    Returns
+    -------
+    penalty : float
+        Sum of squared boundary violations, scaled by penalty_factor.
+        Zero if all halos are inside the physical region.
+    """
+    n = np.atleast_1d(halos.slope)
+    k = np.atleast_1d(halos.kappa_star)
+
+    # Slope: penalize n <= 0 and n >= 2 quadratically in distance from boundary
+    pen_n_low = np.where(n <= 0.0, (0.0 - n) ** 2, 0.0).sum()
+    pen_n_hi = np.where(n >= 2.0, (n - 2.0) ** 2, 0.0).sum()
+    pen_k = np.where(k <= 0.0, (0.0 - k) ** 2, 0.0).sum()
+
+    return penalty_factor * float(pen_n_low + pen_n_hi + pen_k)
+
+
+def calc_dof_wl_power_law(sources, halos, use_flags=(True, True, True)):
+    """
+    Degrees of freedom for the weak-lensing chi-squared with power-law halos.
+
+    Each signal component contributes 2 numbers per source (the two
+    polarization components), times the number of enabled signal families.
+    Each halo contributes 4 free parameters: (x, y, kappa_star, slope).
+    Note that theta_star is fixed by global convention and not counted.
+
+    Parameters
+    ----------
+    sources : Source
+        Source object.  Only sources.x is used for counting.
+    halos : PowerLawHalo
+        Halo model.  Only halos.x is used for counting.
+    use_flags : tuple of three bool
+        (use_shear, use_flexion, use_g_flexion).
+
+    Returns
+    -------
+    dof : int or float
+        Degrees of freedom.  np.inf if dof <= 0.
+    """
+    num_signals = int(sum(use_flags))
+    num_source_params = 2 * num_signals * len(sources.x)
+    num_halo_params = 4 * len(halos.x)
+    dof = num_source_params - num_halo_params
+    if dof <= 0:
+        return np.inf
+    return int(dof)
