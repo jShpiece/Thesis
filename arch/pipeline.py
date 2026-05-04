@@ -1266,24 +1266,46 @@ def _strength_chi2_target_power_law(packed_params, x_fixed, y_fixed,
     return float(chi2_total)
 
 def update_chi2_values(sources, lenses, use_flags, lens_type='NFW',
-                      use_strong_lensing: bool = False, lambda_sl: float = None):
+                       use_strong_lensing: bool = False, lambda_sl: float = None):
     """
-    Updates per-lens chi2 (WL-only per-lens is fine) and returns reduced chi2 for the
-    combined WL+SL objective at the global level.
+    Updates per-lens chi2 (WL-only per-lens is fine) and returns reduced
+    chi2 for the combined WL+SL objective at the global level.
 
-    Parameters:
-        sources (Source): Source object.
-        lenses (SIS_Lens or NFW_Lens): Lens object.
-        use_flags (list of bool): Which lensing signals to use.
-        lens_type (str): 'SIS' or 'NFW'.
-        use_strong_lensing (bool): Whether to include strong lensing.
-        lambda_sl (float or None): Pre-computed SL weight.
+    Parameters
+    ----------
+    sources : Source
+        Source object.
+    lenses : SIS_Lens, NFW_Lens, or PowerLawHalo
+        Lens collection to score.
+    use_flags : list of bool
+        Which lensing signals to use (shear / flexion / g-flexion).
+    lens_type : str
+        'SIS', 'NFW', or 'POWER_LAW'.
+    use_strong_lensing : bool
+        Whether to include strong lensing.
+    lambda_sl : float or None
+        Pre-computed SL weight (frozen across optimizer calls).
 
-    Returns:
-        float: Reduced chi-squared for the combined WL+SL objective.
+    Returns
+    -------
+    float
+        Reduced chi-squared for the combined WL+SL objective.
 
-    NOTE: per-lens chi2 is left as WL-only here (prototype). The returned reduced chi2
-    is computed from the combined objective.
+    Notes
+    -----
+    Per-lens chi2 is computed WL-only (consistent with the existing
+    SIS/NFW behavior).  For POWER_LAW, the per-lens reconstruction
+    builds a single-entry PowerLawHalo carrying the cluster-level
+    metadata (theta_star, redshift) shared across all halos, and the
+    per-halo (x, y, kappa_star, slope) of that one entry.
+
+    For POWER_LAW, the WL-only path is the only currently-supported
+    branch through this function; SL handling for POWER_LAW is
+    delegated to forward_lens_selection (which computes lambda_sl
+    once after WL selection completes and freezes it through merging
+    and strength optimization).  If use_strong_lensing=True is passed
+    with lens_type='POWER_LAW', the underlying calculate_total_chi2
+    will raise NotImplementedError.
     """
     chi2_total, dof_total, comps = metric.calculate_total_chi2(
         sources, lenses, use_flags, lens_type=lens_type,
@@ -1291,9 +1313,8 @@ def update_chi2_values(sources, lenses, use_flags, lens_type='NFW',
     )
     reduced_chi2 = chi2_total / dof_total if dof_total != 0 else np.inf
 
-    # --- Keep existing per-lens bookkeeping (WL-only) ---
+    # --- Per-lens bookkeeping (WL-only, by design) ---
     global_chi2_wl = comps["chi2_wl"]
-
     if len(lenses.x) == 1:
         lenses.chi2[0] = global_chi2_wl
     else:
@@ -1310,13 +1331,25 @@ def update_chi2_values(sources, lenses, use_flags, lens_type='NFW',
                     lenses.x[i], lenses.y[i], lenses.te[i],
                     [0]
                 )
+            elif lens_type == "POWER_LAW":
+                # Cluster-level metadata (theta_star, redshift) is
+                # shared across all halos in the collection; each
+                # single-halo reconstruction carries the same values.
+                one_halo = halo_obj.PowerLawHalo(
+                    x=[lenses.x[i]], y=[lenses.y[i]],
+                    kappa_star=[lenses.kappa_star[i]],
+                    slope=[lenses.slope[i]],
+                    theta_star=lenses.theta_star,
+                    redshift=lenses.redshift,
+                    chi2=[0.0],
+                )
             else:
-                raise ValueError('Invalid lens type - must be either "SIS" or "NFW"')
-
+                raise ValueError(
+                    'Invalid lens type — must be "SIS", "NFW", or "POWER_LAW"'
+                )
             lenses.chi2[i] = metric.calculate_chi_squared(
                 sources, one_halo, use_flags, lens_type=lens_type
             )
-
     return reduced_chi2
 
 def chi2wrapper(guess, params):
@@ -1440,8 +1473,8 @@ def chi2wrapper(guess, params):
 def cast_votes_power_law(sources,
                          theta_star=30.0,
                          redshift=0.5,
-                         amp_floor_F=None,
-                         amp_floor_G=None,
+                         amp_floor_F=0.0,
+                         amp_floor_G=0.0,
                          weight_power=2.0):
     """
     Per-source candidate generation for power-law halos via the two
@@ -1452,32 +1485,40 @@ def cast_votes_power_law(sources,
         F_hat       = unit vector toward halo   (radial pointing)
 
     For each source s, this routine inverts the invariants to estimate
-    (n_s, theta_s, x_s, y_s, kappa_star_s) — a one-source-per-vote
-    candidate seed.  These can then be passed to seed_from_votes() for
-    peak extraction or directly into forward selection.
+    (n_s, theta_s, x_s, y_s, kappa_star_s) — a one-candidate-per-source
+    seed.  These can then be passed to seed_from_votes() for peak
+    extraction or directly into forward selection.  This matches the
+    ARCH design philosophy used by the SIS and NFW branches of
+    generate_initial_guess: every source contributes a candidate,
+    and forward selection is what discriminates true halos from
+    noise-driven false positives.
 
     The slope estimator
         n_hat = 2 (R - 1) / (R + 1),    R = |G|/|F|
-    is clipped to (0.05, 1.95) for numerical safety.  Sources with |F|
-    or |G| below their respective amplitude floors get NaN entries —
-    the caller can mask these out.
+    is clipped to (0.05, 1.95) for numerical safety.  Sources whose
+    |F| or |G| are below their respective amplitude floors get NaN
+    entries — the caller can mask these out.  By default the floors
+    are 0 (every source with a non-zero signal contributes).
 
     Parameters
     ----------
     sources : Source
         Source object carrying e1, e2, f1, f2, g1, g2, x, y arrays.
-        Per-source signal uncertainties (sigs, sigf, sigg) are used
-        only to set sensible amp_floor defaults if those are None.
     theta_star : float
         Pivot radius (arcsec).  Must match the value to be used for
         any subsequent power-law fitting.
     redshift : float
         Cluster redshift (used to construct the returned PowerLawHalo).
-    amp_floor_F, amp_floor_G : float or None
+    amp_floor_F, amp_floor_G : float
         Minimum |F| and |G| amplitudes for a source to contribute a
-        valid vote.  Sources below the floor get NaN entries.  Pass
-        None (default) to use 3*median(sigf) and 3*median(sigg).  Pass
-        0.0 to disable the floor entirely (every source votes).
+        valid vote.  Default 0.0 (every source with non-zero signal
+        votes — matches the SIS/NFW one-candidate-per-source philosophy).
+
+        Earlier versions defaulted to 3 * median(sigma), suppressing
+        sub-3-sigma sources at the seeding stage.  That was a numerical-
+        safety workaround that violated the ARCH "trust every source,
+        let forward selection discriminate" principle.  Set explicitly
+        if a downstream step is sensitive to noisy seeds.
     weight_power : float
         Vote weight is |F|^weight_power.  Default 2 (favours strong-F
         sources, which provide the most accurate radial estimate).
@@ -1485,11 +1526,11 @@ def cast_votes_power_law(sources,
     Returns
     -------
     votes : dict with keys:
-        "x_vote", "y_vote"          : (N,) per-source halo position estimates (arcsec)
-        "n_est"                     : (N,) per-source slope estimates
-        "kappa_star_est"            : (N,) per-source kappa_star estimates
-        "weight"                    : (N,) per-source vote weights
-        "valid"                     : (N,) bool mask: True where the vote is usable
+        "x_vote", "y_vote"    : (N,) per-source halo position estimates (arcsec)
+        "n_est"               : (N,) per-source slope estimates
+        "kappa_star_est"      : (N,) per-source kappa_star estimates
+        "weight"              : (N,) per-source vote weights
+        "valid"               : (N,) bool mask: True where the vote is usable
     """
     e1 = np.atleast_1d(sources.e1).astype(float)
     e2 = np.atleast_1d(sources.e2).astype(float)
@@ -1500,19 +1541,17 @@ def cast_votes_power_law(sources,
     xs = np.atleast_1d(sources.x).astype(float)
     ys = np.atleast_1d(sources.y).astype(float)
 
-    # Default amplitude floors at 3-sigma if user passed None
-    if amp_floor_F is None:
-        amp_floor_F = (3.0 * float(np.median(np.atleast_1d(sources.sigf)))
-                       if hasattr(sources, "sigf") else 0.0)
-    if amp_floor_G is None:
-        amp_floor_G = (3.0 * float(np.median(np.atleast_1d(sources.sigg)))
-                       if hasattr(sources, "sigg") else 0.0)
-
     gamma_amp = np.hypot(e1, e2)
     F_amp = np.hypot(f1, f2)
     G_amp = np.hypot(g1, g2)
 
-    valid = (F_amp > amp_floor_F) & (G_amp > amp_floor_G)
+    # Validity criterion — only excludes degenerate signals.  By default
+    # (amp_floor_F = amp_floor_G = 0) this is just a non-zero check; the
+    # tiny epsilon floor avoids divide-by-zero on literally-zero signals
+    # but otherwise lets every source vote.
+    eps = 1.0e-30
+    valid = ((F_amp > max(amp_floor_F, eps))
+             & (G_amp > max(amp_floor_G, eps)))
 
     # |G|/|F| -> n_hat
     R = np.where(valid, G_amp / np.where(F_amp > 0, F_amp, 1.0), np.nan)
@@ -1548,8 +1587,7 @@ def cast_votes_power_law(sources,
     # an embedded beta(z_s) factor since the observed signals scale by
     # beta.  For at-infinity convention kappa_star (matching the
     # production calculate_lensing_signals_power_law convention),
-    # divide by beta(z_s) using the per-source redshift.  We keep this
-    # source-by-source in case sources span a wide z range.
+    # divide by beta(z_s) using the per-source redshift.
     if hasattr(sources, "redshift"):
         zs_arr = np.atleast_1d(sources.redshift).astype(float)
         if zs_arr.size == xs.size:
