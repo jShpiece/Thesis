@@ -295,12 +295,24 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8, k_val=
     Calculates the convergence (kappa) map for a given set of lenses.
 
     Parameters:
-        lenses: Lens object containing positions and strengths.
-        extent (tuple): (xmin, xmax, ymin, ymax) defining the map extent in arcseconds.
-        smoothing_scale (float): Smoothing scale in arcseconds.
+        lenses: Lens object containing positions and strengths.  Type
+            depends on `lens_type`:
+              - SIS: SIS_Lens with .te
+              - NFW: NFW_Lens with .mass, .concentration, .redshift
+              - POWER_LAW: PowerLawHalo with .kappa_star, .slope,
+                .theta_star, .redshift
+        extent (tuple): (xmin, xmax, ymin, ymax) defining the map extent
+            in arcseconds.
+        lens_type (str): 'SIS', 'NFW', or 'POWER_LAW'.
+        source_redshift (float): Source redshift used to compute the
+            beta(z_s) factor for POWER_LAW (and the critical surface
+            density for NFW).
+        k_val (float): Mass-sheet transformation parameter (driving
+            kappa to zero at the field edge).
 
     Returns:
-        tuple: (X, Y, kappa) where X and Y are meshgrid arrays, and kappa is the convergence map.
+        tuple: (X, Y, kappa) where X and Y are meshgrid arrays, and
+            kappa is the convergence map.
     """
     xmin, xmax, ymin, ymax = extent
 
@@ -315,7 +327,7 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8, k_val=
     X, Y = np.meshgrid(x_range, y_range)
     kappa = np.zeros_like(X)
 
-    # Calculate the convergence map
+    # Radial NFW shape function
     def radial_term_1(x):
         sol = np.zeros_like(x)
         mask1 = x < 1
@@ -325,7 +337,7 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8, k_val=
         sol[mask2] = 1 - (2 / np.sqrt(x[mask2] ** 2 - 1)) * np.arctan(np.sqrt((x[mask2] - 1) / (1 + x[mask2])))
 
         return sol
-    
+
     if lens_type == 'SIS':
         for k in range(len(lenses.x)):
             dx = X - lenses.x[k]
@@ -352,14 +364,42 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8, k_val=
             kappa_s = rho_s[k] * rs_1[k] / sigma_crit  # Dimensionless surface density
             kappa += 2 * kappa_s * term_1 / (x ** 2 - 1)
 
+    elif lens_type == 'POWER_LAW':
+        # kappa(theta) = beta(z_s) * kappa_star * (theta / theta_star)^(-n)
+        #
+        # kappa_star is defined at z_s -> infinity (Wright & Brainerd
+        # convention).  At a finite source redshift we apply the
+        # lensing-efficiency factor beta(z_s) = sigma_crit(inf) / sigma_crit(z_s)
+        # = D_ls / D_s, which scales the at-infinity convergence to the
+        # observation-plane value.
+        z_l = float(lenses.redshift)
+        if source_redshift <= z_l:
+            beta = 0.0
+        else:
+            sigma_crit_zs = critical_surface_density(z_l, source_redshift)
+            # sigma_crit at z_s -> infinity is c^2 / (4 pi G D_l)
+            D_l = cosmo.angular_diameter_distance(z_l).to(u.m).value
+            sigma_crit_inf = c.value ** 2 / (4 * np.pi * G.value * D_l)
+            beta = sigma_crit_inf / sigma_crit_zs
+
+        theta_star = float(lenses.theta_star)
+        for k in range(len(lenses.x)):
+            dx = X - lenses.x[k]
+            dy = Y - lenses.y[k]
+            r = np.hypot(dx, dy) + 0.5  # avoid central singularity (NFW convention)
+            kappa += beta * lenses.kappa_star[k] * (r / theta_star) ** (-lenses.slope[k])
+
+    else:
+        raise ValueError("Invalid lens_type. Must be 'SIS', 'NFW', or 'POWER_LAW'.")
+
     # Break the mass sheet degeneracy by requiring kappa to go to zero at the edges
-    # k_val = estimate_mass_sheet_factor(kappa) # Mass sheet transformation parameter
     kappa = mass_sheet_transformation(kappa, k=k_val)
 
     # Remove the padding
     X = X[pad_val:-pad_val, pad_val:-pad_val]
     Y = Y[pad_val:-pad_val, pad_val:-pad_val]
     kappa = kappa[pad_val:-pad_val, pad_val:-pad_val]
+
     return X, Y, kappa
 
 
