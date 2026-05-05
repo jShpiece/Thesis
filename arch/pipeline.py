@@ -488,7 +488,7 @@ def filter_lens_positions(sources, lenses, xmax,
                           threshold_distance=0.5,
                           lens_type='SIS',
                           slope_boundary_tol=1.0e-3,
-                          kappa_floor_n_sigma=1.0,
+                          kappa_floor_n_sigma=0.0,
                           kappa_test_radius=10.0):
     """
     Filters out invalid lenses based on geometric and physical criteria.
@@ -502,20 +502,29 @@ def filter_lens_positions(sources, lenses, xmax,
       - SIS:        Einstein radius >= 1e-3 arcsec.
       - NFW:        Mass in [1e10, 1e16] M_sun.
       - POWER_LAW:  Slope `n` not pinned at the (0.05, 1.95) boundary,
-                    and `kappa_star` above a flexion-noise floor.
+                    and (optionally) `kappa_star` above a flexion-noise
+                    floor.
 
     The boundary-pinning check for POWER_LAW catches optimizer failures
     where Nelder-Mead landed at the bound but couldn't find an interior
     minimum — these halos' fitted parameters are not physically
     meaningful and should be dropped before forward selection.
 
-    The kappa_star noise floor is computed from the data itself as
+    The kappa_star noise-floor filter is OFF BY DEFAULT
+    (kappa_floor_n_sigma=0).  In real data, the source-distribution
+    sigma_f estimate is dominated by intrinsic flexion variance rather
+    than measurement noise, which makes the analytical noise floor too
+    aggressive (rejects everything).  forward_lens_selection performs
+    a more principled signal-vs-noise discrimination by accepting only
+    candidates that lower the global chi-squared, so the analytical
+    floor here is redundant for production data.
+
+    To enable the noise floor (e.g., for synthetic-data tests where
+    sigma_f is well-known), set kappa_floor_n_sigma > 0.  The floor is
+    computed as:
+
         kappa_star_min = (kappa_floor_n_sigma * median(sigf))
-                         * theta^(n+1) / (n * theta_star^n)
-    evaluated at theta = `kappa_test_radius` and the candidate's own n.
-    A halo whose kappa_star falls below this threshold cannot produce
-    a flexion signal distinguishable from noise at typical source
-    distances and should be dropped.
+                         * theta_test^(n+1) / (n * theta_star^n)
 
     Parameters
     ----------
@@ -537,11 +546,13 @@ def filter_lens_positions(sources, lenses, xmax,
     kappa_floor_n_sigma : float
         POWER_LAW only.  Multiplicative factor on the median per-source
         flexion noise that defines the kappa_star noise floor.  Default
-        1.0 — i.e., the halo must produce a signal at least 1*median(sigf)
-        at the test radius.
+        0.0 (filter disabled — forward_lens_selection handles noise
+        discrimination).  Set to ~0.3-1.0 to enable on synthetic data
+        with a well-known sigma_f.
     kappa_test_radius : float
         POWER_LAW only.  Radius at which the kappa_star noise floor is
-        evaluated (arcsec).  Default 10 arcsec.
+        evaluated (arcsec).  Default 10 arcsec.  Only used when
+        kappa_floor_n_sigma > 0.
 
     Returns
     -------
@@ -580,28 +591,30 @@ def filter_lens_positions(sources, lenses, xmax,
 
     elif lens_type == 'POWER_LAW':
         # (1) Slope pinned at boundary?
+        # This step catches optimizer failures where the simplex landed at the slope
+        # boundary but couldn't find an interior minimum.  These halos' parameters are not
+        # physically meaningful and should be dropped before forward selection.
         slope_pinned = (
             (lenses.slope < 0.05 + slope_boundary_tol)
             | (lenses.slope > 1.95 - slope_boundary_tol)
         )
 
-        # (2) kappa_star below flexion-noise floor?
-        # Flexion at radius theta from a power-law halo:
-        #   |F|(theta) = n * kappa_star * theta_star^n / theta^(n+1)
-        # Set |F|(theta_test) = kappa_floor_n_sigma * median(sigf), solve for kappa_star_min:
-        #   kappa_star_min = (kappa_floor_n_sigma * median(sigf))
-        #                    * theta_test^(n+1) / (n * theta_star^n)
-        median_sigf = float(np.median(np.atleast_1d(sources.sigf)))
-        n_arr = np.maximum(lenses.slope, 0.05)  # avoid division by zero
-        kappa_star_min = (
-            kappa_floor_n_sigma * median_sigf
-            * kappa_test_radius ** (n_arr + 1.0)
-            / (n_arr * lenses.theta_star ** n_arr)
-        )
-        kappa_below_floor = lenses.kappa_star < kappa_star_min
+        # (2) kappa_star below flexion-noise floor (only if enabled)
+        # The floor is based on the analytical inversion of the flexion SNR at a test radius,
+        if kappa_floor_n_sigma > 0:
+            median_sigf = float(np.median(np.atleast_1d(sources.sigf)))
+            n_arr = np.maximum(lenses.slope, 0.05)
+            kappa_star_min = (
+                kappa_floor_n_sigma * median_sigf
+                * kappa_test_radius ** (n_arr + 1.0)
+                / (n_arr * lenses.theta_star ** n_arr)
+            )
+            kappa_below_floor = lenses.kappa_star < kappa_star_min
+        else:
+            kappa_below_floor = np.zeros(len(lenses.x), dtype=bool)
+            median_sigf = float(np.median(np.atleast_1d(sources.sigf)))
 
-        # Diagnostic counts so the failure message can identify which
-        # filter dominated.
+        # Diagnostic counts
         n_total = len(lenses.x)
         n_too_close = int(too_close.sum())
         n_too_far = int(too_far.sum())
@@ -622,9 +635,9 @@ def filter_lens_positions(sources, lenses, xmax,
                 f"  Too close to a source (<{threshold_distance} arcsec): {n_too_close}\n"
                 f"  Drifted outside {xmax * 1.5} arcsec: {n_too_far}\n"
                 f"  Slope pinned at (0.05, 1.95) boundary: {n_slope_pinned}\n"
-                f"  kappa_star below noise floor: {n_kappa_floor}\n"
-                f"  median(sigf) = {median_sigf:.3e}, "
-                f"theta_test = {kappa_test_radius:.1f} arcsec\n"
+                f"  kappa_star below noise floor: {n_kappa_floor} "
+                f"(filter {'on' if kappa_floor_n_sigma > 0 else 'off'})\n"
+                f"  median(sigf) = {median_sigf:.3e}\n"
                 f"If slope-pinning dominates, the position optimizer is "
                 f"hitting bounds — check that cast_votes outputs are "
                 f"clipped into optimizer ranges."

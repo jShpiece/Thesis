@@ -337,6 +337,81 @@ class JWSTPipeline:
                      f"_{self.lens_type}.csv")
         self.lenses.export_to_csv(file_name)
 
+        # Sanity-check diagnostic — print recovered parameters per halo
+        # so the user can see if anything is bound-pinned or
+        # implausibly large.
+        self._print_summary()
+
+    def _print_summary(self):
+        """Print a per-halo summary of the fitted lenses."""
+        if self.lenses is None or self.lenses.x.size == 0:
+            print("  (no halos recovered)")
+            return
+
+        if self.lens_type == 'NFW':
+            print(f"\n  NFW fit summary ({self.lenses.x.size} halos):")
+            print(f"  {'idx':>3} {'x':>8} {'y':>8} "
+                  f"{'mass':>13} {'conc':>6}")
+            print("  " + "-" * 50)
+            for i in range(self.lenses.x.size):
+                print(f"  {i:>3d} "
+                      f"{self.lenses.x[i]:>8.2f} {self.lenses.y[i]:>8.2f} "
+                      f"{self.lenses.mass[i]:>13.3e} "
+                      f"{self.lenses.concentration[i]:>6.2f}")
+            print(f"  Sum mass: {np.nansum(self.lenses.mass):.3e} M_sun")
+
+        elif self.lens_type == 'POWER_LAW':
+            # Bound-pinning detection — uses the tightened production
+            # bounds (slope in (0.4, 1.7), kappa_star in (1e-6, 10)).
+            bound_tol = 1.0e-2
+            slope_lo, slope_hi = 0.4, 1.7
+            kappa_lo, kappa_hi = 1.0e-6, 10.0
+            k_pinned = (
+                (self.lenses.kappa_star < kappa_lo * (1 + bound_tol))
+                | (self.lenses.kappa_star > kappa_hi * (1 - bound_tol))
+            )
+            n_pinned = (
+                (self.lenses.slope < slope_lo + bound_tol)
+                | (self.lenses.slope > slope_hi - bound_tol)
+            )
+
+            theta_E_arr = self.lenses.calc_theta_E()
+
+            # M(<100 kpc) per halo
+            from astropy.cosmology import Planck18 as _cosmo
+            kpc_per_arcsec = _cosmo.kpc_proper_per_arcmin(
+                float(self.lenses.redshift)).to(u.kpc / u.arcsec).value
+            theta_100kpc = 100.0 / kpc_per_arcsec
+            M_100_arr = np.array([
+                float(self.lenses.calc_mass_2d(theta_100kpc, self.z_source)[i])
+                for i in range(self.lenses.x.size)
+            ])
+
+            print(f"\n  POWER_LAW fit summary ({self.lenses.x.size} halos):")
+            print(f"  {'idx':>3} {'x':>8} {'y':>8} {'kappa*':>8} "
+                  f"{'n':>6} {'theta_E':>10} {'M(<100kpc)':>13}  flag")
+            print("  " + "-" * 75)
+            for i in range(self.lenses.x.size):
+                flags = []
+                if k_pinned[i]:
+                    flags.append("k_pinned")
+                if n_pinned[i]:
+                    flags.append("n_pinned")
+                flag_str = "+".join(flags) if flags else ""
+                print(f"  {i:>3d} "
+                      f"{self.lenses.x[i]:>8.2f} {self.lenses.y[i]:>8.2f} "
+                      f"{self.lenses.kappa_star[i]:>8.4f} "
+                      f"{self.lenses.slope[i]:>6.3f} "
+                      f"{theta_E_arr[i]:>9.2f}\" "
+                      f"{M_100_arr[i]:>13.3e}  {flag_str}")
+            print("  " + "-" * 75)
+            print(f"  Total: kappa_star pinned: {int(k_pinned.sum())}/{self.lenses.x.size}, "
+                  f"slope pinned: {int(n_pinned.sum())}/{self.lenses.x.size}")
+            print(f"  Median: kappa_star = {np.median(self.lenses.kappa_star):.4f}, "
+                  f"slope = {np.median(self.lenses.slope):.3f}, "
+                  f"theta_E = {np.median(theta_E_arr):.2f}\"")
+            print(f"  Sum M(<100kpc): {np.nansum(M_100_arr):.3e} M_sun")
+
     # ------------------------------------------------------------------
     # Plotting
     # ------------------------------------------------------------------
@@ -488,26 +563,60 @@ class JWSTPipeline:
         img_extent = (0.0, img_data.shape[1] * self.CDELT,
                       0.0, img_data.shape[0] * self.CDELT)
 
-        # Model kappa from current lenses
+        # Model kappa from current lenses.  We mask the inner
+        # `inner_mask_radius` arcsec around each halo center because
+        # neither profile is data-constrained closer than the typical
+        # source distance from a halo (~5 arcsec for JWST).  For
+        # POWER_LAW especially, the kappa profile diverges as r^(-n) so
+        # the inner pixels are pure model extrapolation that would
+        # otherwise dominate the contour-level computation.  Both NFW
+        # and POWER_LAW are masked equally for a fair comparison.
         X, Y, kappa = utils.calculate_kappa(
             self.lenses, extent=img_extent, lens_type=self.lens_type,
             source_redshift=self.z_source,
         )
+        inner_mask_radius = float(getattr(self, 'inner_mask_radius', 5.0))
+        if inner_mask_radius > 0 and self.lenses.x.size > 0:
+            for k in range(self.lenses.x.size):
+                R = np.hypot(X - self.lenses.x[k], Y - self.lenses.y[k])
+                kappa = np.where(R < inner_mask_radius, 0.0, kappa)
 
-        # Peaks within 300 kpc
+        # Peaks within 300 kpc.  Compute these BEFORE masking would
+        # affect them (they're already past the masked inner region
+        # since peak detection finds large-scale halo centers).
         peaks, _ = utils.find_peaks_and_masses(
             kappa, z_lens=self.z_cluster, z_source=self.z_source,
             radius_kpc=300,
         )
 
-        # Fixed kappa levels per cluster (cached so all signal choices
-        # share the same color scale)
+        # Kappa contour levels.  We use FIXED scientifically-meaningful
+        # levels by default so NFW and POWER_LAW reconstructions of
+        # the same cluster are directly comparable visually.  The old
+        # quantile-based levels gave wildly different numbers for the
+        # two profiles (NFW first contour ~0.16, POWER_LAW first
+        # contour ~0.75 for Abell) because POWER_LAW kappa is more
+        # centrally concentrated — that's a profile-shape artifact,
+        # not a recovery difference.
+        #
+        # Override per-cluster by setting self.kappa_levels in the
+        # config or instance before calling visualize().
         if not hasattr(self, "_kappa_levels"):
             self._kappa_levels = {}
         cache_key = (self.cluster_name, self.lens_type)
         if cache_key not in self._kappa_levels:
-            self._kappa_levels[cache_key] = _compute_levels_from_kappa(
-                kappa, positive=True)
+            if hasattr(self, 'kappa_levels') and self.kappa_levels is not None:
+                # User-supplied levels
+                self._kappa_levels[cache_key] = list(self.kappa_levels)
+            else:
+                # Cluster-scale presets:
+                #   ABELL_2744 (z=0.308, M~2e14): 'cluster' regime
+                #   EL_GORDO   (z=0.873, M~1e15): 'massive' regime
+                if self.cluster_name == 'EL_GORDO':
+                    self._kappa_levels[cache_key] = [
+                        0.10, 0.20, 0.50, 1.00, 2.00]
+                else:
+                    self._kappa_levels[cache_key] = [
+                        0.05, 0.10, 0.20, 0.50, 1.00]
         levels = self._kappa_levels[cache_key]
 
         # Title and total-mass label depend on lens_type
@@ -536,16 +645,17 @@ class JWSTPipeline:
             save_pdf_path=str(save_main), cluster_name=self.cluster_name,
         )
 
-        # Mass comparison (NFW only — the utility expects .mass)
-        if self.lens_type == 'NFW':
-            utils.compare_mass_estimates(
-                self.lenses,
-                Path(self.output_dir) / (f"mass_{self.cluster_name}"
-                                          f"_{self.signal_choice}.pdf"),
-                f"Mass Comparison: {self.cluster_name} "
-                f"(signals: {self.signal_choice})",
-                self.cluster_name,
-            )
+        # Mass comparison — now supports both NFW and POWER_LAW
+        utils.compare_mass_estimates(
+            self.lenses,
+            Path(self.output_dir) / (f"mass_{self.cluster_name}"
+                                      f"_{self.signal_choice}"
+                                      f"_{self.lens_type}.pdf"),
+            f"Mass Comparison: {self.cluster_name} "
+            f"({self.lens_type}, signals: {self.signal_choice})",
+            self.cluster_name,
+            lens_type=self.lens_type,
+        )
 
     def get_image_data(self):
         with fits.open(self.image_path) as hdul:
@@ -655,40 +765,173 @@ def run_nfw_vs_power_law(base_config):
 # CLI entry
 # ======================================================================
 
+# Cluster definitions — paths are relative to the repository root
+# (the parent of `pipelines/` and `arch/`).  Override with --repo-root
+# if invoking from elsewhere.
+CLUSTERS = {
+    'ABELL_2744': {
+        'flexion_catalog_path': 'Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
+        'source_catalog_path':  'Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
+        'image_path':           'Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
+        'output_dir':           'Output/JWST/ABELL/',
+        'cluster_redshift':     0.308,
+        'source_redshift':      0.8,
+    },
+    'EL_GORDO': {
+        'flexion_catalog_path': 'Data/JWST/EL_GORDO/Catalogs/multiband_flexion.pkl',
+        'source_catalog_path':  'Data/JWST/EL_GORDO/Catalogs/stacked_cat.ecsv',
+        'image_path':           'Data/JWST/EL_GORDO/Image_Data/stacked.fits',
+        'output_dir':           'Output/JWST/EL_GORDO/',
+        'cluster_redshift':     0.873,
+        'source_redshift':      1.2,
+    },
+}
+
+VALID_SIGNALS = ['all', 'shear_f', 'f_g', 'shear_g']
+VALID_MODES = ['NFW', 'POWER_LAW', 'COMPARE']
+VALID_ACTIONS = ['fit', 'visualize', 'errorbars']
+
+
+def _build_config(cluster_name, signal, theta_star, repo_root):
+    """Construct a JWSTPipeline config dict for a (cluster, signal) pair."""
+    base = CLUSTERS[cluster_name]
+    cfg = {
+        'flexion_catalog_path': str(repo_root / base['flexion_catalog_path']),
+        'source_catalog_path':  str(repo_root / base['source_catalog_path']),
+        'image_path':           str(repo_root / base['image_path']),
+        'output_dir':           str(repo_root / base['output_dir']),
+        'cluster_name':         cluster_name,
+        'cluster_redshift':     base['cluster_redshift'],
+        'source_redshift':      base['source_redshift'],
+        'signal_choice':        signal,
+        'theta_star':           theta_star,
+    }
+    return cfg
+
+
+def _run_one(cfg, mode, action):
+    """Run a single (cluster, signal, mode, action) job."""
+    if mode == 'COMPARE':
+        if action != 'fit':
+            raise ValueError(
+                "--mode COMPARE only supported with --action fit (it runs both "
+                "NFW and POWER_LAW from scratch).  For visualize/errorbars, "
+                "pick a specific lens type.")
+        return run_nfw_vs_power_law(cfg)
+
+    cfg = dict(cfg)
+    cfg['lens_type'] = mode
+    pipe = JWSTPipeline(cfg)
+    if action == 'fit':
+        pipe.run()
+        pipe.visualize()
+    elif action == 'visualize':
+        pipe.visualize()
+    elif action == 'errorbars':
+        pipe.compute_error_bars()
+    return pipe
+
+
+def main_cli():
+    import argparse
+    p = argparse.ArgumentParser(
+        prog='python -m pipelines.read_jwst',
+        description=(
+            "JWST cluster lensing reconstruction with NFW and/or POWER_LAW "
+            "profiles.  Run from the repository root (the parent of "
+            "`pipelines/` and `arch/`)."),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  # Default sweep — both clusters, all 4 signals, NFW vs POWER_LAW comparison\n"
+            "  python -m pipelines.read_jwst\n"
+            "\n"
+            "  # Just Abell 2744, all signals, POWER_LAW only\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 --mode POWER_LAW\n"
+            "\n"
+            "  # One run end to end (Abell, 'all', power-law, theta_star=50\")\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
+            "      --signal all --mode POWER_LAW --theta-star 50\n"
+            "\n"
+            "  # Re-render plots from saved CSVs (no re-fitting)\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
+            "      --signal all --mode NFW --action visualize\n"
+            "\n"
+            "  # Jackknife error bars on a previously fit reconstruction\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
+            "      --signal all --mode NFW --action errorbars\n"
+        ),
+    )
+    p.add_argument('--cluster', choices=list(CLUSTERS.keys()) + ['ALL'],
+                   default='ALL',
+                   help="Which cluster to run.  Default: ALL.")
+    p.add_argument('--signal', choices=VALID_SIGNALS + ['ALL'],
+                   default='ALL',
+                   help="Which signal combination to use.  Default: ALL "
+                        "(sweeps over all 4).")
+    p.add_argument('--mode', choices=VALID_MODES, default='COMPARE',
+                   help="Which profile to fit.  COMPARE runs both NFW and "
+                        "POWER_LAW.  Default: COMPARE.")
+    p.add_argument('--action', choices=VALID_ACTIONS, default='fit',
+                   help="What to do: 'fit' runs the pipeline and renders "
+                        "plots; 'visualize' re-renders plots from saved "
+                        "CSV; 'errorbars' runs the jackknife.  Default: fit.")
+    p.add_argument('--theta-star', type=float, default=30.0,
+                   dest='theta_star',
+                   help="POWER_LAW pivot radius in arcsec.  Default: 30.")
+    p.add_argument('--repo-root', type=str, default=None, dest='repo_root',
+                   help="Repository root path (the parent of `pipelines/` "
+                        "and `arch/`).  Default: auto-detected from this "
+                        "file's location.")
+    args = p.parse_args()
+
+    # Resolve repository root
+    if args.repo_root is None:
+        # This file lives at <repo_root>/pipelines/read_jwst.py
+        repo_root = Path(__file__).resolve().parent.parent
+    else:
+        repo_root = Path(args.repo_root).resolve()
+
+    if not (repo_root / 'arch').is_dir():
+        warnings.warn(
+            f"Repository root {repo_root!s} does not contain an `arch/` "
+            f"directory.  This may indicate the path is wrong.  Set "
+            f"--repo-root explicitly if needed.")
+
+    # Resolve cluster and signal lists
+    clusters = list(CLUSTERS.keys()) if args.cluster == 'ALL' else [args.cluster]
+    signals  = VALID_SIGNALS         if args.signal  == 'ALL' else [args.signal]
+
+    # Print a short header so the user can see what they're about to do
+    n_jobs = len(clusters) * len(signals)
+    print(f"\n{'='*64}")
+    print(f"  ARCH JWST runner")
+    print(f"{'='*64}")
+    print(f"  repo root  : {repo_root}")
+    print(f"  clusters   : {clusters}")
+    print(f"  signals    : {signals}")
+    print(f"  mode       : {args.mode}")
+    print(f"  action     : {args.action}")
+    if args.mode == 'POWER_LAW' or args.mode == 'COMPARE':
+        print(f"  theta_star : {args.theta_star}")
+    print(f"  total jobs : {n_jobs}")
+    print()
+
+    for cluster_name in clusters:
+        for signal in signals:
+            print(f"\n--- {cluster_name} / signal={signal} / "
+                  f"mode={args.mode} / action={args.action} ---")
+            cfg = _build_config(cluster_name, signal,
+                                args.theta_star, repo_root)
+            try:
+                _run_one(cfg, args.mode, args.action)
+            except FileNotFoundError as e:
+                print(f"  SKIPPED: missing input data ({e})")
+            except Exception as e:
+                print(f"  FAILED ({type(e).__name__}): {e}")
+                # Continue with the next job rather than aborting the whole sweep
+                continue
+
+
 if __name__ == '__main__':
-    signals = ['all', 'shear_f', 'f_g', 'shear_g']
-
-    # Set to 'NFW', 'POWER_LAW', or 'COMPARE' to run both
-    run_mode = 'COMPARE'
-
-    for signal in signals:
-        abell_config = {
-            'flexion_catalog_path': 'Data/JWST/ABELL_2744/Catalogs/multiband_flexion.pkl',
-            'source_catalog_path': 'Data/JWST/ABELL_2744/Catalogs/stacked_cat.ecsv',
-            'image_path': 'Data/JWST/ABELL_2744/Image_Data/jw02756-o003_t001_nircam_clear-f115w_i2d.fits',
-            'output_dir': 'Output/JWST/ABELL/',
-            'cluster_name': 'ABELL_2744',
-            'cluster_redshift': 0.308,
-            'source_redshift': 0.8,
-            'signal_choice': signal,
-        }
-
-        el_gordo_config = {
-            'flexion_catalog_path': 'Data/JWST/EL_GORDO/Catalogs/multiband_flexion.pkl',
-            'source_catalog_path': 'Data/JWST/EL_GORDO/Catalogs/stacked_cat.ecsv',
-            'image_path': 'Data/JWST/EL_GORDO/Image_Data/stacked.fits',
-            'output_dir': 'Output/JWST/EL_GORDO/',
-            'cluster_name': 'EL_GORDO',
-            'cluster_redshift': 0.873,
-            'source_redshift': 1.2,
-            'signal_choice': signal,
-        }
-
-        for cfg in (abell_config, el_gordo_config):
-            if run_mode == 'COMPARE':
-                run_nfw_vs_power_law(cfg)
-            else:
-                cfg['lens_type'] = run_mode
-                pipe = JWSTPipeline(cfg)
-                pipe.run()
-                pipe.visualize()
+    main_cli()

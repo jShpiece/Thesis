@@ -2484,16 +2484,174 @@ def calculate_lensing_signals_nfw(halos, sources):
                 g_flexion_1.item(), g_flexion_2.item())
     return kappa, shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
+def power_law_projected_mass(
+    halos,
+    r_p,
+    return_2d=False,
+    nx=100,
+    ny=100,
+    x_range=(-300, 300),
+    y_range=(-300, 300),
+    x_center=0.0,
+    y_center=0.0,
+    z_source=0.8,
+):
+    """
+    Compute the projected mass (or convergence map) for a single
+    POWER_LAW halo.  Mirrors `nfw_projected_mass`'s API so the cluster-
+    level mass-comparison workflow in `compare_mass_estimates` can
+    dispatch on lens type without restructuring.
 
-def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_2744'):
+    The power-law convergence at angular radius theta is
+        kappa(theta) = beta(z_s) * kappa_star * (theta / theta_star)^(-n)
+    where beta(z_s) = D_ls / D_s converts from the at-infinity convention
+    (kappa_star is defined for a source at z_s -> infinity, matching the
+    Wright & Brainerd 2000 NFW convention used elsewhere in arch).
+
+    Internally everything is in kpc to match nfw_projected_mass; we
+    convert the halo's angular pivot theta_star (arcsec) to a physical
+    pivot radius r_pivot (kpc) using the lens-redshift kpc/arcsec
+    conversion, then evaluate
+
+        kappa(R) = beta * kappa_star * (R / r_pivot)^(-n)
+
+    For `return_2d=False`, the closed-form integrated 2D mass (Phase 0)
+    is used directly:
+        M_2D(<r) = pi * Sigma_cr * 2 * beta * kappa_star * r_pivot^n
+                   * r^(2-n) / (2 - n)
+
+    Parameters
+    ----------
+    halos : PowerLawHalo
+        Single-halo PowerLawHalo (the per-halo loop in
+        compare_mass_estimates constructs one of these per iteration).
+    r_p : float or array_like
+        Projected radius in kpc (only used when return_2d=False).
+    return_2d : bool
+        If True, return (kappa_grid, area_per_pixel).  If False, return
+        the integrated projected mass M(<r_p) in solar masses.
+    nx, ny : int
+    x_range, y_range : tuple of float
+        Grid extent in kpc.
+    x_center, y_center : float
+        Halo center in kpc.
+    z_source : float
+        Source redshift used for beta(z_s).
+
+    Returns
+    -------
+    If return_2d=False:
+        M_proj : float or ndarray
+            Integrated projected mass within r_p, in M_sun.
+    If return_2d=True:
+        kappa : 2D ndarray
+            Convergence map (dimensionless) on the (nx, ny) grid.
+        area_per_pixel : float
+            Pixel area in kpc^2 (so kappa * sigma_c_in_M_per_kpc2 *
+            area_per_pixel gives M_sun per pixel — same convention as
+            nfw_projected_mass).
     """
-    Compares our mass reconstruction to literature estimates for Abell 2744.
+    # --- Cosmological quantities ---
+    z_l = float(halos.redshift)
+    if z_source <= z_l:
+        # Foreground source — no lensing
+        beta = 0.0
+    else:
+        D_l_m = cosmo.angular_diameter_distance(z_l).to(u.m).value
+        D_s_m = cosmo.angular_diameter_distance(z_source).to(u.m).value
+        D_ls_m = cosmo.angular_diameter_distance_z1z2(
+            z_l, z_source).to(u.m).value
+        # beta = D_ls / D_s (equivalent to sigma_crit_inf / sigma_crit_zs)
+        beta = D_ls_m / D_s_m
+
+    # kpc per arcsec at the lens redshift
+    kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_l).to(
+        u.kpc / u.arcsec).value
+
+    # Halo strength and shape parameters
+    n = float(halos.slope)
+    kappa_star = float(halos.kappa_star)
+    theta_star_arcsec = float(halos.theta_star)
+    r_pivot_kpc = theta_star_arcsec * kpc_per_arcsec   # physical pivot radius
+
+    # --- 1D integrated mass branch ---
+    if not return_2d:
+        r_p_arr = np.atleast_1d(r_p).astype(float)
+        # Critical surface density in M_sun / kpc^2
+        sigma_c = critical_surface_density(z_l, z_source)
+        sigma_c = (sigma_c * u.M_sun / u.kpc ** 2).value
+
+        denom = 2.0 - n
+        if abs(denom) < 1e-6:
+            denom = 1e-6
+        # M(<r) = integral of Sigma over disk of radius r
+        # Sigma(R) = sigma_c * kappa(R) = sigma_c * beta * kappa_star * (R/r_pivot)^(-n)
+        # M(<r) = 2*pi * integral_0^r Sigma(R) R dR
+        #        = 2*pi * sigma_c * beta * kappa_star * r_pivot^n * r^(2-n) / (2-n)
+        M_2D = (2.0 * np.pi * sigma_c * beta * kappa_star
+                * r_pivot_kpc ** n * r_p_arr ** denom / denom)
+        return M_2D if M_2D.size > 1 else float(M_2D[0])
+
+    # --- 2D convergence-grid branch ---
+    x_vals = np.linspace(x_range[0], x_range[1], nx)
+    y_vals = np.linspace(y_range[0], y_range[1], ny)
+    dx = (x_range[1] - x_range[0]) / (nx - 1)
+    dy = (y_range[1] - y_range[0]) / (ny - 1)
+    area_per_pixel = dx * dy
+
+    XX, YY = np.meshgrid(x_vals, y_vals)
+    R = np.sqrt((XX - x_center) ** 2 + (YY - y_center) ** 2)
+    # Avoid the central singularity
+    R = np.where(R < 0.5, 0.5, R)
+
+    kappa = beta * kappa_star * (R / r_pivot_kpc) ** (-n)
+    return kappa, area_per_pixel
+
+
+def compare_mass_estimates(halos, plot_name, plot_title,
+                           cluster_name='Abell_2744', lens_type='NFW'):
     """
-    
+    Compares the cluster-level mass reconstruction to literature
+    estimates for Abell 2744 or El Gordo.
+
+    Supports both NFW and POWER_LAW lens types via the `lens_type`
+    parameter.  The workflow is identical for both:
+
+        1. For each halo, compute its convergence (kappa) contribution
+           on a 2D kpc grid centered on the cluster's mass-weighted
+           centroid.  This uses `nfw_projected_mass(return_2d=True)`
+           or `power_law_projected_mass(return_2d=True)` accordingly.
+        2. Sum kappa across halos and apply a cluster-specific mass-
+           sheet transformation (k=2 by literature convention).
+        3. Convert kappa -> Sigma -> M_2D per pixel, then compute the
+           cumulative aperture mass M(<r) by summing pixels within r.
+        4. Overlay literature mass estimates (mass, radius) on the
+           cumulative-mass plot for direct comparison.
+
+    Parameters
+    ----------
+    halos : NFW_Lens or PowerLawHalo
+        Lens collection.
+    plot_name : str
+        Path to save the output figure.
+    plot_title : str
+        Figure title.
+    cluster_name : str
+        'ABELL_2744' or 'EL_GORDO'.
+    lens_type : str
+        'NFW' (default, backward-compatible) or 'POWER_LAW'.
+
+    Notes
+    -----
+    For POWER_LAW the mass-weighted centroid uses kappa_star as the
+    weight (analogous to NFW's mass-weighted centroid).  This is a
+    proxy for true mass; halos with larger kappa_star contribute the
+    majority of the projected mass.
+    """
     # Literature mass estimates: dictionary of form {label: (mass, radius)}
     mass_estimates_abell = {
-        'MARS': (1.73e14, 200), 
-        'Bird': (1.93e14, 200), 
+        'MARS': (1.73e14, 200),
+        'Bird': (1.93e14, 200),
         'GRALE': (2.25e14, 250),
         'Merten et al.': (2.24e14, 250)
     }
@@ -2513,19 +2671,32 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
         z_cluster = 0.870
         z_source = 4.25
     else:
-        raise ValueError('Invalid cluster name. Choose from "ABELL_2744" or "EL_GORDO".')
-    
-    # Radii in kpc
-    # Take the minimum mass estimate and the maximum
+        raise ValueError(
+            "Invalid cluster name. Choose from 'ABELL_2744' or 'EL_GORDO'.")
+
+    if lens_type not in ('NFW', 'POWER_LAW'):
+        raise ValueError(
+            "Invalid lens_type. Choose from 'NFW' or 'POWER_LAW'.")
+
+    # Radii in kpc — span the literature radii with margin
     r_min = min([r for _, r in mass_estimates.values()])
     r_max = max([r for _, r in mass_estimates.values()])
-    r = np.linspace(r_min * 0.75, 1.25*r_max, 100)
-    
-    # Move the halos to be centered on the primary halo
-    
-    # largest_halo = np.argmax(halos.mass)
-    # Calculate the centroid as the center of mass of the halos
-    centroid = np.array([np.sum(halos.x * halos.mass) / np.sum(halos.mass), np.sum(halos.y * halos.mass) / np.sum(halos.mass)])
+    r = np.linspace(r_min * 0.75, 1.25 * r_max, 100)
+
+    # Mass-weighted centroid; for POWER_LAW use kappa_star as the proxy
+    if lens_type == 'NFW':
+        weight = halos.mass
+    else:  # POWER_LAW
+        weight = halos.kappa_star
+
+    weight_total = float(np.sum(weight))
+    if weight_total <= 0:
+        raise ValueError(
+            f"Cannot compute mass-weighted centroid: total weight = {weight_total}")
+    centroid = np.array([
+        np.sum(halos.x * weight) / weight_total,
+        np.sum(halos.y * weight) / weight_total,
+    ])
     halos.x -= centroid[0] + 0.5
     halos.y -= centroid[1] + 0.5
 
@@ -2535,82 +2706,108 @@ def compare_mass_estimates(halos, plot_name, plot_title, cluster_name='Abell_274
     x_vals = np.linspace(x_range[0], x_range[1], nx)
     y_vals = np.linspace(y_range[0], y_range[1], ny)
     kappa_total = np.zeros((ny, nx), dtype=float)
-    
-    # Sum the mass grids from all halos
+
+    # Convert halo positions from arcsec to kpc using lens-redshift kpc/arcsec
+    kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_cluster).to(
+        u.kpc / u.arcsec).value
+    halo_x_kpc = halos.x * kpc_per_arcsec
+    halo_y_kpc = halos.y * kpc_per_arcsec
+
+    # Sum the kappa grids from all halos
+    area_per_pixel = None
     for i in range(len(halos.x)):
-        # Compute 2D mass for this halo, centered at (halo.x, halo.y) if needed
-        # Construct the halo (non-iterable)
-        halo = halo_obj.NFW_Lens(halos.x[i], halos.y[i], [0], halos.concentration[i], halos.mass[i], z_cluster, halos.chi2[i])
-        kappa, area_per_pixel = nfw_projected_mass(
-            halo,
-            r_p=0,          # Dummy placeholder since we want the 2D grid
-            return_2d=True,
-            nx=nx,
-            ny=ny,
-            x_range=x_range,
-            y_range=y_range,
-            x_center=halo.x, 
-            y_center=halo.y,
-            z_source=z_source
-        )
-        if np.any(np.isinf(kappa)):
-            print(f'Warning: NaN values found in kappa for halo at ({halo.x}, {halo.y}) with mass {halo.mass}. Skipping this halo.')
+        if lens_type == 'NFW':
+            halo = halo_obj.NFW_Lens(
+                halos.x[i], halos.y[i], [0],
+                halos.concentration[i], halos.mass[i],
+                z_cluster, halos.chi2[i],
+            )
+            kappa, area_per_pixel = nfw_projected_mass(
+                halo, r_p=0,
+                return_2d=True, nx=nx, ny=ny,
+                x_range=x_range, y_range=y_range,
+                x_center=halo_x_kpc[i],
+                y_center=halo_y_kpc[i],
+                z_source=z_source,
+            )
+        else:  # POWER_LAW
+            halo = halo_obj.PowerLawHalo(
+                x=[halos.x[i]], y=[halos.y[i]],
+                kappa_star=[halos.kappa_star[i]],
+                slope=[halos.slope[i]],
+                theta_star=halos.theta_star,
+                redshift=z_cluster,
+                chi2=[halos.chi2[i]],
+            )
+            kappa, area_per_pixel = power_law_projected_mass(
+                halo, r_p=0,
+                return_2d=True, nx=nx, ny=ny,
+                x_range=x_range, y_range=y_range,
+                x_center=halo_x_kpc[i],
+                y_center=halo_y_kpc[i],
+                z_source=z_source,
+            )
+
+        if np.any(np.isinf(kappa)) or np.any(np.isnan(kappa)):
+            print(f"Warning: NaN/Inf values in kappa for halo {i} at "
+                  f"({halos.x[i]:.2f}, {halos.y[i]:.2f}). Skipping.")
             continue
         kappa_total += kappa
-    
-    # Now find a way to break the mass sheet degeneracy
-    # Choose a value of k
+
+    # Mass-sheet degeneracy: k value taken from literature convention
     if cluster_name == 'ABELL_2744':
-        # k value taken from literature
         kappa_total = mass_sheet_transformation(kappa_total, k=2)
     elif cluster_name == 'EL_GORDO':
         kappa_total = mass_sheet_transformation(kappa_total, k=2)
 
-    # Then convert back to a 2D mass distribution
+    # Convert kappa back to a 2D mass distribution
     sigma_c = critical_surface_density(z_cluster, z_source)
-    sigma_c = sigma_c * u.M_sun / u.kpc**2
+    sigma_c = sigma_c * u.M_sun / u.kpc ** 2
     sigma_c = sigma_c.value
     M_2D_total = kappa_total * sigma_c * area_per_pixel
-    
+
     # Coordinates of each pixel in the grid
     XX, YY = np.meshgrid(x_vals, y_vals)
-    RR = np.sqrt(XX**2 + YY**2)  # Distance of each pixel from (0,0), adjust if needed
-    
+    RR = np.sqrt(XX ** 2 + YY ** 2)
+
     # Compute the enclosed mass at each radius in r
     mass_enclosed = np.zeros_like(r)
     for i, radius in enumerate(r):
         mask = (RR <= radius)
         mass_enclosed[i] = np.sum(M_2D_total[mask])
-    
+
     # Tell me how far off we are from the literature estimates
+    print(f"\n  Mass comparison ({lens_type}):")
     for label, (mass_lit, r_lit) in mass_estimates.items():
-        mass_recon = np.interp(r_lit, r, mass_enclosed) # Interpolate to find the mass at the literature radius
-        # Write masses in scientific notation
+        mass_recon = np.interp(r_lit, r, mass_enclosed)
         mass_lit_val = f'{mass_lit:.2e}'
         mass_recon_val = f'{mass_recon:.2e}'
-        print(f'{label}: Literature mass = {mass_lit_val}, Reconstruction = {mass_recon_val}, % Error = {100 * (mass_recon - mass_lit) / mass_lit}')
+        pct = 100 * (mass_recon - mass_lit) / mass_lit
+        print(f"    {label}: lit={mass_lit_val}, recon={mass_recon_val}, "
+              f"err={pct:+.1f}%")
 
     # Plot results
     fig, ax = plt.subplots()
     fig.suptitle(plot_title)
-    
-    # Our reconstruction
-    ax.plot(r, mass_enclosed, label='Reconstruction')
-    
-    # Literature estimates
+    ax.plot(r, mass_enclosed, label=f'Reconstruction ({lens_type})')
+
     markers = ['o', 's', 'D', '^']
     for i, (label, (mass_lit, r_lit)) in enumerate(mass_estimates.items()):
-        ax.scatter(r_lit, mass_lit, label=label, marker=markers[i % len(markers)])
-    
+        ax.scatter(r_lit, mass_lit, label=label,
+                   marker=markers[i % len(markers)])
+
     ax.set_xlabel('Radius (kpc)')
     ax.set_ylabel(r'Mass ($M_\odot$)')
     ax.set_yscale('log')
-    ax.legend() 
+    ax.legend()
     plt.savefig(plot_name)
-    
-    halos.x += centroid[0] # Put the halos back where they were
-    halos.y += centroid[1]
+    plt.close(fig)
 
+    # Put the halos back where they were
+    halos.x += centroid[0] + 0.5
+    halos.y += centroid[1] + 0.5
+
+    return r, mass_enclosed
 
 def perform_kaiser_squire_reconstruction(sources, extent, signal='shear',
                                          smoothing_scale=5.0, resolution_scale=1.0,
