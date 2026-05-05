@@ -323,22 +323,38 @@ def optimize_lens_positions(sources, lenses, xmax, use_flags, lens_type='SIS',
             lenses.calculate_concentration()
 
     elif lens_type == 'POWER_LAW':
+        # Optimizer parameter bounds.  Defined ONCE here (instead of
+        # rebuilt inside the loop) so the seed-clipping below references
+        # the same numbers — preventing "initial guess out of bounds"
+        # warnings from cast_votes producing extreme kappa_star
+        # estimates from low-SNR sources.
+        LOG10_K_LO, LOG10_K_HI = -6.0, 1.0     # log10(kappa_star)
+        N_LO, N_HI = 0.05, 1.95                # slope
+
         for i in range(len(lenses.x)):
             # Initial guess: [x, y, log10(kappa_star), n] — log-space for k*
             x0 = float(lenses.x[i])
             y0 = float(lenses.y[i])
-            k0 = float(max(lenses.kappa_star[i], 1e-6))
-            n0 = float(np.clip(lenses.slope[i], 0.05, 1.95))
-            initial_guess = [x0, y0, np.log10(k0), n0]
 
-            # Bounds: position +/- 2*xmax (allow drift outside field for
-            # filtering); kappa_star spans 6 decades; slope hard-bounded
-            # in (0.05, 1.95) to avoid the formal divergences at 0 and 2.
+            # Clip kappa_star and slope into their optimizer bounds
+            # BEFORE taking log10 / using as initial guess.
+            # cast_votes_power_law returns per-source estimates that
+            # invert noisy |F| / |G| / |gamma| ratios; on real data,
+            # this routinely produces values outside the optimizer's
+            # parameter bounds.  The optimizer then warns "Initial
+            # guess is not within the specified bounds" and projects
+            # to the boundary, leaving the simplex unable to move
+            # upward.  Clipping here avoids that pathology.
+            log_k0 = float(np.clip(np.log10(max(lenses.kappa_star[i], 1e-30)),
+                                   LOG10_K_LO, LOG10_K_HI))
+            n0 = float(np.clip(lenses.slope[i], N_LO, N_HI))
+            initial_guess = [x0, y0, log_k0, n0]
+
             bounds = [
                 (x0 - xmax * 2, x0 + xmax * 2),
                 (y0 - xmax * 2, y0 + xmax * 2),
-                (-6.0, 1.0),     # log10(kappa_star) in [1e-6, 10]
-                (0.05, 1.95),    # slope
+                (LOG10_K_LO, LOG10_K_HI),
+                (N_LO, N_HI),
             ]
 
             # Restrict to sources within local_radius of the candidate
@@ -576,7 +592,6 @@ def filter_lens_positions(sources, lenses, xmax,
         #   kappa_star_min = (kappa_floor_n_sigma * median(sigf))
         #                    * theta_test^(n+1) / (n * theta_star^n)
         median_sigf = float(np.median(np.atleast_1d(sources.sigf)))
-        # Per-halo noise floor (depends on each candidate's own n)
         n_arr = np.maximum(lenses.slope, 0.05)  # avoid division by zero
         kappa_star_min = (
             kappa_floor_n_sigma * median_sigf
@@ -585,12 +600,35 @@ def filter_lens_positions(sources, lenses, xmax,
         )
         kappa_below_floor = lenses.kappa_star < kappa_star_min
 
+        # Diagnostic counts so the failure message can identify which
+        # filter dominated.
+        n_total = len(lenses.x)
+        n_too_close = int(too_close.sum())
+        n_too_far = int(too_far.sum())
+        n_slope_pinned = int(slope_pinned.sum())
+        n_kappa_floor = int(kappa_below_floor.sum())
+
         valid_indices = ~(too_close | too_far | slope_pinned | kappa_below_floor)
         lenses.x = lenses.x[valid_indices]
         lenses.y = lenses.y[valid_indices]
         lenses.kappa_star = lenses.kappa_star[valid_indices]
         lenses.slope = lenses.slope[valid_indices]
         lenses.chi2 = lenses.chi2[valid_indices]
+
+        if len(lenses.x) == 0:
+            raise ValueError(
+                f"No valid lenses remain after filtering (POWER_LAW).\n"
+                f"  Started with: {n_total} candidates\n"
+                f"  Too close to a source (<{threshold_distance} arcsec): {n_too_close}\n"
+                f"  Drifted outside {xmax * 1.5} arcsec: {n_too_far}\n"
+                f"  Slope pinned at (0.05, 1.95) boundary: {n_slope_pinned}\n"
+                f"  kappa_star below noise floor: {n_kappa_floor}\n"
+                f"  median(sigf) = {median_sigf:.3e}, "
+                f"theta_test = {kappa_test_radius:.1f} arcsec\n"
+                f"If slope-pinning dominates, the position optimizer is "
+                f"hitting bounds — check that cast_votes outputs are "
+                f"clipped into optimizer ranges."
+            )
 
     else:
         raise ValueError(
