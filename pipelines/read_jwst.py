@@ -6,6 +6,7 @@ import matplotlib.patheffects as pe
 from astropy.io import fits
 from astropy.table import Table
 from astropy.visualization import ImageNormalize, LogStretch
+from astropy import units as u
 from scipy.ndimage import gaussian_filter
 from pathlib import Path
 import warnings
@@ -377,19 +378,25 @@ class JWSTPipeline:
 
             theta_E_arr = self.lenses.calc_theta_E()
 
-            # M(<100 kpc) per halo
-            from astropy.cosmology import Planck18 as _cosmo
-            kpc_per_arcsec = _cosmo.kpc_proper_per_arcmin(
+            # M(<250 kpc) per halo — this radius is more useful than
+            # 100 kpc because it sits in the regime where weak lensing
+            # actually constrains the profile (sources at JWST cluster
+            # distances typically span ~30-200 arcsec from a halo,
+            # which is roughly 100-800 kpc at z~0.3-0.9).  The 100 kpc
+            # reference would extrapolate inward of most sources and
+            # give artificially-tight error estimates.
+            kpc_per_arcsec = COSMO.kpc_proper_per_arcmin(
                 float(self.lenses.redshift)).to(u.kpc / u.arcsec).value
-            theta_100kpc = 100.0 / kpc_per_arcsec
-            M_100_arr = np.array([
-                float(self.lenses.calc_mass_2d(theta_100kpc, self.z_source)[i])
+            ref_radius_kpc = 250.0
+            theta_ref = ref_radius_kpc / kpc_per_arcsec
+            M_ref_arr = np.array([
+                float(self.lenses.calc_mass_2d(theta_ref, self.z_source)[i])
                 for i in range(self.lenses.x.size)
             ])
 
             print(f"\n  POWER_LAW fit summary ({self.lenses.x.size} halos):")
             print(f"  {'idx':>3} {'x':>8} {'y':>8} {'kappa*':>8} "
-                  f"{'n':>6} {'theta_E':>10} {'M(<100kpc)':>13}  flag")
+                  f"{'n':>6} {'theta_E':>10} {'M(<250kpc)':>13}  flag")
             print("  " + "-" * 75)
             for i in range(self.lenses.x.size):
                 flags = []
@@ -403,14 +410,15 @@ class JWSTPipeline:
                       f"{self.lenses.kappa_star[i]:>8.4f} "
                       f"{self.lenses.slope[i]:>6.3f} "
                       f"{theta_E_arr[i]:>9.2f}\" "
-                      f"{M_100_arr[i]:>13.3e}  {flag_str}")
+                      f"{M_ref_arr[i]:>13.3e}  {flag_str}")
             print("  " + "-" * 75)
             print(f"  Total: kappa_star pinned: {int(k_pinned.sum())}/{self.lenses.x.size}, "
                   f"slope pinned: {int(n_pinned.sum())}/{self.lenses.x.size}")
             print(f"  Median: kappa_star = {np.median(self.lenses.kappa_star):.4f}, "
                   f"slope = {np.median(self.lenses.slope):.3f}, "
                   f"theta_E = {np.median(theta_E_arr):.2f}\"")
-            print(f"  Sum M(<100kpc): {np.nansum(M_100_arr):.3e} M_sun")
+            print(f"  Sum M(<{ref_radius_kpc:.0f}kpc): "
+                  f"{np.nansum(M_ref_arr):.3e} M_sun")
 
     # ------------------------------------------------------------------
     # Plotting
@@ -589,32 +597,56 @@ class JWSTPipeline:
             radius_kpc=300,
         )
 
-        # Kappa contour levels.  We use FIXED scientifically-meaningful
-        # levels by default so NFW and POWER_LAW reconstructions of
-        # the same cluster are directly comparable visually.  The old
-        # quantile-based levels gave wildly different numbers for the
-        # two profiles (NFW first contour ~0.16, POWER_LAW first
-        # contour ~0.75 for Abell) because POWER_LAW kappa is more
-        # centrally concentrated — that's a profile-shape artifact,
-        # not a recovery difference.
+        # Kappa contour levels.  We use QUANTILE-based levels of the
+        # unmasked, positive kappa values: each contour separates a
+        # specific percentile band, so the contours always show the
+        # actual structure of the reconstruction regardless of the
+        # absolute kappa range.
         #
-        # Override per-cluster by setting self.kappa_levels in the
-        # config or instance before calling visualize().
+        # Why not absolute levels [0.05, 0.10, 0.20, 0.50, 1.00]:
+        # produced uninformative contour distributions on real data —
+        # the field is dominated by low kappa with localized spikes
+        # near halos, so most of the absolute range is empty and only
+        # 1-2 contours render.  Why not max-fractional levels:
+        # similar issue — kappa_max is set by the inner spike near a
+        # halo, and the rest of the field has kappa << kappa_max, so
+        # the lower-fractional contours all sit below where any
+        # extended structure lives.
+        #
+        # Quantile levels guarantee each contour band corresponds to
+        # a meaningful fraction of pixels, giving 5 visible contours
+        # that span the actual data distribution.  Defaults: 50%, 70%,
+        # 85%, 94%, 98% percentiles (concentrating the bands toward
+        # the high-kappa tail where structure lives).
+        #
+        # Override per-cluster: set self.kappa_levels in the config or
+        # instance before calling visualize() to use absolute levels.
         if not hasattr(self, "_kappa_levels"):
             self._kappa_levels = {}
         cache_key = (self.cluster_name, self.lens_type)
         if cache_key not in self._kappa_levels:
             if hasattr(self, 'kappa_levels') and self.kappa_levels is not None:
-                # User-supplied levels
+                # User-supplied absolute levels
                 self._kappa_levels[cache_key] = list(self.kappa_levels)
             else:
-                # Cluster-scale presets:
-                #   ABELL_2744 (z=0.308, M~2e14): 'cluster' regime
-                #   EL_GORDO   (z=0.873, M~1e15): 'massive' regime
-                if self.cluster_name == 'EL_GORDO':
-                    self._kappa_levels[cache_key] = [
-                        0.10, 0.20, 0.50, 1.00, 2.00]
+                kappa_finite = kappa[np.isfinite(kappa) & (kappa > 0)]
+                if kappa_finite.size > 20:
+                    quantiles = [0.50, 0.70, 0.85, 0.94, 0.98]
+                    levels_q = [
+                        float(np.quantile(kappa_finite, q)) for q in quantiles]
+                    # De-duplicate (in case the field is nearly uniform)
+                    levels_q = sorted(set(round(lv, 4) for lv in levels_q))
+                    if len(levels_q) >= 3:
+                        self._kappa_levels[cache_key] = levels_q
+                    else:
+                        # Field too uniform for quantiles; fall back to
+                        # max-fractional
+                        kappa_max = float(np.max(kappa_finite))
+                        self._kappa_levels[cache_key] = [
+                            f * kappa_max
+                            for f in [0.20, 0.40, 0.60, 0.80, 0.95]]
                 else:
+                    # Field nearly empty (heavy masking); fallback
                     self._kappa_levels[cache_key] = [
                         0.05, 0.10, 0.20, 0.50, 1.00]
         levels = self._kappa_levels[cache_key]

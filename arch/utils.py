@@ -213,28 +213,9 @@ def CIC_2d(fsize, npixels, xpos, ypos, signal_values):
     return grid
 
 
-def convolve_image(img, kernel):
-    """
-    Convolves an image with a kernel using Fourier transforms.
-
-    Parameters:
-        img (np.ndarray): Input image array.
-        kernel (np.ndarray): Convolution kernel array.
-
-    Returns:
-        np.ndarray: Convolved image.
-    """
-    img_ft = np.fft.fftn(img, norm='ortho')
-    kernel_ft = np.fft.fftn(kernel, s=img.shape, norm='ortho')
-    convolved_img_ft = img_ft * kernel_ft
-    convolved_img = np.real(np.fft.ifftn(convolved_img_ft, norm='ortho'))
-    return np.fft.fftshift(convolved_img)
-
-
 # ------------------------
 # Lensing Utility Functions
 # ------------------------
-
 
 def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200):
     """
@@ -288,7 +269,6 @@ def find_peaks_and_masses(kappa_map, z_lens, z_source, radius_kpc=200):
         masses.append(np.abs(mass))
 
     return peaks_arcsec, masses
-
 
 def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8, k_val=0.95):
     """
@@ -402,54 +382,6 @@ def calculate_kappa(lenses, extent, lens_type='SIS', source_redshift=0.8, k_val=
 
     return X, Y, kappa
 
-
-def calculate_mass(kappa_array, z_l, z_s, pixel_scale):
-    """
-    Calculates the total mass within a convergence map.
-
-    Parameters:
-        kappa_array (np.ndarray): Convergence map array.
-        z_l (float): Redshift of the lens.
-        z_s (float): Redshift of the source.
-        pixel_scale (float): Pixel scale in arcseconds.
-
-    Returns:
-        float: Total mass in solar masses (h^-1 M_sun) within 200 kpc.
-    """
-    h = cosmo.H0.value / 100
-    pixel_scale_rad = (pixel_scale * u.arcsec).to(u.rad).value
-    central_pixel = kappa_array.shape[0] // 2
-
-    # Angular diameter distances
-    D_l = cosmo.angular_diameter_distance(z_l).to(u.m)
-    D_s = cosmo.angular_diameter_distance(z_s).to(u.m)
-    D_ls = cosmo.angular_diameter_distance_z1z2(z_l, z_s).to(u.m)
-
-    # Critical surface mass density
-    Sigma_crit = (c**2 / (4 * np.pi * G)) * (D_s / (D_l * D_ls))
-    Sigma_crit = Sigma_crit.to(u.kg / u.m**2).value
-
-    # Area per pixel in m^2
-    area_per_pixel = (pixel_scale_rad * D_l.value) ** 2
-
-    # Create distance map from the center
-    indices = np.indices(kappa_array.shape)
-    distance_map = np.hypot(indices[0] - central_pixel, indices[1] - central_pixel)
-    distance_map *= pixel_scale_rad * D_l.value  # Convert to meters
-
-    # Define radius of 200 kpc in meters
-    r_200 = (200 * u.kpc).to(u.m).value
-
-    # Find pixels within 200 kpc
-    pixels_within_radius = distance_map <= r_200
-
-    # Calculate the total mass
-    total_mass = np.sum(kappa_array[pixels_within_radius]) * Sigma_crit * area_per_pixel
-    total_mass_solar = (total_mass * u.kg).to(u.Msun).value * h
-
-    return total_mass_solar
-
-
 def estimate_mass_sheet_factor(kappa):
     """
     Estimates the mass-sheet factor k such that the transformed convergence
@@ -475,7 +407,6 @@ def estimate_mass_sheet_factor(kappa):
     k = 1 / (1 - mean_edge_kappa)
     return k
 
-
 def mass_sheet_transformation(kappa, k):
     """
     Applies the mass-sheet transformation to a convergence map.
@@ -488,7 +419,6 @@ def mass_sheet_transformation(kappa, k):
         np.ndarray: Transformed convergence map.
     """
     return k * kappa + (1 - k)
-
 
 def calculate_lensing_signals_sis(lenses, sources):
     """
@@ -525,7 +455,6 @@ def calculate_lensing_signals_sis(lenses, sources):
     g_flexion_2 = np.sum(g_flexion_mag * sin3phi, axis=0)
 
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
-
 
 def calculate_deflection_sis(lenses, theta_x, theta_y, eps=1.0e-6):
     """
@@ -579,7 +508,6 @@ def calculate_deflection_sis(lenses, theta_x, theta_y, eps=1.0e-6):
 
     return alpha_x, alpha_y
 
-
 def backproject_source_positions_sis(lenses, theta_x, theta_y, eps=1.0e-6):
     """
     Back-project observed image positions theta -> source-plane positions beta
@@ -595,7 +523,6 @@ def backproject_source_positions_sis(lenses, theta_x, theta_y, eps=1.0e-6):
     tx = np.atleast_1d(theta_x).astype(float)
     ty = np.atleast_1d(theta_y).astype(float)
     return tx - ax, ty - ay
-
 
 def magnification_sis(lenses, theta_x, theta_y, eps=1.0e-6):
     """
@@ -679,7 +606,6 @@ def magnification_sis(lenses, theta_x, theta_y, eps=1.0e-6):
 
     return abs_mu, det_A
 
-
 def sigma_beta_from_magnification(sigma_theta, abs_mu, mu_floor=0.01):
     """
     Convert image-plane positional uncertainty to source-plane uncertainty
@@ -726,7 +652,6 @@ def sigma_beta_from_magnification(sigma_theta, abs_mu, mu_floor=0.01):
     inv_mu = np.maximum(1.0 / np.maximum(abs_mu, 1.0e-30), mu_floor)
 
     return sigma_theta * inv_mu
-
 
 def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6,
                                  return_breakdown=False,
@@ -842,7 +767,6 @@ def chi2_strong_source_plane_sis(lenses, strong_systems, eps=1.0e-6,
         return chi2_total, breakdown
     return chi2_total
 
-
 def chi2_flux_sis(lenses, strong_systems, eps=1.0e-6,
                   return_breakdown=False):
     """
@@ -933,7 +857,6 @@ def chi2_flux_sis(lenses, strong_systems, eps=1.0e-6,
     if return_breakdown:
         return chi2_total, breakdown
     return chi2_total
-
 
 def calculate_lensing_signals_power_law(halos, sources):
     """
@@ -1060,7 +983,6 @@ def calculate_lensing_signals_power_law(halos, sources):
 
     return shear_1, shear_2, flexion_1, flexion_2, g_flexion_1, g_flexion_2
 
-
 def calculate_deflection_power_law(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     """
     Compute the total deflection field alpha(theta) for a set of power-law
@@ -1177,7 +1099,6 @@ def calculate_deflection_power_law(halos, theta_x, theta_y, z_source, eps=1.0e-6
 
     return alpha_x, alpha_y
 
-
 def backproject_source_positions_power_law(halos, theta_x, theta_y, z_source,
                                            eps=1.0e-6):
     """
@@ -1206,7 +1127,6 @@ def backproject_source_positions_power_law(halos, theta_x, theta_y, z_source,
     tx = np.atleast_1d(theta_x).astype(float)
     ty = np.atleast_1d(theta_y).astype(float)
     return tx - ax, ty - ay
-
 
 def magnification_power_law(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     """
@@ -1324,7 +1244,6 @@ def magnification_power_law(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     abs_mu = 1.0 / np.maximum(np.abs(det_A), 1.0e-30)
 
     return abs_mu, det_A
-
 
 def chi2_strong_source_plane_power_law(halos, strong_systems,
                                        sigma_n=None,
@@ -1510,7 +1429,6 @@ def chi2_strong_source_plane_power_law(halos, strong_systems,
     if return_breakdown:
         return chi2_total, breakdown
     return chi2_total
-
 
 def chi2_flux_power_law(halos, strong_systems,
                         eps=1.0e-6,
@@ -1744,7 +1662,6 @@ def _nfw_radial_g(x):
 
     return g
 
-
 def _nfw_radial_h(x):
     """
     Radial function h(x) for NFW profile (identical to radial_term_5 in
@@ -1771,8 +1688,7 @@ def _nfw_radial_h(x):
     sol[m1] = np.arctanh(np.sqrt(1 - x[m1]**2)) / np.sqrt(1 - x[m1]**2)
     sol[m3] = np.arctan(np.sqrt(x[m3]**2 - 1)) / np.sqrt(x[m3]**2 - 1)
     return sol
- 
- 
+
 def _nfw_kappa_and_gamma(kappa_s, x, h_x=None, g_x=None):
     """
     Convergence kappa(x) and tangential shear |gamma_t(x)| for an NFW lens.
@@ -1817,8 +1733,7 @@ def _nfw_kappa_and_gamma(kappa_s, x, h_x=None, g_x=None):
     abs_gamma = np.abs(kbar - kappa)
  
     return kappa, abs_gamma
- 
- 
+
 def calculate_deflection_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     """
     Compute the total NFW reduced deflection field alpha(theta) for a set of
@@ -1906,8 +1821,7 @@ def calculate_deflection_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     alpha_y = np.sum(alpha_mag * uy, axis=0)
  
     return alpha_x, alpha_y
- 
- 
+
 def backproject_source_positions_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     """
     Back-project image positions to the source plane under an NFW lens model:
@@ -1934,8 +1848,7 @@ def backproject_source_positions_nfw(halos, theta_x, theta_y, z_source, eps=1.0e
     tx = np.atleast_1d(theta_x).astype(float)
     ty = np.atleast_1d(theta_y).astype(float)
     return tx - ax, ty - ay
- 
- 
+
 def magnification_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     """
     Absolute magnification |mu| at image-plane positions for a composite
@@ -2030,8 +1943,7 @@ def magnification_nfw(halos, theta_x, theta_y, z_source, eps=1.0e-6):
     abs_mu = 1.0 / np.maximum(np.abs(det_A), 1.0e-30)
  
     return abs_mu, det_A
- 
- 
+
 def chi2_strong_source_plane_nfw(halos, strong_systems, eps=1.0e-6,
                                   return_breakdown=False,
                                   use_magnification_correction=True,
@@ -2194,7 +2106,6 @@ def chi2_strong_source_plane_nfw(halos, strong_systems, eps=1.0e-6,
         return chi2_total, breakdown
     return chi2_total
 
-
 def chi2_flux_nfw(halos, strong_systems, eps=1.0e-6,
                   return_breakdown=False):
     """
@@ -2286,7 +2197,6 @@ def chi2_flux_nfw(halos, strong_systems, eps=1.0e-6,
     if return_breakdown:
         return chi2_total, breakdown
     return chi2_total
-
 
 def calculate_lensing_signals_nfw(halos, sources):
     """
@@ -2607,6 +2517,129 @@ def power_law_projected_mass(
     kappa = beta * kappa_star * (R / r_pivot_kpc) ** (-n)
     return kappa, area_per_pixel
 
+def power_law_projected_mass(
+    halos,
+    r_p,
+    return_2d=False,
+    nx=100,
+    ny=100,
+    x_range=(-300, 300),
+    y_range=(-300, 300),
+    x_center=0.0,
+    y_center=0.0,
+    z_source=0.8,
+):
+    """
+    Compute the projected mass (or convergence map) for a single
+    POWER_LAW halo.  Mirrors `nfw_projected_mass`'s API so the cluster-
+    level mass-comparison workflow in `compare_mass_estimates` can
+    dispatch on lens type without restructuring.
+
+    The power-law convergence at angular radius theta is
+        kappa(theta) = beta(z_s) * kappa_star * (theta / theta_star)^(-n)
+    where beta(z_s) = D_ls / D_s converts from the at-infinity convention
+    (kappa_star is defined for a source at z_s -> infinity, matching the
+    Wright & Brainerd 2000 NFW convention used elsewhere in arch).
+
+    Internally everything is in kpc to match nfw_projected_mass; we
+    convert the halo's angular pivot theta_star (arcsec) to a physical
+    pivot radius r_pivot (kpc) using the lens-redshift kpc/arcsec
+    conversion, then evaluate
+
+        kappa(R) = beta * kappa_star * (R / r_pivot)^(-n)
+
+    For `return_2d=False`, the closed-form integrated 2D mass (Phase 0)
+    is used directly:
+        M_2D(<r) = pi * Sigma_cr * 2 * beta * kappa_star * r_pivot^n
+                   * r^(2-n) / (2 - n)
+
+    Parameters
+    ----------
+    halos : PowerLawHalo
+        Single-halo PowerLawHalo (the per-halo loop in
+        compare_mass_estimates constructs one of these per iteration).
+    r_p : float or array_like
+        Projected radius in kpc (only used when return_2d=False).
+    return_2d : bool
+        If True, return (kappa_grid, area_per_pixel).  If False, return
+        the integrated projected mass M(<r_p) in solar masses.
+    nx, ny : int
+    x_range, y_range : tuple of float
+        Grid extent in kpc.
+    x_center, y_center : float
+        Halo center in kpc.
+    z_source : float
+        Source redshift used for beta(z_s).
+
+    Returns
+    -------
+    If return_2d=False:
+        M_proj : float or ndarray
+            Integrated projected mass within r_p, in M_sun.
+    If return_2d=True:
+        kappa : 2D ndarray
+            Convergence map (dimensionless) on the (nx, ny) grid.
+        area_per_pixel : float
+            Pixel area in kpc^2 (so kappa * sigma_c_in_M_per_kpc2 *
+            area_per_pixel gives M_sun per pixel — same convention as
+            nfw_projected_mass).
+    """
+    # --- Cosmological quantities ---
+    z_l = float(halos.redshift)
+    if z_source <= z_l:
+        # Foreground source — no lensing
+        beta = 0.0
+    else:
+        D_l_m = cosmo.angular_diameter_distance(z_l).to(u.m).value
+        D_s_m = cosmo.angular_diameter_distance(z_source).to(u.m).value
+        D_ls_m = cosmo.angular_diameter_distance_z1z2(
+            z_l, z_source).to(u.m).value
+        # beta = D_ls / D_s (equivalent to sigma_crit_inf / sigma_crit_zs)
+        beta = D_ls_m / D_s_m
+
+    # kpc per arcsec at the lens redshift
+    kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_l).to(
+        u.kpc / u.arcsec).value
+
+    # Halo strength and shape parameters
+    n = float(halos.slope)
+    kappa_star = float(halos.kappa_star)
+    theta_star_arcsec = float(halos.theta_star)
+    r_pivot_kpc = theta_star_arcsec * kpc_per_arcsec   # physical pivot radius
+
+    # --- 1D integrated mass branch ---
+    if not return_2d:
+        r_p_arr = np.atleast_1d(r_p).astype(float)
+        # Critical surface density in M_sun / kpc^2
+        sigma_c = critical_surface_density(z_l, z_source)
+        sigma_c = (sigma_c * u.M_sun / u.kpc ** 2).value
+
+        denom = 2.0 - n
+        if abs(denom) < 1e-6:
+            denom = 1e-6
+        # M(<r) = integral of Sigma over disk of radius r
+        # Sigma(R) = sigma_c * kappa(R) = sigma_c * beta * kappa_star * (R/r_pivot)^(-n)
+        # M(<r) = 2*pi * integral_0^r Sigma(R) R dR
+        #        = 2*pi * sigma_c * beta * kappa_star * r_pivot^n * r^(2-n) / (2-n)
+        M_2D = (2.0 * np.pi * sigma_c * beta * kappa_star
+                * r_pivot_kpc ** n * r_p_arr ** denom / denom)
+        return M_2D if M_2D.size > 1 else float(M_2D[0])
+
+    # --- 2D convergence-grid branch ---
+    x_vals = np.linspace(x_range[0], x_range[1], nx)
+    y_vals = np.linspace(y_range[0], y_range[1], ny)
+    dx = (x_range[1] - x_range[0]) / (nx - 1)
+    dy = (y_range[1] - y_range[0]) / (ny - 1)
+    area_per_pixel = dx * dy
+
+    XX, YY = np.meshgrid(x_vals, y_vals)
+    R = np.sqrt((XX - x_center) ** 2 + (YY - y_center) ** 2)
+    # Avoid the central singularity
+    R = np.where(R < 0.5, 0.5, R)
+
+    kappa = beta * kappa_star * (R / r_pivot_kpc) ** (-n)
+    return kappa, area_per_pixel
+
 
 def compare_mass_estimates(halos, plot_name, plot_title,
                            cluster_name='Abell_2744', lens_type='NFW'):
@@ -2700,23 +2733,105 @@ def compare_mass_estimates(halos, plot_name, plot_title,
     halos.x -= centroid[0] + 0.5
     halos.y -= centroid[1] + 0.5
 
-    # 2D grid setup (in kpc)
-    x_range, y_range = (-r[-1], r[-1]), (-r[-1], r[-1])
-    nx, ny = int(x_range[1] - x_range[0]), int(y_range[1] - y_range[0])
-    x_vals = np.linspace(x_range[0], x_range[1], nx)
-    y_vals = np.linspace(y_range[0], y_range[1], ny)
-    kappa_total = np.zeros((ny, nx), dtype=float)
+    if lens_type == 'POWER_LAW':
+        # For POWER_LAW we use the closed-form M_2D(<r) directly,
+        # bypassing the kappa-grid path entirely.  The Phase 0 result
+        #   M_2D(<r) = 2 * pi * Sigma_cr * beta * kappa_star
+        #              * r_pivot^n * r^(2-n) / (2 - n)
+        # is exact (no integration), positive by construction (no
+        # mass-sheet transform needed), and additive across halos at
+        # different positions provided we evaluate cumulative mass
+        # within r of the cluster centroid (mass-weighted).
+        #
+        # The mass-sheet transformation used by the kappa-grid path
+        # (kappa_total = 2*kappa - 1 for k=2) drives kappa negative
+        # wherever the input kappa is below 0.5, producing negative
+        # masses for POWER_LAW where the kappa map is mostly subdued
+        # outside halo cores.  The closed-form route avoids this
+        # issue entirely.
+        z_l = z_cluster
+        kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_l).to(
+            u.kpc / u.arcsec).value
+        # critical_surface_density returns kg/m^2 as a plain float;
+        # convert to M_sun/kpc^2 explicitly (the pattern used at
+        # line 270 of utils.py).  The version that just attaches
+        # units (.value after multiplying by u.M_sun/u.kpc**2)
+        # is a unit-attachment bug that masks the kg/m^2 number
+        # as M_sun/kpc^2, leaving the result ~5e8 too small.
+        sigma_c_kg_per_m2 = critical_surface_density(z_l, z_source)
+        sigma_c = (sigma_c_kg_per_m2 * u.kg / u.m ** 2).to(
+            u.M_sun / u.kpc ** 2).value
 
-    # Convert halo positions from arcsec to kpc using lens-redshift kpc/arcsec
-    kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_cluster).to(
-        u.kpc / u.arcsec).value
-    halo_x_kpc = halos.x * kpc_per_arcsec
-    halo_y_kpc = halos.y * kpc_per_arcsec
+        # Compute M(<r) cumulative as the SUM over all halos of each
+        # halo's individual M_2D(<r_to_halo).  For each radius r in our
+        # query grid (centered on the mass-weighted cluster centroid),
+        # we evaluate per-halo M(<r_eff_i) where r_eff_i is the radius
+        # measured from the halo center, not from the cluster centroid.
+        #
+        # For halos at the cluster center, r_eff = r and the per-halo
+        # M_2D matches the global cumulative.  For off-center halos,
+        # r_eff < r when the aperture encloses the halo, and r_eff = 0
+        # before that.  This is the correct generalization of the
+        # NFW-grid workflow to multi-halo POWER_LAW.
+        #
+        # Approximation: for cluster-scale halos clustered near the
+        # centroid (typical case), all halos contribute fully once the
+        # aperture is wider than the typical halo offset (~tens of
+        # arcsec).  At smaller r the per-halo offset matters.
 
-    # Sum the kappa grids from all halos
-    area_per_pixel = None
-    for i in range(len(halos.x)):
-        if lens_type == 'NFW':
+        halo_offsets = np.hypot(halos.x, halos.y)  # arcsec from centroid
+        halo_offsets_kpc = halo_offsets * kpc_per_arcsec
+
+        n_arr = np.atleast_1d(halos.slope).astype(float)
+        kappa_star_arr = np.atleast_1d(halos.kappa_star).astype(float)
+        theta_star_arcsec = float(halos.theta_star)
+        r_pivot_kpc = theta_star_arcsec * kpc_per_arcsec
+
+        # Beta(z_s) at this source redshift
+        if z_source <= z_l:
+            beta = 0.0
+        else:
+            D_l = cosmo.angular_diameter_distance(z_l).to(u.m).value
+            D_s = cosmo.angular_diameter_distance(z_source).to(u.m).value
+            D_ls = cosmo.angular_diameter_distance_z1z2(
+                z_l, z_source).to(u.m).value
+            beta = D_ls / D_s
+
+        mass_enclosed = np.zeros_like(r)
+        for i, radius in enumerate(r):
+            total = 0.0
+            for k in range(len(halos.x)):
+                # Effective radius from this halo center: clip to (0, radius)
+                r_eff = max(0.0, radius - halo_offsets_kpc[k])
+                if r_eff <= 0:
+                    continue
+                denom = 2.0 - n_arr[k]
+                if abs(denom) < 1e-6:
+                    denom = 1e-6
+                M_halo = (2.0 * np.pi * sigma_c * beta * kappa_star_arr[k]
+                          * r_pivot_kpc ** n_arr[k]
+                          * r_eff ** denom / denom)
+                total += float(M_halo)
+            mass_enclosed[i] = total
+
+    else:
+        # NFW path — use the existing kappa-grid + mass-sheet workflow
+        # 2D grid setup (in kpc)
+        x_range, y_range = (-r[-1], r[-1]), (-r[-1], r[-1])
+        nx, ny = int(x_range[1] - x_range[0]), int(y_range[1] - y_range[0])
+        x_vals = np.linspace(x_range[0], x_range[1], nx)
+        y_vals = np.linspace(y_range[0], y_range[1], ny)
+        kappa_total = np.zeros((ny, nx), dtype=float)
+
+        # Convert halo positions from arcsec to kpc using lens-redshift kpc/arcsec
+        kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_cluster).to(
+            u.kpc / u.arcsec).value
+        halo_x_kpc = halos.x * kpc_per_arcsec
+        halo_y_kpc = halos.y * kpc_per_arcsec
+
+        # Sum the kappa grids from all halos
+        area_per_pixel = None
+        for i in range(len(halos.x)):
             halo = halo_obj.NFW_Lens(
                 halos.x[i], halos.y[i], [0],
                 halos.concentration[i], halos.mass[i],
@@ -2730,51 +2845,34 @@ def compare_mass_estimates(halos, plot_name, plot_title,
                 y_center=halo_y_kpc[i],
                 z_source=z_source,
             )
-        else:  # POWER_LAW
-            halo = halo_obj.PowerLawHalo(
-                x=[halos.x[i]], y=[halos.y[i]],
-                kappa_star=[halos.kappa_star[i]],
-                slope=[halos.slope[i]],
-                theta_star=halos.theta_star,
-                redshift=z_cluster,
-                chi2=[halos.chi2[i]],
-            )
-            kappa, area_per_pixel = power_law_projected_mass(
-                halo, r_p=0,
-                return_2d=True, nx=nx, ny=ny,
-                x_range=x_range, y_range=y_range,
-                x_center=halo_x_kpc[i],
-                y_center=halo_y_kpc[i],
-                z_source=z_source,
-            )
 
-        if np.any(np.isinf(kappa)) or np.any(np.isnan(kappa)):
-            print(f"Warning: NaN/Inf values in kappa for halo {i} at "
-                  f"({halos.x[i]:.2f}, {halos.y[i]:.2f}). Skipping.")
-            continue
-        kappa_total += kappa
+            if np.any(np.isinf(kappa)) or np.any(np.isnan(kappa)):
+                print(f"Warning: NaN/Inf values in kappa for halo {i} at "
+                      f"({halos.x[i]:.2f}, {halos.y[i]:.2f}). Skipping.")
+                continue
+            kappa_total += kappa
 
-    # Mass-sheet degeneracy: k value taken from literature convention
-    if cluster_name == 'ABELL_2744':
-        kappa_total = mass_sheet_transformation(kappa_total, k=2)
-    elif cluster_name == 'EL_GORDO':
-        kappa_total = mass_sheet_transformation(kappa_total, k=2)
+        # Mass-sheet degeneracy: k value taken from literature convention
+        if cluster_name == 'ABELL_2744':
+            kappa_total = mass_sheet_transformation(kappa_total, k=2)
+        elif cluster_name == 'EL_GORDO':
+            kappa_total = mass_sheet_transformation(kappa_total, k=2)
 
-    # Convert kappa back to a 2D mass distribution
-    sigma_c = critical_surface_density(z_cluster, z_source)
-    sigma_c = sigma_c * u.M_sun / u.kpc ** 2
-    sigma_c = sigma_c.value
-    M_2D_total = kappa_total * sigma_c * area_per_pixel
+        # Convert kappa back to a 2D mass distribution
+        sigma_c = critical_surface_density(z_cluster, z_source)
+        sigma_c = sigma_c * u.M_sun / u.kpc ** 2
+        sigma_c = sigma_c.value
+        M_2D_total = kappa_total * sigma_c * area_per_pixel
 
-    # Coordinates of each pixel in the grid
-    XX, YY = np.meshgrid(x_vals, y_vals)
-    RR = np.sqrt(XX ** 2 + YY ** 2)
+        # Coordinates of each pixel in the grid
+        XX, YY = np.meshgrid(x_vals, y_vals)
+        RR = np.sqrt(XX ** 2 + YY ** 2)
 
-    # Compute the enclosed mass at each radius in r
-    mass_enclosed = np.zeros_like(r)
-    for i, radius in enumerate(r):
-        mask = (RR <= radius)
-        mass_enclosed[i] = np.sum(M_2D_total[mask])
+        # Compute the enclosed mass at each radius in r
+        mass_enclosed = np.zeros_like(r)
+        for i, radius in enumerate(r):
+            mask = (RR <= radius)
+            mass_enclosed[i] = np.sum(M_2D_total[mask])
 
     # Tell me how far off we are from the literature estimates
     print(f"\n  Mass comparison ({lens_type}):")
@@ -2808,116 +2906,3 @@ def compare_mass_estimates(halos, plot_name, plot_title,
     halos.y += centroid[1] + 0.5
 
     return r, mass_enclosed
-
-def perform_kaiser_squire_reconstruction(sources, extent, signal='shear',
-                                         smoothing_scale=5.0, resolution_scale=1.0,
-                                         weights=None, apodize=False, pad_fraction=0.2):
-    """
-    Kaiser-Squires Fourier inversion to reconstruct convergence (kappa) from lensing signal.
-
-    Parameters:
-        sources: object with .x, .y, and lensing signal attributes ('e1','e2' or 'f1','f2')
-        extent: (xmin, xmax, ymin, ymax) in arcseconds
-        signal: 'shear' or 'flexion'
-        smoothing_scale: real-space Gaussian smoothing (pixels)
-        resolution_scale: pixels per arcsecond
-        weights: 1D array of per-object weights (e.g., SNR^2), optional
-        apodize: whether to apply a Tukey window to suppress edge effects
-        pad_fraction: fraction of padding to apply (default is 0.2)
-            Padding is applied symmetrically to all sides of the input arrays.
-            Expressed as a fraction of the input array size.
-
-    Returns:
-        X, Y: coordinate grids (2D)
-        kappa: reconstructed convergence field (2D)
-    """
-
-    # Extract positions
-    x_s, y_s = sources.x, sources.y
-
-    if signal == 'shear':
-        S1, S2 = sources.e1, sources.e2
-    elif signal == 'flexion':
-        S1, S2 = sources.f1, sources.f2
-    else:
-        raise ValueError("Signal must be 'shear' or 'flexion'.")
-
-    # Default weights = 1
-    if weights is None:
-        weights = np.ones_like(x_s)
-
-    # Grid settings
-    xmin, xmax, ymin, ymax = extent
-    fsize = max(xmax - xmin, ymax - ymin)
-    npixels = int(resolution_scale * fsize)
-    dx = fsize / npixels
-
-    # Shift positions relative to grid
-    x_s_rel = x_s - xmin - 0.5 * dx
-    y_s_rel = y_s - ymin - 0.5 * dx
-
-    # Weighted signal binning via CIC
-    S1w = S1 * weights
-    S2w = S2 * weights
-
-    S1_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S1w)
-    S2_grid = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=S2w)
-    W_grid  = CIC_2d(fsize=fsize, npixels=npixels, xpos=x_s_rel, ypos=y_s_rel, signal_values=weights)
-
-    # Normalize fields by weights to get weighted average
-    S1_grid /= (W_grid + 1e-10)
-    S2_grid /= (W_grid + 1e-10)
-
-    # Optional real-space smoothing
-    if smoothing_scale > 0:
-        S1_grid = gaussian_filter(S1_grid, sigma=smoothing_scale)
-        S2_grid = gaussian_filter(S2_grid, sigma=smoothing_scale)
-
-    npixels = S1_grid.shape[0]
-
-    # --- Apodization ---
-    from scipy.signal.windows import hann
-    if apodize:
-        window = hann(npixels)
-        apod_window = np.outer(window, window)
-        S1_grid = S1_grid * apod_window
-        S2_grid = S2_grid * apod_window
-
-    # --- Padding (reflection to reduce discontinuities) ---
-    pad = int(npixels * pad_fraction)
-    S1_padded = np.pad(S1_grid, pad_width=pad, mode='reflect')
-    S2_padded = np.pad(S2_grid, pad_width=pad, mode='reflect')
-
-    # FFT
-    ft_S1 = np.fft.fft2(S1_padded, norm='ortho')
-    ft_S2 = np.fft.fft2(S2_padded, norm='ortho')
-
-    # Fourier-space coordinates
-    lx = np.fft.fftfreq(S1_padded.shape[1], d=dx) * 2 * np.pi
-    ly = np.fft.fftfreq(S1_padded.shape[0], d=dx) * 2 * np.pi
-    Lx, Ly = np.meshgrid(lx, ly, indexing='xy')
-    l_squared = Lx**2 + Ly**2
-    l_squared[0, 0] = 1e-10  # prevent div by zero
-
-    # Kaiser-Squires inversion kernel
-    if signal == 'shear':
-        ft_kappa = ((Lx**2 - Ly**2) * ft_S1 + 2 * Lx * Ly * ft_S2) / l_squared
-    elif signal == 'flexion':
-        ft_kappa = -1j * (Lx * ft_S1 + Ly * ft_S2) / l_squared
-
-    # Optional Gaussian low-pass filter in Fourier space
-    if smoothing_scale > 0:
-        sigma_k = 1.0 / (smoothing_scale * dx)
-        gaussian_k = np.exp(-0.5 * l_squared / sigma_k**2)
-        ft_kappa *= gaussian_k
-
-    # Inverse FFT to real space
-    kappa_padded = np.fft.ifft2(ft_kappa, norm='ortho').real
-    kappa = kappa_padded[pad:-pad, pad:-pad]
-
-    # Grid coordinates
-    x = np.linspace(xmin + 0.5 * dx, xmax - 0.5 * dx, npixels)
-    y = np.linspace(ymin + 0.5 * dx, ymax - 0.5 * dx, npixels)
-    X, Y = np.meshgrid(x, y, indexing='xy')
-
-    return X, Y, kappa
