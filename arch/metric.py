@@ -44,7 +44,6 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
         return np.inf
     return dof
 
-
 def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
     """
     Calculate the chi-squared statistic for the difference between observed and modeled source properties.
@@ -136,7 +135,6 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
     # Return the total chi-squared including penalties
     return total_chi_squared
 
-
 def calc_strong_dof(sources) -> int:
     """
     Degrees of freedom contribution from strong-lensing constraints.
@@ -187,101 +185,171 @@ def calc_strong_dof(sources) -> int:
 
     return int(dof)
 
- 
- 
 def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     """
-    Pre-compute the strong-lensing weight lambda_sl at the current
-    parameter values.
- 
-    This function is intended to be called **once** before an optimiser
-    loop begins.  The returned scalar is then passed as a fixed constant
-    into every ``calculate_total_chi2`` / ``chi2wrapper`` call so that
-    the objective function seen by the optimiser is smooth and
-    stationary.
- 
-    The weight equalises the reduced chi-squared of the WL and SL
-    contributions:
- 
-        lambda_sl = (chi2_WL / dof_WL) / (chi2_SL / dof_SL)
+    Compute lambda_sl such that SL and WL contribute COMPARABLE absolute
+    chi-squared at the current lens model.
 
-    NOTE ON NFW PIPELINE BEHAVIOR:
+    Joint chi^2 = chi^2_WL + lambda_sl * chi^2_SL
 
-    For NFW, lambda_sl is computed after forward selection (see main.py),
-    where the model typically has 1–4 halos.  If the WL-selected halo
-    positions are >~5" from the true SL system, the source-plane scatter
-    under the wrong model produces rchi2_SL >> 1, giving lambda ≈ 0.
-    This is physically correct: at fixed (wrong) positions, no mass
-    adjustment can fix the source-plane scatter, so SL should not drive
-    mass refinement.  The primary SL benefit in the current architecture
-    is positional — it enters during forward_lens_selection via the
-    dynamic fallback lambda (Path 2 in calculate_total_chi2), where
-    it demonstrably improves halo recovery by ~50–65%.
+    The convention used here is:
 
-    If either dataset has zero degrees of freedom, zero chi-squared,
-    or if strong lensing is absent, we return 1.0 (the proper-likelihood
-    default, i.e. assume both likelihoods are correctly normalised).
- 
+        lambda_sl = chi^2_WL / chi^2_SL
+
+    so that lambda_sl * chi^2_SL = chi^2_WL at the lens model where it's
+    computed.  This makes the SL contribution to the joint chi^2 a
+    significant fraction (specifically half, when evaluated at the
+    chosen reference model) — large enough to actually pull the
+    optimizer, but not so large that SL overwhelms WL.
+
+    Why NOT lambda = rchi^2_WL / rchi^2_SL (the previous convention):
+        That formula divides by dof on both sides, equalising the
+        per-DOF chi-squared between the two probes.  It works correctly
+        when both probes are roughly satisfied (both rchi^2 ~ 1).
+        But it fails when the SL data are NOT satisfied at the WL-only
+        minimum (which is typical because WL doesn't know about SL):
+        then rchi^2_SL >> 1, and lambda is set very small — to "make
+        the rchi^2 equal", the formula tells SL to weight itself less.
+        That's the wrong direction.  We want SL to pull HARDER when
+        it disagrees with WL, not retreat.
+
+        The absolute-chi^2 convention here scales the contribution by
+        problem size (number of constraints * typical residual^2)
+        rather than per-DOF average residual.  At the WL-only minimum,
+        this gives lambda ~ chi^2_WL / chi^2_SL ~ O(1) — SL contributes
+        roughly its absolute chi^2 worth of pull on the joint fit.
+
     Parameters
     ----------
     sources : Source
-        Must carry ``strong_systems`` if SL is to contribute.
-    lenses : SIS_Lens or NFW_Lens
-        Current lens model parameters.
-    use_flags : list of bool
-        [use_shear, use_flexion, use_g_flexion].
+    lenses : SIS_Lens, NFW_Lens, or PowerLawHalo
+        Lens model at which lambda is computed.  Convention: this
+        should be the post-WL-forward-selection model (where chi^2_WL
+        is well-fit but chi^2_SL is generally not yet).
+    use_flags : sequence of bool
     lens_type : str
-        'SIS' or 'NFW'.
- 
+
     Returns
     -------
     lambda_sl : float
-        Pre-computed weight for the SL chi2 term.
     """
-    # ── WL evaluation ──
+    # WL contribution
     chi2_wl = calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
     dof_wl = calc_degrees_of_freedom(sources, lenses, use_flags)
- 
-    # ── SL evaluation ──
+
+    # SL contribution
     has_sl = (hasattr(sources, "strong_systems")
               and sources.strong_systems is not None
               and len(sources.strong_systems) > 0)
- 
+
     if not has_sl:
-        return 1.0  # no SL data — default to proper-likelihood weight
- 
-    # Source-plane scatter
+        return 1.0  # no SL data - default
+
+    # Source-plane scatter + flux ratio
     if lens_type == "SIS":
         chi2_scatter = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
         chi2_flux = utils.chi2_flux_sis(lenses, sources.strong_systems)
     elif lens_type == "NFW":
         chi2_scatter = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
         chi2_flux = utils.chi2_flux_nfw(lenses, sources.strong_systems)
+    elif lens_type == "POWER_LAW":
+        chi2_scatter = utils.chi2_strong_source_plane_power_law(
+            lenses, sources.strong_systems)
+        chi2_flux = utils.chi2_flux_power_law(lenses, sources.strong_systems)
     else:
-        return 1.0  # unknown lens type — fall back to proper-likelihood default
+        return 1.0
 
     chi2_sl = chi2_scatter + chi2_flux
     dof_sl = calc_strong_dof(sources)
- 
+
     # Guard against degenerate cases
     if dof_wl <= 0 or dof_sl <= 0 or chi2_sl <= 0 or chi2_wl <= 0:
         return 1.0
- 
-    rchi2_wl = chi2_wl / dof_wl
-    rchi2_sl = chi2_sl / dof_sl
- 
-    if rchi2_sl <= 0:
-        return 1.0
- 
-    lambda_raw = rchi2_wl / rchi2_sl
-    lambda_max = 50.0  # cap: prevents SL from overwhelming WL when the initial
-                       # guess happens to satisfy SL well but WL poorly
+
+    # Absolute chi-squared ratio.  No dof normalization.
+    lambda_raw = chi2_wl / chi2_sl
+
+    # Cap to prevent runaway weighting in pathological cases.
+    # The 100 cap is much higher than the previous 50 because the
+    # absolute-chi^2 ratio is more robust to initial-guess pathologies
+    # than the reduced-chi^2 ratio was.
+    lambda_max = 100.0
     result = min(lambda_raw, lambda_max)
     cap_note = f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else ""
-    print(f"Pre-computed lambda_sl: {rchi2_wl:.3f} / {rchi2_sl:.3f} = {lambda_raw:.3f}{cap_note}")
+    print(f"Pre-computed lambda_sl: chi^2_WL/chi^2_SL = "
+          f"{chi2_wl:.1f}/{chi2_sl:.1f} = {lambda_raw:.3f}{cap_note}")
     return float(result)
- 
- 
+
+def _compute_lambda_sl_power_law(sources, halos, use_flags,
+                                 strong_systems=None):
+    """
+    Compute lambda_sl as an ABSOLUTE chi-squared ratio after WL forward
+    selection completes.  Power-law analog of metric.compute_lambda_sl.
+
+    The convention used:
+
+        lambda_sl = chi^2_WL / chi^2_SL
+
+    so that lambda_sl * chi^2_SL = chi^2_WL at the post-selection lens
+    model.  See metric.compute_lambda_sl for the rationale: the
+    previous reduced-chi^2 convention down-weighted SL precisely when
+    it disagreed with WL, defeating the point of joint fitting.
+
+    If no strong-lensing systems are supplied or sigma_n cannot be
+    computed, returns 0.0 (effectively WL-only downstream).
+
+    Parameters
+    ----------
+    sources : Source
+    halos : PowerLawHalo
+        Selected halos at the WL forward-selection minimum.
+    use_flags : sequence of three bool
+    strong_systems : iterable of StrongLensingSystem or None
+
+    Returns
+    -------
+    lambda_sl : float
+    """
+    if strong_systems is None or len(list(strong_systems)) == 0:
+        return 0.0
+
+    # WL contribution
+    chi2_wl = metric.chi2_wl_power_law(
+        halos, sources, use_flags=use_flags, apply_penalties=False,
+    )
+    dof_wl = metric.calc_dof_wl_power_law(sources, halos, use_flags)
+    if not np.isfinite(dof_wl) or dof_wl <= 0:
+        return 0.0
+    if not np.isfinite(chi2_wl) or chi2_wl <= 0:
+        return 0.0
+
+    # SL contribution.  Compute sigma_n from the WL Hessian first so
+    # the profile-uncertainty term is properly accounted for.
+    try:
+        sigma_n = metric.posterior_sigma_n(
+            halos, sources, use_flags=use_flags,
+        )
+    except Exception:
+        sigma_n = None
+
+    chi2_sl = utils.chi2_strong_source_plane_power_law(
+        halos, strong_systems,
+        sigma_n=sigma_n, alpha_cal=1.0,
+    )
+    if not np.isfinite(chi2_sl) or chi2_sl <= 0:
+        return 0.0
+
+    # Absolute chi-squared ratio (no dof normalization), matching the
+    # convention in metric.compute_lambda_sl.
+    lambda_raw = chi2_wl / chi2_sl
+
+    # Cap to prevent runaway weighting
+    lambda_max = 100.0
+    result = min(lambda_raw, lambda_max)
+    cap_note = f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else ""
+    print(f"Post-selection lambda_sl: chi^2_WL/chi^2_SL = "
+          f"{chi2_wl:.1f}/{chi2_sl:.1f} = {lambda_raw:.3f}{cap_note}")
+    return float(result)
 
 def calculate_total_chi2(
     sources,
@@ -293,34 +361,37 @@ def calculate_total_chi2(
     use_magnification_correction_sl: bool = True,
 ):
     """
-    Total chi2 = chi2_WL + lambda_sl * chi2_SL  (SL implemented for SIS and NFW).
+    Total chi2 = chi2_WL + lambda_sl * chi2_SL.
 
-    The SL chi2 has two independent components:
-
+    Now supports POWER_LAW in addition to SIS and NFW.  The POWER_LAW
+    SL chi2 uses the same components as SIS/NFW:
         chi2_SL = chi2_scatter + chi2_flux
 
-    where chi2_scatter is the source-plane positional scatter (existing)
-    and chi2_flux is the flux-ratio residual (new).  Both are weighted
-    by the same lambda_sl since they are both strong-lensing constraints.
-    Systems without flux data contribute chi2_flux = 0 (backward compat).
- 
+    where chi2_scatter is computed by chi2_strong_source_plane_power_law
+    and chi2_flux by chi2_flux_power_law.  Both functions live in
+    utils.py and operate directly on PowerLawHalo.
+
     The relative weight lambda_sl between weak and strong lensing can be
     supplied in three ways (in order of precedence):
- 
+
         1. Explicitly via the ``lambda_sl`` keyword  — used as-is.
            This is the recommended path: the caller pre-computes
            lambda_sl once at the initial parameter values via
            ``compute_lambda_sl()`` and holds it fixed throughout
            the entire optimisation call so the objective is smooth.
- 
+
+           For POWER_LAW, lambda_sl is computed AFTER forward selection
+           rather than before — see the POWER_LAW branch in
+           main.fit_lensing_field.
+
         2. If ``lambda_sl is None`` and strong lensing is active,
            a fallback reduced-chi2 ratio is computed at the *current*
            parameter values.  This is provided as a safety net but
            should NOT be relied upon inside an optimiser loop (it
            makes the objective non-stationary).
- 
+
         3. If strong lensing is inactive, lambda_sl = 0 regardless.
- 
+
     Returns
     -------
     chi2_total : float
@@ -329,26 +400,31 @@ def calculate_total_chi2(
         Keys: chi2_wl, chi2_sl, chi2_scatter, chi2_flux,
               dof_wl, dof_sl, lambda_sl
     """
-    # ── WL part (existing behavior) ──
+    # ── WL part ──
     chi2_wl = calculate_chi_squared(sources, lenses, use_flags, lens_type=lens_type)
     dof_wl = calc_degrees_of_freedom(sources, lenses, use_flags)
- 
+
     chi2_scatter = 0.0
     chi2_flux = 0.0
     chi2_sl = 0.0
     dof_sl = 0
- 
+
     # ── SL part (only if present AND requested) ──
     has_sl = (hasattr(sources, "strong_systems")
               and sources.strong_systems is not None
               and len(sources.strong_systems) > 0)
- 
+
     if has_sl and use_strong_lensing:
         # Source-plane scatter (positional constraint)
         if lens_type == "SIS":
-            chi2_scatter = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_sis(
+                lenses, sources.strong_systems)
         elif lens_type == "NFW":
-            chi2_scatter = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_nfw(
+                lenses, sources.strong_systems)
+        elif lens_type == "POWER_LAW":
+            chi2_scatter = utils.chi2_strong_source_plane_power_law(
+                lenses, sources.strong_systems)
         else:
             raise NotImplementedError(
                 f"Strong-lensing chi2 not implemented for lens_type='{lens_type}'."
@@ -359,32 +435,29 @@ def calculate_total_chi2(
             chi2_flux = utils.chi2_flux_sis(lenses, sources.strong_systems)
         elif lens_type == "NFW":
             chi2_flux = utils.chi2_flux_nfw(lenses, sources.strong_systems)
+        elif lens_type == "POWER_LAW":
+            chi2_flux = utils.chi2_flux_power_law(
+                lenses, sources.strong_systems)
 
         chi2_sl = chi2_scatter + chi2_flux
         dof_sl = calc_strong_dof(sources)
- 
+
     # ── Determine lambda ──
     if lambda_sl is not None:
-        # Path 1: caller supplied a pre-computed weight (recommended)
         _lambda = float(lambda_sl)
     elif use_strong_lensing and dof_sl > 0 and chi2_sl > 0:
-        # Path 2: fallback reduced-chi2 equalisation at current params
         rchi2_wl = chi2_wl / dof_wl if dof_wl > 0 else 1.0
         rchi2_sl = chi2_sl / dof_sl if dof_sl > 0 else 1.0
         _lambda = rchi2_wl / rchi2_sl if rchi2_sl > 0 else 1.0
     else:
-        # Path 3: no strong lensing contribution
         _lambda = 0.0
- 
+
     chi2_total = float(chi2_wl) + _lambda * float(chi2_sl)
 
-    # Guard against np.inf from calc_degrees_of_freedom (returned when
-    # num_source_params <= num_lens_params, e.g. very few sources near
-    # a candidate lens during per-lens optimization).
     _dof_wl = int(dof_wl) if np.isfinite(dof_wl) else 0
     _dof_sl = int(dof_sl) if np.isfinite(dof_sl) else 0
     dof_total = _dof_wl + _dof_sl
- 
+
     components = {
         "chi2_wl": float(chi2_wl),
         "chi2_sl": float(chi2_sl),
@@ -395,8 +468,6 @@ def calculate_total_chi2(
         "lambda_sl": float(_lambda),
     }
     return chi2_total, dof_total, components
-
-# Special functions for WL
 
 def chi2_wl_power_law(halos, sources,
                       use_flags=(True, True, True),
@@ -475,7 +546,6 @@ def chi2_wl_power_law(halos, sources,
         chi2 += _power_law_bound_penalty(halos, penalty_factor=penalty_factor)
 
     return float(chi2)
-
 
 def posterior_sigma_n(halos, sources,
                       use_flags=(True, True, True),
@@ -640,7 +710,6 @@ def posterior_sigma_n(halos, sources,
     }
     return sigma_n, info
 
-
 def _power_law_bound_penalty(halos, penalty_factor=1.0e6):
     """
     Soft barrier penalty for halos that have drifted outside the
@@ -664,7 +733,6 @@ def _power_law_bound_penalty(halos, penalty_factor=1.0e6):
     pen_k = np.where(k <= 0.0, (0.0 - k) ** 2, 0.0).sum()
 
     return penalty_factor * float(pen_n_low + pen_n_hi + pen_k)
-
 
 def calc_dof_wl_power_law(sources, halos, use_flags=(True, True, True)):
     """

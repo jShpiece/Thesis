@@ -118,6 +118,26 @@ class JWSTPipeline:
         # POWER_LAW pivot radius (only used if lens_type == 'POWER_LAW')
         self.theta_star = float(config.get('theta_star', 30.0))
 
+        # Strong-lensing configuration (off by default — backward
+        # compatible with existing NFW configs).  When the catalog
+        # path is provided, the pipeline loads the systems via
+        # load_a2744_sl_catalog.load_strong_lensing_systems and
+        # passes use_strong_lensing=True to fit_lensing_field.
+        self.strong_lensing_catalog_path = config.get(
+            'strong_lensing_catalog_path', None)
+        self.sl_qf_min = int(config.get('sl_qf_min', 2))
+        self.sl_qf_max = int(config.get('sl_qf_max', 3))
+        self.sl_keep_locations = tuple(
+            config.get('sl_keep_locations', ('BGCs',)))
+        self.sl_wl_reference_radec = config.get(
+            'sl_wl_reference_radec', None)  # (RA, Dec) fallback if no WCS
+        self.use_strong_lensing = bool(self.strong_lensing_catalog_path)
+
+        # File-naming suffix to disambiguate WL-only vs WL+SL outputs.
+        # Used in CSV / PDF filenames so the same (cluster, signal,
+        # lens_type) can have separate outputs for SL ablations.
+        self.sl_suffix = 'WLSL' if self.use_strong_lensing else 'WL'
+
         # Redshifts
         self.z_source = config['source_redshift']
         self.z_cluster = config['cluster_redshift']
@@ -173,7 +193,8 @@ class JWSTPipeline:
         self.initialize_sources()
 
         output_path = (f"jackknife_results_{self.cluster_name}_"
-                       f"{self.signal_choice}_{self.lens_type}.csv")
+                       f"{self.signal_choice}_{self.lens_type}_"
+                       f"{self.sl_suffix}.csv")
         # Per-lens-type column header
         if self.lens_type == 'NFW':
             header = ["i", "x", "y", "M200", "concentration"]
@@ -293,6 +314,136 @@ class JWSTPipeline:
         self.sources.x -= self.centroid_x
         self.sources.y -= self.centroid_y
 
+        # Load strong-lensing systems if requested.  Must be done AFTER
+        # the centroid is computed because SL positions need to be
+        # co-registered with the WL frame (i.e., centroid-subtracted
+        # the same way Source.x/y are).
+        if self.use_strong_lensing:
+            self._load_strong_lensing_systems()
+
+    def _load_strong_lensing_systems(self):
+        """
+        Parse the SL catalog and attach systems to self.sources.
+        Co-registers SL positions with the WL frame using either FITS
+        WCS (if available) or a tangent-plane projection around a
+        provided reference (RA, Dec).
+        """
+        # Defer the import so users without the loader file installed
+        # can still use the WL-only paths.
+        try:
+            from pipelines.load_a2744_sl_catalog import (
+                load_strong_lensing_systems, print_sl_summary,
+            )
+        except ImportError:
+            try:
+                # Same directory as read_jwst.py (when invoked as a script)
+                import sys as _sys
+                from pathlib import Path as _Path
+                _sys.path.insert(0, str(_Path(__file__).parent))
+                from load_a2744_sl_catalog import (
+                    load_strong_lensing_systems, print_sl_summary,
+                )
+            except ImportError as e:
+                raise ImportError(
+                    "Could not import load_a2744_sl_catalog.  Place "
+                    "load_a2744_sl_catalog.py in pipelines/ next to "
+                    "read_jwst.py, or install it on the Python path."
+                ) from e
+
+        systems, diag = load_strong_lensing_systems(
+            catalog_path=self.strong_lensing_catalog_path,
+            cdelt_arcsec_per_pix=self.CDELT,
+            centroid_x_arcsec=self.centroid_x,
+            centroid_y_arcsec=self.centroid_y,
+            fits_path=self.image_path,
+            wl_reference_radec=self.sl_wl_reference_radec,
+            qf_min=self.sl_qf_min,
+            qf_max=self.sl_qf_max,
+            keep_locations=self.sl_keep_locations,
+            require_zspec=True,
+        )
+        print_sl_summary(systems, diag,
+                         header_text=f"SL catalog ({self.cluster_name})")
+
+        # Attach to Source so fit_lensing_field can find them
+        self.sources.strong_systems = systems
+
+        # Coordinate-alignment sanity check.  Print the spatial overlap
+        # between the WL source distribution and the SL image positions.
+        # If they don't overlap (e.g., misaligned by tens of arcsec),
+        # the SL constraints will pull the recovered halos away from
+        # the actual cluster center and inflate masses to match — a
+        # silent failure mode that's hard to diagnose post-hoc.
+        self._print_sl_alignment_check(systems)
+
+    def _print_sl_alignment_check(self, systems):
+        """
+        Diagnostic printout of WL vs SL spatial extent in the centered
+        frame.  If SL positions don't overlap WL sources, the fit will
+        be wrong; this prints the ranges so you can verify visually.
+        """
+        if not systems:
+            return
+
+        wl_x = np.asarray(self.sources.x)
+        wl_y = np.asarray(self.sources.y)
+        sl_x = np.concatenate([np.atleast_1d(s.theta_x) for s in systems])
+        sl_y = np.concatenate([np.atleast_1d(s.theta_y) for s in systems])
+
+        # WL field extent (already centroid-subtracted)
+        wl_xmin, wl_xmax = float(wl_x.min()), float(wl_x.max())
+        wl_ymin, wl_ymax = float(wl_y.min()), float(wl_y.max())
+        sl_xmin, sl_xmax = float(sl_x.min()), float(sl_x.max())
+        sl_ymin, sl_ymax = float(sl_y.min()), float(sl_y.max())
+
+        # Compute centroid offset between SL and WL
+        wl_cx, wl_cy = float(wl_x.mean()), float(wl_y.mean())
+        sl_cx, sl_cy = float(sl_x.mean()), float(sl_y.mean())
+        offset = np.hypot(sl_cx - wl_cx, sl_cy - wl_cy)
+
+        # SL image fraction within WL extent
+        in_field = ((sl_x >= wl_xmin) & (sl_x <= wl_xmax)
+                    & (sl_y >= wl_ymin) & (sl_y <= wl_ymax))
+        n_in_field = int(in_field.sum())
+        n_total = sl_x.size
+
+        print(f"\n=== Coordinate alignment check ({self.cluster_name}) ===")
+        print(f"  WL source extent (arcsec): "
+              f"x=[{wl_xmin:+7.1f}, {wl_xmax:+7.1f}], "
+              f"y=[{wl_ymin:+7.1f}, {wl_ymax:+7.1f}]")
+        print(f"  SL image extent  (arcsec): "
+              f"x=[{sl_xmin:+7.1f}, {sl_xmax:+7.1f}], "
+              f"y=[{sl_ymin:+7.1f}, {sl_ymax:+7.1f}]")
+        print(f"  WL centroid: ({wl_cx:+.2f}, {wl_cy:+.2f})  (should be ~ 0,0)")
+        print(f"  SL centroid: ({sl_cx:+.2f}, {sl_cy:+.2f})")
+        print(f"  Centroid offset: {offset:.1f} arcsec")
+        print(f"  SL images inside WL field: {n_in_field}/{n_total} "
+              f"({100 * n_in_field / n_total:.0f}%)")
+
+        # Diagnose alignment status.  Two failure modes:
+        #   1. Few SL images inside WL field (< 50%): genuine
+        #      coordinate misalignment.
+        #   2. Most SL images in field but centroid offset is large:
+        #      could be either misalignment OR a real cluster offset
+        #      (the WL source-distribution centroid does NOT have to
+        #      coincide with the cluster mass centroid; sources are
+        #      background galaxies whose distribution depends on
+        #      photometric depth, not cluster mass).
+        if n_in_field < 0.5 * n_total:
+            print(f"  *** WARNING: < 50% of SL images fall within the "
+                  f"WL source field.  Likely coordinate misalignment.  "
+                  f"Check the FITS WCS or sl_wl_reference_radec.")
+        elif offset > 30.0:
+            print(f"  Note: SL centroid is offset {offset:.0f} arcsec "
+                  f"from the WL source centroid, but {100*n_in_field/n_total:.0f}% "
+                  f"of SL images sit inside the WL field.  This is "
+                  f"normal — the WL source centroid is set by photometric "
+                  f"depth, not cluster mass, and the cluster's actual "
+                  f"BCG/mass center can sit several tens of arcsec from "
+                  f"the source-distribution centroid.")
+        else:
+            print(f"  Alignment looks reasonable.")
+
     # ------------------------------------------------------------------
     # Lens fitting — dispatches by lens_type
     # ------------------------------------------------------------------
@@ -304,6 +455,7 @@ class JWSTPipeline:
             self.lenses, _ = main.fit_lensing_field(
                 self.sources, xmax, flags=flags, use_flags=self.use_flags,
                 lens_type='NFW', z_lens=self.z_cluster,
+                use_strong_lensing=self.use_strong_lensing,
             )
         elif self.lens_type == 'POWER_LAW':
             # main.fit_lensing_field as currently shipped does not accept
@@ -314,6 +466,7 @@ class JWSTPipeline:
             self.lenses, _ = main.fit_lensing_field(
                 self.sources, xmax, flags=flags, use_flags=self.use_flags,
                 lens_type='POWER_LAW', z_lens=self.z_cluster,
+                use_strong_lensing=self.use_strong_lensing,
                 # theta_star=self.theta_star,
             )
 
@@ -335,7 +488,7 @@ class JWSTPipeline:
         # Save
         file_name = (self.output_dir
                      / f"lenses_{self.cluster_name}_{self.signal_choice}"
-                     f"_{self.lens_type}.csv")
+                     f"_{self.lens_type}_{self.sl_suffix}.csv")
         self.lenses.export_to_csv(file_name)
 
         # Sanity-check diagnostic — print recovered parameters per halo
@@ -652,22 +805,25 @@ class JWSTPipeline:
         levels = self._kappa_levels[cache_key]
 
         # Title and total-mass label depend on lens_type
+        # Title prefix indicating WL-only vs WL+SL reconstruction
+        sl_label = "WL+SL" if self.use_strong_lensing else "WL-only"
+
         if self.lens_type == 'NFW':
             total_mass_hinv = float(np.nansum(
                 getattr(self.lenses, "mass", np.array([np.nan]))))
-            title_main = (rf"{self.cluster_name}: JWST WL Reconstruction "
+            title_main = (rf"{self.cluster_name}: JWST {sl_label} Reconstruction "
                           rf"(NFW, {self.signal_choice})")
         else:  # POWER_LAW
-            total_mass_hinv = np.nan  # not directly comparable
+            total_mass_hinv = np.nan
             slope_med = float(np.median(getattr(self.lenses, "slope",
                                                 np.array([np.nan]))))
-            title_main = (rf"{self.cluster_name}: JWST WL Reconstruction "
+            title_main = (rf"{self.cluster_name}: JWST {sl_label} Reconstruction "
                           rf"(power-law, $\langle n\rangle={slope_med:.2f}$, "
                           rf"{self.signal_choice})")
 
         save_main = (Path(self.output_dir)
                      / f"{self.cluster_name}_clu_{self.signal_choice}"
-                     f"_{self.lens_type}.pdf")
+                     f"_{self.lens_type}_{self.sl_suffix}.pdf")
 
         _plot_single_panel(
             img_data=img_data, img_extent=img_extent,
@@ -682,9 +838,10 @@ class JWSTPipeline:
             self.lenses,
             Path(self.output_dir) / (f"mass_{self.cluster_name}"
                                       f"_{self.signal_choice}"
-                                      f"_{self.lens_type}.pdf"),
+                                      f"_{self.lens_type}"
+                                      f"_{self.sl_suffix}.pdf"),
             f"Mass Comparison: {self.cluster_name} "
-            f"({self.lens_type}, signals: {self.signal_choice})",
+            f"({self.lens_type}, {sl_label}, signals: {self.signal_choice})",
             self.cluster_name,
             lens_type=self.lens_type,
         )
@@ -697,7 +854,7 @@ class JWSTPipeline:
     def import_lenses(self):
         file_name = (self.output_dir
                      / f"lenses_{self.cluster_name}_{self.signal_choice}"
-                     f"_{self.lens_type}.csv")
+                     f"_{self.lens_type}_{self.sl_suffix}.csv")
         if self.lens_type == 'NFW':
             lens = halo_obj.NFW_Lens(
                 x=[], y=[], z=[], mass=[], concentration=[],
@@ -808,6 +965,14 @@ CLUSTERS = {
         'output_dir':           'Output/JWST/ABELL/',
         'cluster_redshift':     0.308,
         'source_redshift':      0.8,
+        # Strong-lensing catalog: Bergamini+2023 Table A.1
+        # Set strong_lensing_catalog_path=None to disable SL.
+        'strong_lensing_catalog_path':
+            'Data/JWST/ABELL_2744/Catalogs/apjacd643t2_mrt.txt',
+        # Fallback (RA, Dec) for tangent-plane projection if FITS WCS
+        # is unavailable.  This is the approximate cluster center
+        # (BCG-S region) and only used as a fallback.
+        'sl_wl_reference_radec': (3.58833, -30.40014),
     },
     'EL_GORDO': {
         'flexion_catalog_path': 'Data/JWST/EL_GORDO/Catalogs/multiband_flexion.pkl',
@@ -816,6 +981,8 @@ CLUSTERS = {
         'output_dir':           'Output/JWST/EL_GORDO/',
         'cluster_redshift':     0.873,
         'source_redshift':      1.2,
+        # No SL catalog for El Gordo yet
+        'strong_lensing_catalog_path': None,
     },
 }
 
@@ -824,8 +991,15 @@ VALID_MODES = ['NFW', 'POWER_LAW', 'COMPARE']
 VALID_ACTIONS = ['fit', 'visualize', 'errorbars']
 
 
-def _build_config(cluster_name, signal, theta_star, repo_root):
-    """Construct a JWSTPipeline config dict for a (cluster, signal) pair."""
+def _build_config(cluster_name, signal, theta_star, repo_root,
+                  use_strong_lensing=True):
+    """Construct a JWSTPipeline config dict for a (cluster, signal) pair.
+
+    Strong lensing is enabled when (a) the cluster has a SL catalog
+    in CLUSTERS, AND (b) use_strong_lensing=True.  Set
+    use_strong_lensing=False to force a WL-only run regardless of
+    catalog availability (useful for ablation studies).
+    """
     base = CLUSTERS[cluster_name]
     cfg = {
         'flexion_catalog_path': str(repo_root / base['flexion_catalog_path']),
@@ -838,6 +1012,16 @@ def _build_config(cluster_name, signal, theta_star, repo_root):
         'signal_choice':        signal,
         'theta_star':           theta_star,
     }
+    # SL config: forward path + reference RA/Dec from the cluster
+    # definition.  When use_strong_lensing=False, force the path to
+    # None so the pipeline runs WL-only.
+    sl_path = base.get('strong_lensing_catalog_path', None)
+    if use_strong_lensing and sl_path:
+        cfg['strong_lensing_catalog_path'] = str(repo_root / sl_path)
+        cfg['sl_wl_reference_radec'] = base.get(
+            'sl_wl_reference_radec', None)
+    else:
+        cfg['strong_lensing_catalog_path'] = None
     return cfg
 
 
@@ -911,6 +1095,10 @@ def main_cli():
     p.add_argument('--theta-star', type=float, default=30.0,
                    dest='theta_star',
                    help="POWER_LAW pivot radius in arcsec.  Default: 30.")
+    p.add_argument('--no-sl', action='store_true', dest='no_sl',
+                   help="Disable strong lensing even for clusters that "
+                        "have an SL catalog configured.  Useful for "
+                        "WL-only ablation studies.")
     p.add_argument('--repo-root', type=str, default=None, dest='repo_root',
                    help="Repository root path (the parent of `pipelines/` "
                         "and `arch/`).  Default: auto-detected from this "
@@ -933,6 +1121,7 @@ def main_cli():
     # Resolve cluster and signal lists
     clusters = list(CLUSTERS.keys()) if args.cluster == 'ALL' else [args.cluster]
     signals  = VALID_SIGNALS         if args.signal  == 'ALL' else [args.signal]
+    use_strong_lensing = not args.no_sl
 
     # Print a short header so the user can see what they're about to do
     n_jobs = len(clusters) * len(signals)
@@ -946,6 +1135,7 @@ def main_cli():
     print(f"  action     : {args.action}")
     if args.mode == 'POWER_LAW' or args.mode == 'COMPARE':
         print(f"  theta_star : {args.theta_star}")
+    print(f"  strong-lensing: {'enabled' if use_strong_lensing else 'DISABLED'}")
     print(f"  total jobs : {n_jobs}")
     print()
 
@@ -954,7 +1144,8 @@ def main_cli():
             print(f"\n--- {cluster_name} / signal={signal} / "
                   f"mode={args.mode} / action={args.action} ---")
             cfg = _build_config(cluster_name, signal,
-                                args.theta_star, repo_root)
+                                args.theta_star, repo_root,
+                                use_strong_lensing=use_strong_lensing)
             try:
                 _run_one(cfg, args.mode, args.action)
             except FileNotFoundError as e:
