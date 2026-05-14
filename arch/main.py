@@ -1,10 +1,16 @@
-import arch.pipeline as pipeline
 import arch.metric as metric
+import arch.pipeline as pipeline
 
 
-def fit_lensing_field(sources, xmax, flags=False, use_flags=None,
-                      lens_type='SIS', z_lens=0.5,
-                      use_strong_lensing: bool = False):
+def fit_lensing_field(
+    sources,
+    xmax,
+    flags=False,
+    use_flags=None,
+    lens_type="SIS",
+    z_lens=0.5,
+    use_strong_lensing: bool = False,
+):
     """
     Reconstructs the gravitational lensing field based on observed
     source properties.
@@ -63,20 +69,17 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None,
 
     def log_step(message, lenses, reduced_chi2):
         if flags:
-            print(f"{message}\nLenses: {len(lenses.x)}, "
-                  f"Reduced Chi^2: {reduced_chi2:.4f}")
+            print(f"{message}\nLenses: {len(lenses.x)}, " f"Reduced Chi^2: {reduced_chi2:.4f}")
 
     # ── Step 1: Generate initial lens candidates ──
     lenses = pipeline.generate_initial_guess(sources, lens_type, z_lens)
-    reduced_chi2 = pipeline.update_chi2_values(
-        sources, lenses, use_flags, lens_type)
+    reduced_chi2 = pipeline.update_chi2_values(sources, lenses, use_flags, lens_type)
     log_step("Initial Guesses:", lenses, reduced_chi2)
 
     # ── Pre-compute lambda_sl (SIS only) ──
     # NFW and POWER_LAW defer to after forward selection — see docstring.
-    if use_strong_lensing and lens_type == 'SIS':
-        lambda_sl = metric.compute_lambda_sl(
-            sources, lenses, use_flags, lens_type)
+    if use_strong_lensing and lens_type == "SIS":
+        lambda_sl = metric.compute_lambda_sl(sources, lenses, use_flags, lens_type)
         if flags:
             print(f"Pre-computed lambda_sl = {lambda_sl:.6f}")
     else:
@@ -87,37 +90,53 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None,
     # runs WL-only (matching the post-selection convention).
     # SIS: pre-computed lambda_sl is used.
     lenses = pipeline.optimize_lens_positions(
-        sources, lenses, xmax, use_flags, lens_type,
-        use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl,
+        sources,
+        lenses,
+        xmax,
+        use_flags,
+        lens_type,
+        use_strong_lensing=use_strong_lensing,
+        lambda_sl=lambda_sl,
     )
     reduced_chi2 = pipeline.update_chi2_values(
-        sources, lenses, use_flags, lens_type,
-        use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl,
+        sources,
+        lenses,
+        use_flags,
+        lens_type,
+        use_strong_lensing=use_strong_lensing,
+        lambda_sl=lambda_sl,
     )
     log_step("After Local Minimization:", lenses, reduced_chi2)
 
     # ── Step 3: Filter out unsuitable lenses ──
-    lenses = pipeline.filter_lens_positions(
-        sources, lenses, xmax, lens_type=lens_type)
+    lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type=lens_type)
     reduced_chi2 = pipeline.update_chi2_values(
-        sources, lenses, use_flags, lens_type,
-        use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl,
+        sources,
+        lenses,
+        use_flags,
+        lens_type,
+        use_strong_lensing=use_strong_lensing,
+        lambda_sl=lambda_sl,
     )
     log_step("After Filtering:", lenses, reduced_chi2)
 
     # ── Step 4: Forward selection ──
     # Both NFW and POWER_LAW: forward selection runs WL-only, then
     # lambda_sl is computed at the post-selection minimum and frozen.
-    if use_strong_lensing and lens_type in ('NFW', 'POWER_LAW'):
-        if lens_type == 'POWER_LAW':
+    if use_strong_lensing and lens_type in ("NFW", "POWER_LAW"):
+        if lens_type == "POWER_LAW":
             # POWER_LAW: forward_lens_selection has return_lambda_sl=True
             # path that computes lambda_sl internally.
             selected, _, lambda_sl_post = pipeline.forward_lens_selection(
-                sources, lenses, use_flags, lens_type,
-                use_strong_lensing=False,           # forced WL-only internally
+                sources,
+                lenses,
+                use_flags,
+                lens_type,
+                use_strong_lensing=False,  # forced WL-only internally
                 lambda_sl=None,
-                strong_systems=sources.strong_systems
-                    if hasattr(sources, "strong_systems") else None,
+                strong_systems=(
+                    sources.strong_systems if hasattr(sources, "strong_systems") else None
+                ),
                 return_lambda_sl=True,
             )
             lenses = selected
@@ -126,59 +145,86 @@ def fit_lensing_field(sources, xmax, flags=False, use_flags=None,
             # NFW: forward selection WL-only, then compute lambda_sl
             # via metric.compute_lambda_sl on the post-selection model.
             lenses, _ = pipeline.forward_lens_selection(
-                sources, lenses, use_flags, lens_type,
-                use_strong_lensing=False, lambda_sl=None,
+                sources,
+                lenses,
+                use_flags,
+                lens_type,
+                use_strong_lensing=False,
+                lambda_sl=None,
             )
-            lambda_sl = metric.compute_lambda_sl(
-                sources, lenses, use_flags, lens_type)
+            lambda_sl = metric.compute_lambda_sl(sources, lenses, use_flags, lens_type)
         if flags:
-            print(f"Post-selection lambda_sl = "
-                  f"{(lambda_sl if lambda_sl is not None else 0.0):.6f}")
+            print(
+                f"Post-selection lambda_sl = "
+                f"{(lambda_sl if lambda_sl is not None else 0.0):.6f}"
+            )
     else:
         # SIS path with pre-computed lambda_sl, or WL-only run
         lenses, _ = pipeline.forward_lens_selection(
-            sources, lenses, use_flags, lens_type,
-            use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl,
+            sources,
+            lenses,
+            use_flags,
+            lens_type,
+            use_strong_lensing=use_strong_lensing,
+            lambda_sl=lambda_sl,
         )
 
-    lambda_sl = 1 # Try freezing this to 1 to see how it affects reconstruction
+    lambda_sl = 1  # Try freezing this to 1 to see how it affects reconstruction
     reduced_chi2 = pipeline.update_chi2_values(
-        sources, lenses, use_flags, lens_type,
-        use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl,
+        sources,
+        lenses,
+        use_flags,
+        lens_type,
+        use_strong_lensing=use_strong_lensing,
+        lambda_sl=lambda_sl,
     )
     log_step("After Forward Selection:", lenses, reduced_chi2)
 
     # ── Step 5: Merge nearby lenses ──
-    merger_threshold = ((len(sources.x) / (2 * xmax) ** 2) ** (-0.5)
-                        if len(sources.x) > 0 else 1.0)
+    merger_threshold = (len(sources.x) / (2 * xmax) ** 2) ** (-0.5) if len(sources.x) > 0 else 1.0
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold, lens_type)
     reduced_chi2 = pipeline.update_chi2_values(
-        sources, lenses, use_flags, lens_type,
-        use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl,
+        sources,
+        lenses,
+        use_flags,
+        lens_type,
+        use_strong_lensing=use_strong_lensing,
+        lambda_sl=lambda_sl,
     )
     log_step("After Merging Lenses:", lenses, reduced_chi2)
 
     # ── Step 6: Final optimization (strength) ──
-    if lens_type == 'POWER_LAW':
+    if lens_type == "POWER_LAW":
         lenses = pipeline.optimize_lens_strength(
-            sources, lenses, use_flags, lens_type,
+            sources,
+            lenses,
+            use_flags,
+            lens_type,
             use_strong_lensing=use_strong_lensing,
             lambda_sl=lambda_sl,
-            strong_systems=sources.strong_systems
-                if (use_strong_lensing
-                    and hasattr(sources, "strong_systems"))
-                else None,
+            strong_systems=(
+                sources.strong_systems
+                if (use_strong_lensing and hasattr(sources, "strong_systems"))
+                else None
+            ),
         )
     else:
         lenses = pipeline.optimize_lens_strength(
-            sources, lenses, use_flags, lens_type,
+            sources,
+            lenses,
+            use_flags,
+            lens_type,
             use_strong_lensing=use_strong_lensing,
             lambda_sl=lambda_sl,
         )
 
     reduced_chi2 = pipeline.update_chi2_values(
-        sources, lenses, [True, True, True], lens_type,
-        use_strong_lensing=use_strong_lensing, lambda_sl=lambda_sl,
+        sources,
+        lenses,
+        [True, True, True],
+        lens_type,
+        use_strong_lensing=use_strong_lensing,
+        lambda_sl=lambda_sl,
     )
     log_step("After Final Optimization:", lenses, reduced_chi2)
 

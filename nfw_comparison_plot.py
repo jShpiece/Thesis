@@ -24,7 +24,7 @@ import arch.metric as metric
 from arch.main import fit_lensing_field
 
 # Re-use the toy data builders from the test suite
-from tests_nfw_strong import (
+from tests.tests_nfw_strong import (
     make_nfw_halo,
     make_nfw_strong_system,
     make_weak_lensing_catalog_nfw,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Any
+from typing import Iterable, Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -21,14 +21,17 @@ class StrongLensingSystem:
     chi2_flux_* functions in utils.py use these to constrain the magnification
     ratio |mu_i|/|mu_ref|, breaking the position-mass degeneracy.
     """
-    system_id: str # Unique identifier for the strong lensing system
-    theta_x: np.ndarray # x-positions of the multiple images
-    theta_y: np.ndarray # y-positions of the multiple images
-    z_source: float # Redshift of the source
-    sigma_theta: float | np.ndarray = 0.1 # Positional uncertainty per image (scalar or per-image array)
-    flux: np.ndarray | None = None # Observed flux per image (arbitrary units, None = no flux data)
-    sigma_flux: float | np.ndarray | None = None # Flux uncertainty per image
-    meta: dict = field(default_factory=dict) # Additional metadata for the system
+
+    system_id: str  # Unique identifier for the strong lensing system
+    theta_x: np.ndarray  # x-positions of the multiple images
+    theta_y: np.ndarray  # y-positions of the multiple images
+    z_source: float  # Redshift of the source
+    sigma_theta: float | np.ndarray = (
+        0.1  # Positional uncertainty per image (scalar or per-image array)
+    )
+    flux: np.ndarray | None = None  # Observed flux per image (arbitrary units, None = no flux data)
+    sigma_flux: float | np.ndarray | None = None  # Flux uncertainty per image
+    meta: dict = field(default_factory=dict)  # Additional metadata for the system
 
     def __post_init__(self) -> None:
         # ── Positions ──
@@ -81,6 +84,7 @@ class StrongLensingSystem:
         for x, y, s in zip(self.theta_x, self.theta_y, sig):
             yield float(x), float(y), float(s)
 
+
 class Source:
     """
     Represents a catalog of sources with lensing properties.
@@ -102,9 +106,22 @@ class Source:
 
     def __init__(
         self,
-        x, y, e1, e2, f1, f2, g1, g2, sigs, sigf, sigg, redshift,
-        strong_systems: Optional[Iterable[StrongLensingSystem]] = None,  # <- ADD (default keeps old calls working)
-    ):        # Ensure all inputs are numpy arrays
+        x,
+        y,
+        e1,
+        e2,
+        f1,
+        f2,
+        g1,
+        g2,
+        sigs,
+        sigf,
+        sigg,
+        redshift,
+        strong_systems: Optional[
+            Iterable[StrongLensingSystem]
+        ] = None,  # <- ADD (default keeps old calls working)
+    ):  # Ensure all inputs are numpy arrays
         self.x = np.atleast_1d(x)
         self.y = np.atleast_1d(y)
         self.e1 = np.atleast_1d(e1)
@@ -122,7 +139,9 @@ class Source:
         self.redshift = np.atleast_1d(redshift)
 
         # Initialize strong lensing systems - if provided
-        self.strong_systems: List[StrongLensingSystem] = list(strong_systems) if strong_systems is not None else []
+        self.strong_systems: List[StrongLensingSystem] = (
+            list(strong_systems) if strong_systems is not None else []
+        )
 
     def copy(self):
         """
@@ -138,9 +157,17 @@ class Source:
                 theta_x=s.theta_x.copy(),
                 theta_y=s.theta_y.copy(),
                 z_source=float(s.z_source),
-                sigma_theta=s.sigma_theta.copy() if isinstance(s.sigma_theta, np.ndarray) else float(s.sigma_theta),
+                sigma_theta=(
+                    s.sigma_theta.copy()
+                    if isinstance(s.sigma_theta, np.ndarray)
+                    else float(s.sigma_theta)
+                ),
                 flux=s.flux.copy() if s.flux is not None else None,
-                sigma_flux=s.sigma_flux.copy() if isinstance(s.sigma_flux, np.ndarray) else (float(s.sigma_flux) if s.sigma_flux is not None else None),
+                sigma_flux=(
+                    s.sigma_flux.copy()
+                    if isinstance(s.sigma_flux, np.ndarray)
+                    else (float(s.sigma_flux) if s.sigma_flux is not None else None)
+                ),
                 meta=dict(s.meta),
             )
             for s in self.strong_systems
@@ -201,7 +228,18 @@ class Source:
             indices (array_like): Indices of the sources to remove.
         """
         for attr in [
-            'x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg', 'redshift'
+            "x",
+            "y",
+            "e1",
+            "e2",
+            "f1",
+            "f2",
+            "g1",
+            "g2",
+            "sigs",
+            "sigf",
+            "sigg",
+            "redshift",
         ]:
             setattr(self, attr, np.delete(getattr(self, attr), indices))
 
@@ -209,7 +247,7 @@ class Source:
         """
         Resets all lensing signals (shear, flexion, g-flexion) to zero.
         """
-        for attr in ['e1', 'e2', 'f1', 'f2', 'g1', 'g2']:
+        for attr in ["e1", "e2", "f1", "f2", "g1", "g2"]:
             setattr(self, attr, np.zeros_like(getattr(self, attr)))
 
     def filter_sources(self, max_flexion=0.1):
@@ -224,10 +262,10 @@ class Source:
         """
         # Identify valid sources where both f1 and f2 are within the allowed flexion
         valid_indices = (np.abs(self.f1) <= max_flexion) & (np.abs(self.f2) <= max_flexion)
-        
+
         # Identify bad indices where the condition is not met
         bad_indices = np.where(~valid_indices)[0]
-        
+
         # Remove the bad indices using the class's remove method
         self.remove(bad_indices)
         return bad_indices
@@ -237,57 +275,55 @@ class Source:
         Applies random noise to the lensing properties based on their standard deviations.
         """
         # Apply noise to shear components
-        for attr, sigma in zip(['e1', 'e2'], [self.sigs, self.sigs]):
+        for attr, sigma in zip(["e1", "e2"], [self.sigs, self.sigs]):
             noise = np.random.normal(0, sigma, size=getattr(self, attr).shape)
             setattr(self, attr, getattr(self, attr) + noise)
         # Apply noise to flexion components
-        for attr, sigma in zip(['f1', 'f2'], [self.sigf, self.sigf]):
+        for attr, sigma in zip(["f1", "f2"], [self.sigf, self.sigf]):
             noise = np.random.normal(0, sigma, size=getattr(self, attr).shape)
             setattr(self, attr, getattr(self, attr) + noise)
         # Apply noise to g-flexion components
-        for attr, sigma in zip(['g1', 'g2'], [self.sigg, self.sigg]):
+        for attr, sigma in zip(["g1", "g2"], [self.sigg, self.sigg]):
             noise = np.random.normal(0, sigma, size=getattr(self, attr).shape)
             setattr(self, attr, getattr(self, attr) + noise)
 
-    def apply_lensing(self, lenses, lens_type='SIS', z_source=0.8):
-            """
-            Applies lensing effects to the sources using the specified lens model.
+    def apply_lensing(self, lenses, lens_type="SIS", z_source=0.8):
+        """
+        Applies lensing effects to the sources using the specified lens model.
 
-            Parameters:
-                lenses: An object containing lens properties (e.g., positions,
-                    masses, kappa_star+slope for power-law).  Must be of a type
-                    consistent with `lens_type`.
-                lens_type (str): The type of lens model to use.  One of:
-                    'SIS', 'NFW', 'POWER_LAW'.  Default is 'SIS'.
-                z_source (float): Redshift of the sources, used by NFW lensing
-                    only.  POWER_LAW reads per-source redshifts from
-                    ``self.redshift`` directly via the lensing-efficiency
-                    factor inside ``calculate_lensing_signals_power_law``.
-                    Default is 0.8.
-            """
-            if lens_type == 'SIS':
-                shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
-                    utils.calculate_lensing_signals_sis(lenses, self)
-                )
-            elif lens_type == 'NFW':
-                _, shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
-                    utils.calculate_lensing_signals_nfw(lenses, self)
-                )
-            elif lens_type == 'POWER_LAW':
-                shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
-                    utils.calculate_lensing_signals_power_law(lenses, self)
-                )
-            else:
-                raise ValueError(
-                    "Invalid lens type. Use 'SIS', 'NFW', or 'POWER_LAW'."
-                )
+        Parameters:
+            lenses: An object containing lens properties (e.g., positions,
+                masses, kappa_star+slope for power-law).  Must be of a type
+                consistent with `lens_type`.
+            lens_type (str): The type of lens model to use.  One of:
+                'SIS', 'NFW', 'POWER_LAW'.  Default is 'SIS'.
+            z_source (float): Redshift of the sources, used by NFW lensing
+                only.  POWER_LAW reads per-source redshifts from
+                ``self.redshift`` directly via the lensing-efficiency
+                factor inside ``calculate_lensing_signals_power_law``.
+                Default is 0.8.
+        """
+        if lens_type == "SIS":
+            shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
+                utils.calculate_lensing_signals_sis(lenses, self)
+            )
+        elif lens_type == "NFW":
+            _, shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
+                utils.calculate_lensing_signals_nfw(lenses, self)
+            )
+        elif lens_type == "POWER_LAW":
+            shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = (
+                utils.calculate_lensing_signals_power_law(lenses, self)
+            )
+        else:
+            raise ValueError("Invalid lens type. Use 'SIS', 'NFW', or 'POWER_LAW'.")
 
-            # Update lensing properties by adding the calculated signals
-            for attr, delta in zip(
-                ['e1', 'e2', 'f1', 'f2', 'g1', 'g2'],
-                [shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2]
-            ):
-                setattr(self, attr, getattr(self, attr) + delta)
+        # Update lensing properties by adding the calculated signals
+        for attr, delta in zip(
+            ["e1", "e2", "f1", "f2", "g1", "g2"],
+            [shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2],
+        ):
+            setattr(self, attr, getattr(self, attr) + delta)
 
     def export_to_csv(self, filename):
         """
@@ -298,24 +334,26 @@ class Source:
         """
 
         # Create a DataFrame from the Source object
-        df = pd.DataFrame({
-            'x': self.x,
-            'y': self.y,
-            'e1': self.e1,
-            'e2': self.e2,
-            'f1': self.f1,
-            'f2': self.f2,
-            'g1': self.g1,
-            'g2': self.g2,
-            'sigs': self.sigs,
-            'sigf': self.sigf,
-            'sigg': self.sigg,
-            'redshift': self.redshift
-        })
+        df = pd.DataFrame(
+            {
+                "x": self.x,
+                "y": self.y,
+                "e1": self.e1,
+                "e2": self.e2,
+                "f1": self.f1,
+                "f2": self.f2,
+                "g1": self.g1,
+                "g2": self.g2,
+                "sigs": self.sigs,
+                "sigf": self.sigf,
+                "sigg": self.sigg,
+                "redshift": self.redshift,
+            }
+        )
 
         # Export the DataFrame to a CSV file
         df.to_csv(filename, index=False)
-    
+
     def import_from_csv(self, filename):
         """
         Imports a source catalog from a CSV file.
@@ -327,9 +365,21 @@ class Source:
         df = pd.read_csv(filename)
 
         # Assign the DataFrame columns to the Source object attributes
-        for attr in ['x', 'y', 'e1', 'e2', 'f1', 'f2', 'g1', 'g2', 'sigs', 'sigf', 'sigg', 'redshift']:
+        for attr in [
+            "x",
+            "y",
+            "e1",
+            "e2",
+            "f1",
+            "f2",
+            "g1",
+            "g2",
+            "sigs",
+            "sigf",
+            "sigg",
+            "redshift",
+        ]:
             setattr(self, attr, df[attr].values)
-        
 
     @property
     def has_strong_lensing(self) -> bool:

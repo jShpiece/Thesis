@@ -1,11 +1,12 @@
 import numpy as np
-from astropy.cosmology import Planck18 as cosmo
 from astropy import units as u
+from astropy.cosmology import Planck18 as cosmo
 
 # Physical constants
 M_SUN = 1.989e30  # Mass of the sun in kg
-G = 6.67430e-11   # Gravitational constant in m^3 kg^-1 s^-2
-C = 299_792_458   # Speed of light in m/s
+G = 6.67430e-11  # Gravitational constant in m^3 kg^-1 s^-2
+C = 299_792_458  # Speed of light in m/s
+
 
 class SIS_Lens:
     """
@@ -33,7 +34,7 @@ class SIS_Lens:
         self.y = np.atleast_1d(y)
         self.te = np.atleast_1d(te)
         self.chi2 = np.atleast_1d(chi2)
-    
+
     def copy(self):
         """
         Creates a deep copy of the SIS_Lens object.
@@ -41,13 +42,8 @@ class SIS_Lens:
         Returns:
             SIS_Lens: Deep copy of the SIS_Lens object.
         """
-        return SIS_Lens(
-            x=self.x.copy(),
-            y=self.y.copy(),
-            te=self.te.copy(),
-            chi2=self.chi2.copy()
-        )
-    
+        return SIS_Lens(x=self.x.copy(), y=self.y.copy(), te=self.te.copy(), chi2=self.chi2.copy())
+
     def merge(self, other):
         """
         Merges another SIS_Lens object into this one.
@@ -94,6 +90,7 @@ class SIS_Lens:
         self.y = data[:, 1]
         self.te = data[:, 2]
         self.chi2 = data[:, 3]
+
 
 class NFW_Lens:
     """
@@ -148,9 +145,9 @@ class NFW_Lens:
             concentration=self.concentration.copy(),
             mass=self.mass.copy(),
             redshift=self.redshift,
-            chi2=self.chi2.copy()
+            chi2=self.chi2.copy(),
         )
-    
+
     def merge(self, other):
         """
         Merges another NFW_Lens object into this one.
@@ -179,7 +176,7 @@ class NFW_Lens:
         self.concentration = np.delete(self.concentration, indices)
         self.mass = np.delete(self.mass, indices)
         self.chi2 = np.delete(self.chi2, indices)
-    
+
     def export_to_csv(self, filename):
         """
         Exports the NFW_Lens object to a CSV file.
@@ -271,8 +268,8 @@ class NFW_Lens:
         Returns:
             np.ndarray: Characteristic density contrast values.
         """
-        c = self.concentration # Concentration parameter - rename for brevity
-        delta_c = (200 / 3) * (c ** 3) / (np.log(1 + c) - c / (1 + c))
+        c = self.concentration  # Concentration parameter - rename for brevity
+        delta_c = (200 / 3) * (c**3) / (np.log(1 + c) - c / (1 + c))
         return delta_c
 
     def calculate_concentration(self):
@@ -282,15 +279,17 @@ class NFW_Lens:
         Updates:
             self.concentration (np.ndarray): Updated concentration parameters.
         """
-        mass_corrected = self.mass + 1e-10 # Avoid division by zero
-        self.concentration = (5.71 * (mass_corrected / 2e12) ** (-0.084) * (1 + self.redshift) ** (-0.47))
-        '''
+        mass_corrected = self.mass + 1e-10  # Avoid division by zero
+        self.concentration = (
+            5.71 * (mass_corrected / 2e12) ** (-0.084) * (1 + self.redshift) ** (-0.47)
+        )
+        """
         Or raganin et al
         A = 6.02
         B = -0.12
         C = 0.16
         self.concentration = (A * (mass_corrected / 1e13) ** B * ((1.47)/(1 + self.redshift)) ** (C))
-        '''
+        """
 
     def check_for_nan_properties(self):
         """
@@ -300,11 +299,21 @@ class NFW_Lens:
             bool: True if any property contains NaN values, False otherwise.
             Let's also check for inf values while we're at it.
         """
-        return (np.isnan(self.x).any() or np.isnan(self.y).any() or np.isnan(self.z).any() or
-                np.isnan(self.concentration).any() or np.isnan(self.mass).any() or
-                np.isnan(self.chi2).any() or np.isinf(self.x).any() or np.isinf(self.y).any() or
-                np.isinf(self.z).any() or np.isinf(self.concentration).any() or
-                np.isinf(self.mass).any() or np.isinf(self.chi2).any())
+        return (
+            np.isnan(self.x).any()
+            or np.isnan(self.y).any()
+            or np.isnan(self.z).any()
+            or np.isnan(self.concentration).any()
+            or np.isnan(self.mass).any()
+            or np.isnan(self.chi2).any()
+            or np.isinf(self.x).any()
+            or np.isinf(self.y).any()
+            or np.isinf(self.z).any()
+            or np.isinf(self.concentration).any()
+            or np.isinf(self.mass).any()
+            or np.isinf(self.chi2).any()
+        )
+
 
 class PowerLawHalo:
     """
@@ -371,7 +380,7 @@ class PowerLawHalo:
             slope=self.slope.copy(),
             theta_star=self.theta_star,
             redshift=self.redshift,
-            chi2=self.chi2.copy()
+            chi2=self.chi2.copy(),
         )
 
     def merge(self, other):
@@ -382,8 +391,9 @@ class PowerLawHalo:
             other (PowerLawHalo): Another PowerLawHalo object to merge into this one.
         """
         assert self.redshift == other.redshift, "Redshifts must match for merging."
-        assert np.isclose(self.theta_star, other.theta_star), \
-            "Pivot radii (theta_star) must match for merging."
+        assert np.isclose(
+            self.theta_star, other.theta_star
+        ), "Pivot radii (theta_star) must match for merging."
         self.x = np.concatenate((self.x, other.x))
         self.y = np.concatenate((self.y, other.y))
         self.kappa_star = np.concatenate((self.kappa_star, other.kappa_star))
@@ -411,8 +421,9 @@ class PowerLawHalo:
             filename (str): Name of the CSV file to create.
         """
         data = np.vstack((self.x, self.y, self.kappa_star, self.slope, self.chi2)).T
-        header = (f"theta_star={self.theta_star},redshift={self.redshift}\n"
-                  f"x,y,kappa_star,slope,chi2")
+        header = (
+            f"theta_star={self.theta_star},redshift={self.redshift}\n" f"x,y,kappa_star,slope,chi2"
+        )
         np.savetxt(filename, data, delimiter=",", header=header)
 
     def import_from_csv(self, filename):
@@ -484,24 +495,22 @@ class PowerLawHalo:
         # Cosmological distances
         D_l = cosmo.angular_diameter_distance(self.redshift).to(u.m).value
         D_s = cosmo.angular_diameter_distance(z_source).to(u.m).value
-        D_ls = cosmo.angular_diameter_distance_z1z2(
-            self.redshift, z_source).to(u.m).value
+        D_ls = cosmo.angular_diameter_distance_z1z2(self.redshift, z_source).to(u.m).value
 
         # Critical surface density (kg / m^2)
-        Sigma_cr = (C ** 2 / (4.0 * np.pi * G)) * (D_s / (D_l * D_ls))
+        Sigma_cr = (C**2 / (4.0 * np.pi * G)) * (D_s / (D_l * D_ls))
 
         # Convert angular radii to physical (arcsec -> rad -> m at the lens)
         ARCSEC_TO_RAD = 1.0 / 206_265.0
-        theta_phys = theta_arcsec * ARCSEC_TO_RAD * D_l            # meters
-        theta_star_phys = self.theta_star * ARCSEC_TO_RAD * D_l    # meters
+        theta_phys = theta_arcsec * ARCSEC_TO_RAD * D_l  # meters
+        theta_star_phys = self.theta_star * ARCSEC_TO_RAD * D_l  # meters
 
         # M_2D (kg) — note: integration in angular units gives the same
         # closed form, just multiplied by D_l^2 to convert area to physical.
         denom = 2.0 - n
         denom = np.where(np.abs(denom) < 1e-6, 1e-6, denom)
-        prefactor = (2.0 * np.pi * Sigma_cr * self.kappa_star
-                     * theta_star_phys ** n / denom)
-        M_2D_kg = prefactor * theta_phys ** denom
+        prefactor = 2.0 * np.pi * Sigma_cr * self.kappa_star * theta_star_phys**n / denom
+        M_2D_kg = prefactor * theta_phys**denom
 
         # Return in solar masses for consistency with NFW_Lens.mass
         return M_2D_kg / M_SUN
@@ -546,12 +555,18 @@ class PowerLawHalo:
         Returns:
             bool: True if any property contains NaN or Inf values, False otherwise.
         """
-        return (np.isnan(self.x).any() or np.isnan(self.y).any() or
-                np.isnan(self.kappa_star).any() or np.isnan(self.slope).any() or
-                np.isnan(self.chi2).any() or
-                np.isinf(self.x).any() or np.isinf(self.y).any() or
-                np.isinf(self.kappa_star).any() or np.isinf(self.slope).any() or
-                np.isinf(self.chi2).any())
+        return (
+            np.isnan(self.x).any()
+            or np.isnan(self.y).any()
+            or np.isnan(self.kappa_star).any()
+            or np.isnan(self.slope).any()
+            or np.isnan(self.chi2).any()
+            or np.isinf(self.x).any()
+            or np.isinf(self.y).any()
+            or np.isinf(self.kappa_star).any()
+            or np.isinf(self.slope).any()
+            or np.isinf(self.chi2).any()
+        )
 
     def check_physical_bounds(self):
         """

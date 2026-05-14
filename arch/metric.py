@@ -13,10 +13,12 @@ Functions:
     - calculate_total_chi2
 """
 
-import numpy as np
 import copy
 
+import numpy as np
+
 import arch.utils as utils
+
 
 def calc_degrees_of_freedom(sources, lenses, use_flags):
     """
@@ -25,7 +27,7 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
     Parameters:
         sources (Source): Source object containing source positions and lensing signals.
         lenses (Lens): Lens object containing lens positions and parameters.
-        use_flags (list of bool): Flags indicating which lensing signals are used 
+        use_flags (list of bool): Flags indicating which lensing signals are used
                                 [use_shear, use_flexion, use_g_flexion].
 
     Returns:
@@ -44,7 +46,8 @@ def calc_degrees_of_freedom(sources, lenses, use_flags):
         return np.inf
     return dof
 
-def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
+
+def calculate_chi_squared(sources, lenses, flags, lens_type="SIS") -> float:
     """
     Calculate the chi-squared statistic for the difference between observed and modeled source properties.
 
@@ -55,7 +58,7 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
     Parameters:
         sources (Source): Source object containing observed source properties and uncertainties.
         lenses (Lens): Lens object containing lens properties.
-        flags (list of bool): Flags indicating which lensing effects to include 
+        flags (list of bool): Flags indicating which lensing effects to include
                             [use_shear, use_flexion, use_g_flexion].
         lens_type (str): The lensing model to use ('SIS' or 'NFW'). Default is 'SIS'.
         use_weights (bool): If True, weight the chi-squared contributions by source weights.
@@ -79,24 +82,21 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
     chi_squared_components = {}
     if use_shear:
         chi_squared_shear = (
-            (source_clone.e1 - sources.e1) ** 2 +
-            (source_clone.e2 - sources.e2) ** 2
-        ) / sources.sigs ** 2
-        chi_squared_components['shear'] = chi_squared_shear
+            (source_clone.e1 - sources.e1) ** 2 + (source_clone.e2 - sources.e2) ** 2
+        ) / sources.sigs**2
+        chi_squared_components["shear"] = chi_squared_shear
 
     if use_flexion:
         chi_squared_flexion = (
-            (source_clone.f1 - sources.f1) ** 2 +
-            (source_clone.f2 - sources.f2) ** 2
-        ) / sources.sigf ** 2
-        chi_squared_components['flexion'] = chi_squared_flexion
+            (source_clone.f1 - sources.f1) ** 2 + (source_clone.f2 - sources.f2) ** 2
+        ) / sources.sigf**2
+        chi_squared_components["flexion"] = chi_squared_flexion
 
     if use_g_flexion:
         chi_squared_g_flexion = (
-            (source_clone.g1 - sources.g1) ** 2 +
-            (source_clone.g2 - sources.g2) ** 2
-        ) / sources.sigg ** 2
-        chi_squared_components['g_flexion'] = chi_squared_g_flexion
+            (source_clone.g1 - sources.g1) ** 2 + (source_clone.g2 - sources.g2) ** 2
+        ) / sources.sigg**2
+        chi_squared_components["g_flexion"] = chi_squared_g_flexion
 
     # Sum the chi-squared components
     total_chi_squared_array = np.zeros_like(sources.x)
@@ -104,7 +104,6 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
         total_chi_squared_array += component
 
     total_chi_squared = np.sum(total_chi_squared_array)
-
 
     # Define penalty functions for lens parameters
     def einstein_radius_penalty(eR, limit=40.0, penalty_factor=1000.0):
@@ -124,16 +123,17 @@ def calculate_chi_squared(sources, lenses, flags, lens_type='SIS') -> float:
         return 0.0
 
     # Calculate and add penalties for the lenses
-    if lens_type == 'SIS':
+    if lens_type == "SIS":
         # Apply penalties for SIS lenses if Einstein radius exceeds limit
         penalties = sum(einstein_radius_penalty(eR) for eR in lenses.te)
         total_chi_squared += penalties
-    elif lens_type == 'NFW':
+    elif lens_type == "NFW":
         # No penalties defined for NFW lenses in this function
         pass
 
     # Return the total chi-squared including penalties
     return total_chi_squared
+
 
 def calc_strong_dof(sources) -> int:
     """
@@ -181,11 +181,12 @@ def calc_strong_dof(sources) -> int:
         dof += 2 * (n - 1)
         # Flux ratios: only if system has flux data
         if getattr(sls, "has_flux", False):
-            dof += (n - 1)
+            dof += n - 1
 
     return int(dof)
 
-def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
+
+def compute_lambda_sl(sources, lenses, use_flags, lens_type="SIS"):
     """
     Compute lambda_sl such that SL and WL contribute COMPARABLE absolute
     chi-squared at the current lens model.
@@ -238,9 +239,11 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     dof_wl = calc_degrees_of_freedom(sources, lenses, use_flags)
 
     # SL contribution
-    has_sl = (hasattr(sources, "strong_systems")
-              and sources.strong_systems is not None
-              and len(sources.strong_systems) > 0)
+    has_sl = (
+        hasattr(sources, "strong_systems")
+        and sources.strong_systems is not None
+        and len(sources.strong_systems) > 0
+    )
 
     if not has_sl:
         return 1.0  # no SL data - default
@@ -253,8 +256,7 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
         chi2_scatter = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
         chi2_flux = utils.chi2_flux_nfw(lenses, sources.strong_systems)
     elif lens_type == "POWER_LAW":
-        chi2_scatter = utils.chi2_strong_source_plane_power_law(
-            lenses, sources.strong_systems)
+        chi2_scatter = utils.chi2_strong_source_plane_power_law(lenses, sources.strong_systems)
         chi2_flux = utils.chi2_flux_power_law(lenses, sources.strong_systems)
     else:
         return 1.0
@@ -276,24 +278,26 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type='SIS'):
     lambda_max = 100.0
     result = min(lambda_raw, lambda_max)
     cap_note = f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else ""
-    print(f"Pre-computed lambda_sl: chi^2_WL/chi^2_SL = "
-          f"{chi2_wl:.1f}/{chi2_sl:.1f} = {lambda_raw:.3f}{cap_note}")
+    print(
+        f"Pre-computed lambda_sl: chi^2_WL/chi^2_SL = "
+        f"{chi2_wl:.1f}/{chi2_sl:.1f} = {lambda_raw:.3f}{cap_note}"
+    )
     return float(result)
 
-def _compute_lambda_sl_power_law(sources, halos, use_flags,
-                                 strong_systems=None):
+
+def _compute_lambda_sl_power_law(sources, halos, use_flags, strong_systems=None):
     """
-    Compute lambda_sl as an ABSOLUTE chi-squared ratio after WL forward
-    selection completes.  Power-law analog of metric.compute_lambda_sl.
+    Compute lambda_sl as a reduced-chi-squared ratio after WL forward
+    selection completes.  This is the power-law analog of the
+    convention adopted in the NFW pipeline.
 
-    The convention used:
-
-        lambda_sl = chi^2_WL / chi^2_SL
-
-    so that lambda_sl * chi^2_SL = chi^2_WL at the post-selection lens
-    model.  See metric.compute_lambda_sl for the rationale: the
-    previous reduced-chi^2 convention down-weighted SL precisely when
-    it disagreed with WL, defeating the point of joint fitting.
+    The motivation: the WL and SL chi^2 contributions need to be
+    rescaled so that neither dominates the joint objective at the
+    converged WL-only solution.  Using
+        lambda_sl = (chi2_WL / dof_WL) / (chi2_SL / dof_SL)
+    ensures that the per-degree-of-freedom contributions are equal at
+    selection time, after which lambda_sl is FROZEN through merging
+    and strength optimization to keep the joint objective stationary.
 
     If no strong-lensing systems are supplied or sigma_n cannot be
     computed, returns 0.0 (effectively WL-only downstream).
@@ -310,46 +314,53 @@ def _compute_lambda_sl_power_law(sources, halos, use_flags,
     -------
     lambda_sl : float
     """
-    if strong_systems is None or len(list(strong_systems)) == 0:
+    if strong_systems is None:
         return 0.0
 
     # WL contribution
-    chi2_wl = metric.chi2_wl_power_law(
-        halos, sources, use_flags=use_flags, apply_penalties=False,
+    chi2_wl = chi2_wl_power_law(
+        halos,
+        sources,
+        use_flags=use_flags,
+        apply_penalties=False,
     )
-    dof_wl = metric.calc_dof_wl_power_law(sources, halos, use_flags)
+    dof_wl = calc_dof_wl_power_law(sources, halos, use_flags)
     if not np.isfinite(dof_wl) or dof_wl <= 0:
         return 0.0
-    if not np.isfinite(chi2_wl) or chi2_wl <= 0:
-        return 0.0
+    rchi2_wl = chi2_wl / dof_wl
 
     # SL contribution.  Compute sigma_n from the WL Hessian first so
     # the profile-uncertainty term is properly accounted for.
     try:
-        sigma_n = metric.posterior_sigma_n(
-            halos, sources, use_flags=use_flags,
+        sigma_n = posterior_sigma_n(
+            halos,
+            sources,
+            use_flags=use_flags,
         )
     except Exception:
         sigma_n = None
 
     chi2_sl = utils.chi2_strong_source_plane_power_law(
-        halos, strong_systems,
-        sigma_n=sigma_n, alpha_cal=1.0,
+        halos,
+        strong_systems,
+        sigma_n=sigma_n,
+        alpha_cal=1.0,
     )
-    if not np.isfinite(chi2_sl) or chi2_sl <= 0:
+
+    # SL DOF: 2 numbers (x, y in source plane) per image after
+    # marginalizing one source-plane mean per system, summed over
+    # systems.  Match the SIS/NFW convention.
+    n_images_total = sum(int(np.atleast_1d(sys.theta_x).size) for sys in strong_systems)
+    n_systems = sum(1 for _ in strong_systems)
+    dof_sl = 2 * n_images_total - 2 * n_systems
+    if dof_sl <= 0:
+        return 0.0
+    rchi2_sl = chi2_sl / dof_sl
+    if rchi2_sl <= 0:
         return 0.0
 
-    # Absolute chi-squared ratio (no dof normalization), matching the
-    # convention in metric.compute_lambda_sl.
-    lambda_raw = chi2_wl / chi2_sl
+    return float(rchi2_wl / rchi2_sl)
 
-    # Cap to prevent runaway weighting
-    lambda_max = 100.0
-    result = min(lambda_raw, lambda_max)
-    cap_note = f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else ""
-    print(f"Post-selection lambda_sl: chi^2_WL/chi^2_SL = "
-          f"{chi2_wl:.1f}/{chi2_sl:.1f} = {lambda_raw:.3f}{cap_note}")
-    return float(result)
 
 def calculate_total_chi2(
     sources,
@@ -410,21 +421,20 @@ def calculate_total_chi2(
     dof_sl = 0
 
     # ── SL part (only if present AND requested) ──
-    has_sl = (hasattr(sources, "strong_systems")
-              and sources.strong_systems is not None
-              and len(sources.strong_systems) > 0)
+    has_sl = (
+        hasattr(sources, "strong_systems")
+        and sources.strong_systems is not None
+        and len(sources.strong_systems) > 0
+    )
 
     if has_sl and use_strong_lensing:
         # Source-plane scatter (positional constraint)
         if lens_type == "SIS":
-            chi2_scatter = utils.chi2_strong_source_plane_sis(
-                lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
         elif lens_type == "NFW":
-            chi2_scatter = utils.chi2_strong_source_plane_nfw(
-                lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
         elif lens_type == "POWER_LAW":
-            chi2_scatter = utils.chi2_strong_source_plane_power_law(
-                lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_power_law(lenses, sources.strong_systems)
         else:
             raise NotImplementedError(
                 f"Strong-lensing chi2 not implemented for lens_type='{lens_type}'."
@@ -436,8 +446,7 @@ def calculate_total_chi2(
         elif lens_type == "NFW":
             chi2_flux = utils.chi2_flux_nfw(lenses, sources.strong_systems)
         elif lens_type == "POWER_LAW":
-            chi2_flux = utils.chi2_flux_power_law(
-                lenses, sources.strong_systems)
+            chi2_flux = utils.chi2_flux_power_law(lenses, sources.strong_systems)
 
         chi2_sl = chi2_scatter + chi2_flux
         dof_sl = calc_strong_dof(sources)
@@ -469,10 +478,10 @@ def calculate_total_chi2(
     }
     return chi2_total, dof_total, components
 
-def chi2_wl_power_law(halos, sources,
-                      use_flags=(True, True, True),
-                      apply_penalties=True,
-                      penalty_factor=1.0e6):
+
+def chi2_wl_power_law(
+    halos, sources, use_flags=(True, True, True), apply_penalties=True, penalty_factor=1.0e6
+):
     """
     Weak-lensing chi-squared for a power-law halo model.
 
@@ -521,40 +530,33 @@ def chi2_wl_power_law(halos, sources,
     use_shear, use_flexion, use_g_flexion = use_flags
 
     # --- Predicted signals at every source ---
-    e1_p, e2_p, f1_p, f2_p, g1_p, g2_p = (
-        utils.calculate_lensing_signals_power_law(halos, sources)
-    )
+    e1_p, e2_p, f1_p, f2_p, g1_p, g2_p = utils.calculate_lensing_signals_power_law(halos, sources)
 
     chi2 = 0.0
     if use_shear:
-        chi2 += np.sum(
-            ((e1_p - sources.e1) ** 2 + (e2_p - sources.e2) ** 2)
-            / sources.sigs ** 2
-        )
+        chi2 += np.sum(((e1_p - sources.e1) ** 2 + (e2_p - sources.e2) ** 2) / sources.sigs**2)
     if use_flexion:
-        chi2 += np.sum(
-            ((f1_p - sources.f1) ** 2 + (f2_p - sources.f2) ** 2)
-            / sources.sigf ** 2
-        )
+        chi2 += np.sum(((f1_p - sources.f1) ** 2 + (f2_p - sources.f2) ** 2) / sources.sigf**2)
     if use_g_flexion:
-        chi2 += np.sum(
-            ((g1_p - sources.g1) ** 2 + (g2_p - sources.g2) ** 2)
-            / sources.sigg ** 2
-        )
+        chi2 += np.sum(((g1_p - sources.g1) ** 2 + (g2_p - sources.g2) ** 2) / sources.sigg**2)
 
     if apply_penalties:
         chi2 += _power_law_bound_penalty(halos, penalty_factor=penalty_factor)
 
     return float(chi2)
 
-def posterior_sigma_n(halos, sources,
-                      use_flags=(True, True, True),
-                      relative_step=1.0e-3,
-                      absolute_step_x=0.05,
-                      absolute_step_kappa=5.0e-4,
-                      absolute_step_slope=5.0e-3,
-                      eigval_threshold=1.0e-8,
-                      return_info=False):
+
+def posterior_sigma_n(
+    halos,
+    sources,
+    use_flags=(True, True, True),
+    relative_step=1.0e-3,
+    absolute_step_x=0.05,
+    absolute_step_kappa=5.0e-4,
+    absolute_step_slope=5.0e-3,
+    eigval_threshold=1.0e-8,
+    return_info=False,
+):
     """
     Posterior uncertainty on the slope parameter, sigma_n, per halo.
 
@@ -629,24 +631,19 @@ def posterior_sigma_n(halos, sources,
     # --- Adaptive step sizes ---
     steps = np.zeros(N_p)
     for j in range(N_h):
-        steps[0 * N_h + j] = max(relative_step * abs(halos.x[j]),
-                                 absolute_step_x)
-        steps[1 * N_h + j] = max(relative_step * abs(halos.y[j]),
-                                 absolute_step_x)
-        steps[2 * N_h + j] = max(relative_step * abs(halos.kappa_star[j]),
-                                 absolute_step_kappa)
-        steps[3 * N_h + j] = max(relative_step * abs(halos.slope[j]),
-                                 absolute_step_slope)
+        steps[0 * N_h + j] = max(relative_step * abs(halos.x[j]), absolute_step_x)
+        steps[1 * N_h + j] = max(relative_step * abs(halos.y[j]), absolute_step_x)
+        steps[2 * N_h + j] = max(relative_step * abs(halos.kappa_star[j]), absolute_step_kappa)
+        steps[3 * N_h + j] = max(relative_step * abs(halos.slope[j]), absolute_step_slope)
 
     # --- chi2 evaluator from flat parameter vector ---
     def chi2_from_p(p):
         h = halos.copy()
-        h.x = p[0 * N_h:1 * N_h].copy()
-        h.y = p[1 * N_h:2 * N_h].copy()
-        h.kappa_star = np.abs(p[2 * N_h:3 * N_h]).copy()
-        h.slope = p[3 * N_h:4 * N_h].copy()
-        return chi2_wl_power_law(h, sources, use_flags=use_flags,
-                                 apply_penalties=False)
+        h.x = p[0 * N_h : 1 * N_h].copy()
+        h.y = p[1 * N_h : 2 * N_h].copy()
+        h.kappa_star = np.abs(p[2 * N_h : 3 * N_h]).copy()
+        h.slope = p[3 * N_h : 4 * N_h].copy()
+        return chi2_wl_power_law(h, sources, use_flags=use_flags, apply_penalties=False)
 
     chi2_0 = chi2_from_p(p0)
 
@@ -655,7 +652,8 @@ def posterior_sigma_n(halos, sources,
 
     # Diagonal: H_ii ≈ (f(p+h e_i) - 2 f(p) + f(p-h e_i)) / h^2
     for i in range(N_p):
-        ei = np.zeros(N_p); ei[i] = 1.0
+        ei = np.zeros(N_p)
+        ei[i] = 1.0
         f_p = chi2_from_p(p0 + steps[i] * ei)
         f_m = chi2_from_p(p0 - steps[i] * ei)
         H[i, i] = (f_p - 2.0 * chi2_0 + f_m) / steps[i] ** 2
@@ -663,8 +661,10 @@ def posterior_sigma_n(halos, sources,
     # Off-diagonal: H_ij ≈ (f++ - f+- - f-+ + f--) / (4 h_i h_j)
     for i in range(N_p):
         for j in range(i + 1, N_p):
-            ei = np.zeros(N_p); ei[i] = 1.0
-            ej = np.zeros(N_p); ej[j] = 1.0
+            ei = np.zeros(N_p)
+            ei[i] = 1.0
+            ej = np.zeros(N_p)
+            ej[j] = 1.0
             f_pp = chi2_from_p(p0 + steps[i] * ei + steps[j] * ej)
             f_pm = chi2_from_p(p0 + steps[i] * ei - steps[j] * ej)
             f_mp = chi2_from_p(p0 - steps[i] * ei + steps[j] * ej)
@@ -683,8 +683,9 @@ def posterior_sigma_n(halos, sources,
     # H^{-1} = V diag(1/lambda_clipped) V^T;  cov = 2 H^{-1}
     cov = 2.0 * (eigvecs @ np.diag(1.0 / eigvals_clipped) @ eigvecs.T)
 
-    cond_num = (eigvals_clipped.max() / eigvals_clipped.min()
-                if eigvals_clipped.min() > 0 else np.inf)
+    cond_num = (
+        eigvals_clipped.max() / eigvals_clipped.min() if eigvals_clipped.min() > 0 else np.inf
+    )
 
     # --- Extract per-halo sigma_n from slope diagonal block ---
     sigma_n = np.zeros(N_h)
@@ -710,6 +711,7 @@ def posterior_sigma_n(halos, sources,
     }
     return sigma_n, info
 
+
 def _power_law_bound_penalty(halos, penalty_factor=1.0e6):
     """
     Soft barrier penalty for halos that have drifted outside the
@@ -733,6 +735,7 @@ def _power_law_bound_penalty(halos, penalty_factor=1.0e6):
     pen_k = np.where(k <= 0.0, (0.0 - k) ** 2, 0.0).sum()
 
     return penalty_factor * float(pen_n_low + pen_n_hi + pen_k)
+
 
 def calc_dof_wl_power_law(sources, halos, use_flags=(True, True, True)):
     """

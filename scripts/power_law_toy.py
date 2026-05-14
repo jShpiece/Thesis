@@ -28,13 +28,14 @@ exactly to the ARCH SIS formulas: |F|=theta_E/(2 r^2), |G|=3 theta_E/(2 r^2).
 Jacob, 2026
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.optimize import minimize
 
 # ----------------------------------------------------------------------
 # Power-law halo
 # ----------------------------------------------------------------------
+
 
 class PowerLawHalo:
     """
@@ -130,6 +131,7 @@ class PowerLawHalo:
 # Synthetic data generation
 # ----------------------------------------------------------------------
 
+
 def make_source_grid(L=300.0, n_side=25):
     """Uniform grid of sources inside a square field of side L (arcsec)."""
     x = np.linspace(L / (2 * n_side), L - L / (2 * n_side), n_side)
@@ -142,17 +144,20 @@ def add_noise(signals, sigmas, rng):
     """Add Gaussian noise to each signal component."""
     g1, g2, F1, F2, G1, G2 = signals
     s_e, s_f, s_g = sigmas
-    return (g1 + rng.normal(0, s_e, g1.shape),
-            g2 + rng.normal(0, s_e, g2.shape),
-            F1 + rng.normal(0, s_f, F1.shape),
-            F2 + rng.normal(0, s_f, F2.shape),
-            G1 + rng.normal(0, s_g, G1.shape),
-            G2 + rng.normal(0, s_g, G2.shape))
+    return (
+        g1 + rng.normal(0, s_e, g1.shape),
+        g2 + rng.normal(0, s_e, g2.shape),
+        F1 + rng.normal(0, s_f, F1.shape),
+        F2 + rng.normal(0, s_f, F2.shape),
+        G1 + rng.normal(0, s_g, G1.shape),
+        G2 + rng.normal(0, s_g, G2.shape),
+    )
 
 
 # ----------------------------------------------------------------------
 # Simple-inversion candidate finder (ARCH-style)
 # ----------------------------------------------------------------------
+
 
 def slope_from_GF_ratio(F_amp, G_amp, amp_floor=0.0):
     """
@@ -168,8 +173,7 @@ def slope_from_GF_ratio(F_amp, G_amp, amp_floor=0.0):
     return n_est
 
 
-def cast_votes(xs, ys, g1, g2, F1, F2, G1, G2,
-               weight_power=2.0, amp_floor=0.0):
+def cast_votes(xs, ys, g1, g2, F1, F2, G1, G2, weight_power=2.0, amp_floor=0.0):
     """
     Each source uses (|G|/|F|, |gamma|/|F|, F direction) to estimate the
     halo position.  Returns per-source vote coordinates and weights.
@@ -202,7 +206,7 @@ def cast_votes(xs, ys, g1, g2, F1, F2, G1, G2,
 
     # Weight: strong flexion and large G/F signal-to-noise → better vote.
     # Simple choice: |F|^weight_power.
-    w_vote = F_amp ** weight_power
+    w_vote = F_amp**weight_power
 
     return x_vote, y_vote, w_vote, n_est
 
@@ -217,9 +221,7 @@ def votes_to_density(x_vote, y_vote, w_vote, L, n_pix=120, smoothing_sigma=8.0):
     yv = y_vote[inside]
     wv = w_vote[inside]
 
-    H, xedges, yedges = np.histogram2d(
-        xv, yv, bins=n_pix, range=[[0, L], [0, L]], weights=wv
-    )
+    H, xedges, yedges = np.histogram2d(xv, yv, bins=n_pix, range=[[0, L], [0, L]], weights=wv)
     H = gaussian_filter(H, sigma=smoothing_sigma)
     # histogram2d returns H[x_index, y_index]; transpose for imshow
     return H.T, xedges, yedges
@@ -236,6 +238,7 @@ def peak_of_density(H, xedges, yedges):
 # ----------------------------------------------------------------------
 # Nonlinear optimizer
 # ----------------------------------------------------------------------
+
 
 def chi2_single_halo(params, xs, ys, obs, sigmas, theta_star):
     """
@@ -279,6 +282,7 @@ def optimize_single_halo(xs, ys, obs, sigmas, init, theta_star):
 # Tests
 # ----------------------------------------------------------------------
 
+
 def arch_sis_signals(x0, y0, theta_E, xs, ys, eps=1e-6):
     """ARCH's SIS signal formula, copied verbatim (single lens)."""
     dx = xs - x0
@@ -292,11 +296,16 @@ def arch_sis_signals(x0, y0, theta_E, xs, ys, eps=1e-6):
     cos3 = cos2 * cos_phi - sin2 * sin_phi
     sin3 = sin2 * cos_phi + cos2 * sin_phi
     shear_mag = -theta_E / (2 * r)
-    flex_mag = -theta_E / (2 * r ** 2)
-    gflex_mag = 3.0 * theta_E / (2 * r ** 2)
-    return (shear_mag * cos2, shear_mag * sin2,
-            flex_mag * cos_phi, flex_mag * sin_phi,
-            gflex_mag * cos3, gflex_mag * sin3)
+    flex_mag = -theta_E / (2 * r**2)
+    gflex_mag = 3.0 * theta_E / (2 * r**2)
+    return (
+        shear_mag * cos2,
+        shear_mag * sin2,
+        flex_mag * cos_phi,
+        flex_mag * sin_phi,
+        gflex_mag * cos3,
+        gflex_mag * sin3,
+    )
 
 
 def test1_sis_limit():
@@ -313,8 +322,7 @@ def test1_sis_limit():
     # Matching: kappa(r) = theta_E/(2r) = (theta_E/(2 theta_star)) (r/theta_star)^(-1)
     kappa_star = theta_E / (2.0 * theta_star)
 
-    halo = PowerLawHalo(x=0.0, y=0.0,
-                        kappa_star=kappa_star, n=1.0, theta_star=theta_star)
+    halo = PowerLawHalo(x=0.0, y=0.0, kappa_star=kappa_star, n=1.0, theta_star=theta_star)
 
     # Random test points (avoid origin)
     rng = np.random.default_rng(0)
@@ -332,8 +340,7 @@ def test1_sis_limit():
         print(f"  {name:10s} max relative error = {rel:.3e}")
 
     passed = max_abs_rel < 1e-10
-    print(f"  -> {'PASS' if passed else 'FAIL'} "
-          f"(max relative error = {max_abs_rel:.2e})")
+    print(f"  -> {'PASS' if passed else 'FAIL'} " f"(max relative error = {max_abs_rel:.2e})")
     return passed
 
 
@@ -353,8 +360,7 @@ def test2_ratio_invariants():
 
     all_pass = True
     for n in [0.4, 0.7, 1.0, 1.3, 1.6]:
-        halo = PowerLawHalo(x=150.0, y=150.0, kappa_star=0.05, n=n,
-                            theta_star=theta_star)
+        halo = PowerLawHalo(x=150.0, y=150.0, kappa_star=0.05, n=n, theta_star=theta_star)
         xs = rng.uniform(20, 280, 200)
         ys = rng.uniform(20, 280, 200)
         g1, g2, F1, F2, G1, G2 = halo.signals(xs, ys)
@@ -372,10 +378,12 @@ def test2_ratio_invariants():
 
         ok = (err_slope < 1e-10) and (err_r < 1e-8)
         all_pass &= ok
-        print(f"  n={n:.2f}  |G|/|F| -> {R_GF.mean():.6f} "
-              f"(exp {R_GF_expected:.6f})  "
-              f"max r-error = {err_r:.2e} arcsec   "
-              f"{'PASS' if ok else 'FAIL'}")
+        print(
+            f"  n={n:.2f}  |G|/|F| -> {R_GF.mean():.6f} "
+            f"(exp {R_GF_expected:.6f})  "
+            f"max r-error = {err_r:.2e} arcsec   "
+            f"{'PASS' if ok else 'FAIL'}"
+        )
     return all_pass
 
 
@@ -396,14 +404,15 @@ def test3_recovery_single_halo():
     # Truth — cluster-scale halo comparable to ARCH's SIS tests (theta_E ~ 12")
     L = 300.0
     theta_star = 30.0
-    true_halo = PowerLawHalo(x=155.0, y=140.0, kappa_star=0.20, n=0.7,
-                             theta_star=theta_star)
-    print(f"  Truth: (x,y)=({true_halo.x}, {true_halo.y})  "
-          f"kappa_star={true_halo.kappa_star:.4f}  n={true_halo.n}")
+    true_halo = PowerLawHalo(x=155.0, y=140.0, kappa_star=0.20, n=0.7, theta_star=theta_star)
+    print(
+        f"  Truth: (x,y)=({true_halo.x}, {true_halo.y})  "
+        f"kappa_star={true_halo.kappa_star:.4f}  n={true_halo.n}"
+    )
 
     # Sources + noise — ARCH-realistic (matches lensing_fields.py defaults)
     xs, ys = make_source_grid(L=L, n_side=30)
-    sigmas = (0.10, 0.01, 0.02)   # sigma_e, sigma_f (arcsec^-1), sigma_g (arcsec^-1)
+    sigmas = (0.10, 0.01, 0.02)  # sigma_e, sigma_f (arcsec^-1), sigma_g (arcsec^-1)
     rng = np.random.default_rng(42)
 
     # Keep all sources with r > 2 arcsec (avoid singularity only)
@@ -419,14 +428,11 @@ def test3_recovery_single_halo():
     snr_F = F_true / sigmas[1]
     n_snr_gt3 = int(np.sum(snr_F > 3))
     n_snr_gt1 = int(np.sum(snr_F > 1))
-    print(f"  Sources kept: {xs.size}   |F| SNR > 1: {n_snr_gt1}   "
-          f"|F| SNR > 3: {n_snr_gt3}")
+    print(f"  Sources kept: {xs.size}   |F| SNR > 1: {n_snr_gt1}   " f"|F| SNR > 3: {n_snr_gt3}")
 
     # (b) Simple inversion -> votes -> peak, weighting by |F| SNR^2 per source
     # (noisy F direction contributes little; strong-F sources dominate).
-    x_vote, y_vote, w_vote, n_est = cast_votes(
-        xs, ys, *obs, weight_power=2.0
-    )
+    x_vote, y_vote, w_vote, n_est = cast_votes(xs, ys, *obs, weight_power=2.0)
     H, xedges, yedges = votes_to_density(
         x_vote, y_vote, w_vote, L=L, n_pix=120, smoothing_sigma=6.0
     )
@@ -444,13 +450,14 @@ def test3_recovery_single_halo():
     # kappa_* seed from high-SNR sources:  |F| = n kappa_* theta_*^n / r^(n+1)
     # -> kappa_* = |F| r^(n+1) / (n theta_*^n)
     r_typ = np.hypot(xs - x_seed, ys - y_seed)
-    k_samples = (F_amp_obs * r_typ ** (n_seed + 1.0)
-                 / (max(n_seed, 0.05) * theta_star ** n_seed))
+    k_samples = F_amp_obs * r_typ ** (n_seed + 1.0) / (max(n_seed, 0.05) * theta_star**n_seed)
     kappa_star_seed = float(np.median(k_samples[hi_snr])) if hi_snr.sum() >= 5 else 0.1
     kappa_star_seed = max(kappa_star_seed, 1e-3)
 
-    print(f"  Candidate seed from votes:  (x,y)=({x_seed:.2f}, {y_seed:.2f})  "
-          f"n_seed={n_seed:.2f}  kappa_star_seed={kappa_star_seed:.4f}")
+    print(
+        f"  Candidate seed from votes:  (x,y)=({x_seed:.2f}, {y_seed:.2f})  "
+        f"n_seed={n_seed:.2f}  kappa_star_seed={kappa_star_seed:.4f}"
+    )
 
     # (c) Optimize from vote seed
     init = (x_seed, y_seed, kappa_star_seed, n_seed)
@@ -462,16 +469,25 @@ def test3_recovery_single_halo():
     rchi2 = res.fun / max(N_data - N_param, 1)
 
     print(f"  Optimizer (from vote seed):")
-    print(f"    (x,y)=({x_fit:.2f}, {y_fit:.2f})  "
-          f"kappa_star={k_fit:.4f}  n={n_fit:.3f}  rchi2={rchi2:.3f}")
+    print(
+        f"    (x,y)=({x_fit:.2f}, {y_fit:.2f})  "
+        f"kappa_star={k_fit:.4f}  n={n_fit:.3f}  rchi2={rchi2:.3f}"
+    )
 
     # (d) Sanity check — optimize from truth
     chi2_truth = chi2_single_halo(
         (true_halo.x, true_halo.y, true_halo.kappa_star, true_halo.n),
-        xs, ys, obs, sigmas, theta_star,
+        xs,
+        ys,
+        obs,
+        sigmas,
+        theta_star,
     )
     res_t = optimize_single_halo(
-        xs, ys, obs, sigmas,
+        xs,
+        ys,
+        obs,
+        sigmas,
         init=(true_halo.x, true_halo.y, true_halo.kappa_star, true_halo.n),
         theta_star=theta_star,
     )
@@ -480,16 +496,18 @@ def test3_recovery_single_halo():
     rchi2_truth = chi2_truth / max(N_data - N_param, 1)
     print(f"  Sanity check (optimizer started at truth):")
     print(f"    rchi2 at truth       = {rchi2_truth:.3f}")
-    print(f"    rchi2 after optimize = {rchi2_t:.3f}  "
-          f"(x,y)=({x_t:.2f}, {y_t:.2f})  "
-          f"kappa_star={k_t:.4f}  n={n_t:.3f}")
+    print(
+        f"    rchi2 after optimize = {rchi2_t:.3f}  "
+        f"(x,y)=({x_t:.2f}, {y_t:.2f})  "
+        f"kappa_star={k_t:.4f}  n={n_t:.3f}"
+    )
 
     diag = {
         "vote_seed": (x_seed, y_seed, kappa_star_seed, n_seed),
-        "fit_from_seed":  (x_fit, y_fit, k_fit, n_fit, rchi2),
-        "fit_from_truth": (x_t,   y_t,   k_t,   n_t,   rchi2_t),
-        "rchi2_truth":    rchi2_truth,
-        "snr_F":          snr_F,
+        "fit_from_seed": (x_fit, y_fit, k_fit, n_fit, rchi2),
+        "fit_from_truth": (x_t, y_t, k_t, n_t, rchi2_t),
+        "rchi2_truth": rchi2_truth,
+        "snr_F": snr_F,
     }
 
     # Report errors vs truth (for the vote-seeded fit)
@@ -502,22 +520,39 @@ def test3_recovery_single_halo():
     fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
 
     ax = axes[0]
-    im = ax.imshow(H, origin="lower", extent=(0, L, 0, L),
-                   cmap="viridis")
+    im = ax.imshow(H, origin="lower", extent=(0, L, 0, L), cmap="viridis")
     ax.scatter(xs, ys, s=3, c="w", alpha=0.35, label="sources")
-    ax.scatter([true_halo.x], [true_halo.y], marker="x",
-               s=180, c="red", linewidth=2.5, label="truth")
-    ax.scatter([x_seed], [y_seed], marker="+",
-               s=200, c="cyan", linewidth=2.5, label="vote peak (seed)")
-    ax.scatter([x_fit], [y_fit], marker="o",
-               s=120, facecolors="none", edgecolors="orange",
-               linewidth=2.5, label="optimized (from seed)")
-    ax.scatter([x_t], [y_t], marker="s",
-               s=80, facecolors="none", edgecolors="magenta",
-               linewidth=2.0, label="optimized (from truth)")
-    ax.set_title("Vote map: each source votes for halo location\n"
-                 f"n_true={true_halo.n}, n_fit(seed)={n_fit:.2f}, "
-                 f"n_fit(truth)={n_t:.2f}")
+    ax.scatter(
+        [true_halo.x], [true_halo.y], marker="x", s=180, c="red", linewidth=2.5, label="truth"
+    )
+    ax.scatter(
+        [x_seed], [y_seed], marker="+", s=200, c="cyan", linewidth=2.5, label="vote peak (seed)"
+    )
+    ax.scatter(
+        [x_fit],
+        [y_fit],
+        marker="o",
+        s=120,
+        facecolors="none",
+        edgecolors="orange",
+        linewidth=2.5,
+        label="optimized (from seed)",
+    )
+    ax.scatter(
+        [x_t],
+        [y_t],
+        marker="s",
+        s=80,
+        facecolors="none",
+        edgecolors="magenta",
+        linewidth=2.0,
+        label="optimized (from truth)",
+    )
+    ax.set_title(
+        "Vote map: each source votes for halo location\n"
+        f"n_true={true_halo.n}, n_fit(seed)={n_fit:.2f}, "
+        f"n_fit(truth)={n_t:.2f}"
+    )
     ax.set_xlabel("x (arcsec)")
     ax.set_ylabel("y (arcsec)")
     ax.legend(loc="upper right", fontsize=8)
@@ -526,39 +561,72 @@ def test3_recovery_single_halo():
     # Chi^2 slice in the (n, kappa_*) plane at the vote-seed (x, y).
     # Reveals whether the failure is local minimum or a real degeneracy valley.
     n_grid = np.linspace(0.1, 1.9, 40)
-    k_grid = np.logspace(np.log10(true_halo.kappa_star * 0.1),
-                         np.log10(true_halo.kappa_star * 5), 40)
+    k_grid = np.logspace(
+        np.log10(true_halo.kappa_star * 0.1), np.log10(true_halo.kappa_star * 5), 40
+    )
     chi2_map = np.zeros((n_grid.size, k_grid.size))
     for i, nn in enumerate(n_grid):
         for j, kk in enumerate(k_grid):
             chi2_map[i, j] = chi2_single_halo(
                 (true_halo.x, true_halo.y, kk, nn),
-                xs, ys, obs, sigmas, theta_star,
+                xs,
+                ys,
+                obs,
+                sigmas,
+                theta_star,
             )
     chi2_min = chi2_map.min()
     dchi2 = chi2_map - chi2_min
 
     ax = axes[1]
     N_dof = 6 * xs.size - 4
-    cf = ax.contourf(k_grid, n_grid, np.log10(dchi2 / N_dof + 1e-3),
-                     levels=30, cmap="magma")
+    cf = ax.contourf(k_grid, n_grid, np.log10(dchi2 / N_dof + 1e-3), levels=30, cmap="magma")
     # Overlay 1-, 2-, 3-sigma contours (Δχ² = 2.30, 6.17, 11.83 for 2 params)
-    ax.contour(k_grid, n_grid, dchi2,
-               levels=[2.30, 6.17, 11.83], colors="white",
-               linestyles=["-", "--", ":"], linewidths=1.2)
-    ax.scatter([true_halo.kappa_star], [true_halo.n], marker="x",
-               s=180, c="cyan", linewidth=3, label="truth")
-    ax.scatter([k_fit], [n_fit], marker="o",
-               s=100, facecolors="none", edgecolors="orange",
-               linewidth=2, label="fit from vote seed")
-    ax.scatter([k_t], [n_t], marker="s",
-               s=80, facecolors="none", edgecolors="magenta",
-               linewidth=2, label="fit from truth")
+    ax.contour(
+        k_grid,
+        n_grid,
+        dchi2,
+        levels=[2.30, 6.17, 11.83],
+        colors="white",
+        linestyles=["-", "--", ":"],
+        linewidths=1.2,
+    )
+    ax.scatter(
+        [true_halo.kappa_star],
+        [true_halo.n],
+        marker="x",
+        s=180,
+        c="cyan",
+        linewidth=3,
+        label="truth",
+    )
+    ax.scatter(
+        [k_fit],
+        [n_fit],
+        marker="o",
+        s=100,
+        facecolors="none",
+        edgecolors="orange",
+        linewidth=2,
+        label="fit from vote seed",
+    )
+    ax.scatter(
+        [k_t],
+        [n_t],
+        marker="s",
+        s=80,
+        facecolors="none",
+        edgecolors="magenta",
+        linewidth=2,
+        label="fit from truth",
+    )
     ax.set_xscale("log")
     ax.set_xlabel(r"$\kappa_*$")
     ax.set_ylabel(r"slope $n$")
-    ax.set_title(r"$\log_{10}(\Delta\chi^2 / N_{\rm dof})$  at truth (x,y)"
-                 "\nwhite contours = 1,2,3$\\sigma$ (2-param)")
+    ax.set_title(
+        r"$\log_{10}(\Delta\chi^2 / N_{\rm dof})$  at truth (x,y)"
+        "\nwhite contours = 1,2,3$\\sigma$ (2-param)"
+    )
     ax.legend(loc="upper right", fontsize=8)
     plt.colorbar(cf, ax=ax)
 
@@ -576,14 +644,10 @@ def test3_recovery_single_halo():
         (true_halo, "-", "truth"),
         (halo_fit, "--", "fit (seed)"),
     ]:
-        ax.loglog(r_grid, halo.kappa(r_grid), style + "C0",
-                  label=rf"$\kappa$ ({label})")
-        ax.loglog(r_grid, halo.gamma_t(r_grid), style + "C1",
-                  label=rf"$\gamma_t$ ({label})")
-        ax.loglog(r_grid, halo.F_amp(r_grid), style + "C2",
-                  label=rf"$|F|$ ({label})")
-        ax.loglog(r_grid, halo.G_amp(r_grid), style + "C3",
-                  label=rf"$|G|$ ({label})")
+        ax.loglog(r_grid, halo.kappa(r_grid), style + "C0", label=rf"$\kappa$ ({label})")
+        ax.loglog(r_grid, halo.gamma_t(r_grid), style + "C1", label=rf"$\gamma_t$ ({label})")
+        ax.loglog(r_grid, halo.F_amp(r_grid), style + "C2", label=rf"$|F|$ ({label})")
+        ax.loglog(r_grid, halo.G_amp(r_grid), style + "C3", label=rf"$|G|$ ({label})")
     ax.axhline(sigmas[0], color="C1", ls=":", alpha=0.5, label=r"$\sigma_\gamma$")
     ax.axhline(sigmas[1], color="C2", ls=":", alpha=0.5, label=r"$\sigma_F$")
     ax.axhline(sigmas[2], color="C3", ls=":", alpha=0.5, label=r"$\sigma_G$")
@@ -607,6 +671,7 @@ def test3_recovery_single_halo():
 
 if __name__ == "__main__":
     import os
+
     os.makedirs("/mnt/user-data/outputs", exist_ok=True)
 
     ok1 = test1_sis_limit()
@@ -620,13 +685,19 @@ if __name__ == "__main__":
     print("=" * 60)
     print(f"  Test 1 (SIS limit):         {'PASS' if ok1 else 'FAIL'}")
     print(f"  Test 2 (ratio invariants):  {'PASS' if ok2 else 'FAIL'}")
-    xs_s, ys_s, ks_s, ns_s            = diag["vote_seed"]
-    xf, yf, kf, nf, rchi2_f           = diag["fit_from_seed"]
-    xt, yt, kt, nt, rchi2_t           = diag["fit_from_truth"]
-    print(f"  Test 3 seed:                "
-          f"(x,y)=({xs_s:.1f},{ys_s:.1f})  k*={ks_s:.3f}  n={ns_s:.2f}")
-    print(f"  Test 3 fit (from seed):     "
-          f"(x,y)=({xf:.1f},{yf:.1f})  k*={kf:.3f}  n={nf:.3f}  rchi2={rchi2_f:.2f}")
-    print(f"  Test 3 fit (from truth):    "
-          f"(x,y)=({xt:.1f},{yt:.1f})  k*={kt:.3f}  n={nt:.3f}  rchi2={rchi2_t:.2f}")
+    xs_s, ys_s, ks_s, ns_s = diag["vote_seed"]
+    xf, yf, kf, nf, rchi2_f = diag["fit_from_seed"]
+    xt, yt, kt, nt, rchi2_t = diag["fit_from_truth"]
+    print(
+        f"  Test 3 seed:                "
+        f"(x,y)=({xs_s:.1f},{ys_s:.1f})  k*={ks_s:.3f}  n={ns_s:.2f}"
+    )
+    print(
+        f"  Test 3 fit (from seed):     "
+        f"(x,y)=({xf:.1f},{yf:.1f})  k*={kf:.3f}  n={nf:.3f}  rchi2={rchi2_f:.2f}"
+    )
+    print(
+        f"  Test 3 fit (from truth):    "
+        f"(x,y)=({xt:.1f},{yt:.1f})  k*={kt:.3f}  n={nt:.3f}  rchi2={rchi2_t:.2f}"
+    )
     print(f"  Test 3 rchi2 at truth:      {diag['rchi2_truth']:.2f}")
