@@ -9,7 +9,8 @@
       "PowerShell(New-Item -ItemType Directory -Path \"d:\\\\Research\\\\Thesis\\\\scripts\" -Force)",
       "PowerShell(Copy-Item \"d:\\\\Research\\\\Thesis\\\\power_law_toy.py\" \"d:\\\\Research\\\\Thesis\\\\scripts\\\\power_law_toy.py\")",
       "PowerShell(cd d:\\\\Research\\\\Thesis; Get-ChildItem -File | Where-Object { $_.Extension -eq '.py' } | Sort-Object Name | Format-Table Name, Length)",
-      "PowerShell(cd d:\\\\Research\\\\Thesis; python -m pyflakes scripts/paper2_shared.py scripts/task11_magnification_tests.py scripts/task12_nfw_endtoend.py scripts/task13_nfw_sl_unit.py scripts/task14_nfw_endtoend_sl.py scripts/task17_two_halo_comparison.py scripts/task18_mc_validation.py 2>&1 | Where-Object { $_ -notmatch \"imported but unused\" -and $_ -ne \"\" })"
+      "PowerShell(cd d:\\\\Research\\\\Thesis; python -m pyflakes scripts/paper2_shared.py scripts/task11_magnification_tests.py scripts/task12_nfw_endtoend.py scripts/task13_nfw_sl_unit.py scripts/task14_nfw_endtoend_sl.py scripts/task17_two_halo_comparison.py scripts/task18_mc_validation.py 2>&1 | Where-Object { $_ -notmatch \"imported but unused\" -and $_ -ne \"\" })",
+      "Bash(python3)"
     ]
   }
 }

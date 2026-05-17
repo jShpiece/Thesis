@@ -169,7 +169,6 @@ def fit_lensing_field(
             lambda_sl=lambda_sl,
         )
 
-    lambda_sl = 1  # Try freezing this to 1 to see how it affects reconstruction
     reduced_chi2 = pipeline.update_chi2_values(
         sources,
         lenses,

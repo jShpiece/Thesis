@@ -248,15 +248,27 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type="SIS"):
     if not has_sl:
         return 1.0  # no SL data - default
 
-    # Source-plane scatter + flux ratio
+    # Source-plane scatter + flux ratio.
+    # use_magnification_correction=False: at the WL-only model the predicted
+    # |mu| at SL image positions is unreliable (10–100x), which would compress
+    # sigma_beta to ~0.001 arcsec and inflate chi2_SL by 100–10,000x.  Using
+    # sigma_beta = sigma_theta directly gives a physically meaningful scale for
+    # the lambda ratio.  The full magnification correction is still applied
+    # during the actual joint fitting.
     if lens_type == "SIS":
-        chi2_scatter = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+        chi2_scatter = utils.chi2_strong_source_plane_sis(
+            lenses, sources.strong_systems, use_magnification_correction=False
+        )
         chi2_flux = utils.chi2_flux_sis(lenses, sources.strong_systems)
     elif lens_type == "NFW":
-        chi2_scatter = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+        chi2_scatter = utils.chi2_strong_source_plane_nfw(
+            lenses, sources.strong_systems, use_magnification_correction=False
+        )
         chi2_flux = utils.chi2_flux_nfw(lenses, sources.strong_systems)
     elif lens_type == "POWER_LAW":
-        chi2_scatter = utils.chi2_strong_source_plane_power_law(lenses, sources.strong_systems)
+        chi2_scatter = utils.chi2_strong_source_plane_power_law(
+            lenses, sources.strong_systems, use_magnification_correction=False
+        )
         chi2_flux = utils.chi2_flux_power_law(lenses, sources.strong_systems)
     else:
         return 1.0
@@ -268,19 +280,27 @@ def compute_lambda_sl(sources, lenses, use_flags, lens_type="SIS"):
     if dof_wl <= 0 or dof_sl <= 0 or chi2_sl <= 0 or chi2_wl <= 0:
         return 1.0
 
-    # Absolute chi-squared ratio.  No dof normalization.
-    lambda_raw = chi2_wl / chi2_sl
+    # Geometric-mean lambda: chi2_WL / sqrt(chi2_SL * dof_SL).
+    #
+    # The pure absolute ratio chi2_WL/chi2_SL gives O(1) only when chi2_SL ~
+    # chi2_WL at the WL-only minimum.  For clusters like Abell 2744 the WL
+    # model is ~1–2 arcsec off at SL image positions, and sigma_theta = 0.07
+    # arcsec (JWST precision) → chi2_SL/chi2_WL ~ 20–80, making lambda too
+    # small for SL to influence forward selection.
+    #
+    # The geometric mean is the midpoint (in log space) between:
+    #   chi2_WL / chi2_SL  — absolute ratio (current, too small)
+    #   chi2_WL / dof_SL   — DOF-normalised (target at joint minimum, too large)
+    # It gives O(1) for rchi2_SL in the range 20–100 without any free
+    # parameters and without letting either probe overwhelm the other.
+    lambda_raw = chi2_wl / np.sqrt(chi2_sl * dof_sl)
 
-    # Cap to prevent runaway weighting in pathological cases.
-    # The 100 cap is much higher than the previous 50 because the
-    # absolute-chi^2 ratio is more robust to initial-guess pathologies
-    # than the reduced-chi^2 ratio was.
     lambda_max = 100.0
     result = min(lambda_raw, lambda_max)
     cap_note = f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else ""
     print(
-        f"Pre-computed lambda_sl: chi^2_WL/chi^2_SL = "
-        f"{chi2_wl:.1f}/{chi2_sl:.1f} = {lambda_raw:.3f}{cap_note}"
+        f"Pre-computed lambda_sl: chi^2_WL/sqrt(chi^2_SL*dof_SL) = "
+        f"{chi2_wl:.1f}/sqrt({chi2_sl:.1f}*{dof_sl}) = {lambda_raw:.3f}{cap_note}"
     )
     return float(result)
 
@@ -324,13 +344,14 @@ def _compute_lambda_sl_power_law(sources, halos, use_flags, strong_systems=None)
         use_flags=use_flags,
         apply_penalties=False,
     )
-    dof_wl = calc_dof_wl_power_law(sources, halos, use_flags)
-    if not np.isfinite(dof_wl) or dof_wl <= 0:
+    if not np.isfinite(chi2_wl) or chi2_wl <= 0:
         return 0.0
-    rchi2_wl = chi2_wl / dof_wl
 
     # SL contribution.  Compute sigma_n from the WL Hessian first so
     # the profile-uncertainty term is properly accounted for.
+    # use_magnification_correction=False for the same reason as in
+    # compute_lambda_sl: the WL-only model's |mu| at SL positions is
+    # unreliable and would inflate chi2_SL by 100–10,000x.
     try:
         sigma_n = posterior_sigma_n(
             halos,
@@ -345,21 +366,25 @@ def _compute_lambda_sl_power_law(sources, halos, use_flags, strong_systems=None)
         strong_systems,
         sigma_n=sigma_n,
         alpha_cal=1.0,
+        use_magnification_correction=False,
     )
 
-    # SL DOF: 2 numbers (x, y in source plane) per image after
-    # marginalizing one source-plane mean per system, summed over
-    # systems.  Match the SIS/NFW convention.
-    n_images_total = sum(int(np.atleast_1d(sys.theta_x).size) for sys in strong_systems)
-    n_systems = sum(1 for _ in strong_systems)
-    dof_sl = 2 * n_images_total - 2 * n_systems
-    if dof_sl <= 0:
-        return 0.0
-    rchi2_sl = chi2_sl / dof_sl
-    if rchi2_sl <= 0:
+    if not np.isfinite(chi2_sl) or chi2_sl <= 0:
         return 0.0
 
-    return float(rchi2_wl / rchi2_sl)
+    dof_sl = calc_strong_dof(sources)
+    if dof_sl <= 0:
+        return 0.0
+
+    # Geometric-mean lambda: same convention as compute_lambda_sl.
+    lambda_raw = chi2_wl / np.sqrt(chi2_sl * dof_sl)
+    lambda_max = 100.0
+    print(
+        f"Pre-computed lambda_sl (power-law): chi^2_WL/sqrt(chi^2_SL*dof_SL) = "
+        f"{chi2_wl:.1f}/sqrt({chi2_sl:.1f}*{dof_sl}) = {lambda_raw:.3f}"
+        + (f"  (capped at {lambda_max:.0f})" if lambda_raw > lambda_max else "")
+    )
+    return float(min(lambda_raw, lambda_max))
 
 
 def calculate_total_chi2(
