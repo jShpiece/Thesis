@@ -82,6 +82,14 @@ class JWSTPipeline:
                        concentration), and theta_star is fixed at 30
                        arcsec (the project default; override via config
                        key 'theta_star' if desired).
+
+    Strong-lensing handling (when strong_lensing_catalog_path is set):
+        use_sl_in_selection=True (default): two-pass forward selection
+            (Pass 1 WL-only → compute λ_SL at the Pass 1 minimum →
+             Pass 2 WL+λ_SL on rejected candidates).
+        use_sl_in_selection=False: legacy single-pass WL selection
+            with post-selection λ_SL applied only to merging and
+            strength optimization.
     """
 
     def __init__(self, config):
@@ -133,10 +141,24 @@ class JWSTPipeline:
             'sl_wl_reference_radec', None)  # (RA, Dec) fallback if no WCS
         self.use_strong_lensing = bool(self.strong_lensing_catalog_path)
 
+        # Whether to use SL information during forward selection (two-pass:
+        # WL → λ_SL → WL+SL).  Only meaningful when use_strong_lensing=True.
+        # Default True when SL is enabled — see forward_lens_selection_two_pass
+        # in arch.forward_selection for the physical justification.  Set False
+        # for ablation against the legacy post-selection-only SL path.
+        self.use_sl_in_selection = bool(config.get(
+            'use_sl_in_selection', self.use_strong_lensing))
+
         # File-naming suffix to disambiguate WL-only vs WL+SL outputs.
         # Used in CSV / PDF filenames so the same (cluster, signal,
         # lens_type) can have separate outputs for SL ablations.
-        self.sl_suffix = 'WLSL' if self.use_strong_lensing else 'WL'
+        #   'WL'           — weak lensing only
+        #   'WLSL'         — WL + SL applied post-selection only (legacy)
+        #   'WLSL_2pass'   — WL + SL during selection via two-pass
+        if self.use_strong_lensing:
+            self.sl_suffix = 'WLSL_2pass' if self.use_sl_in_selection else 'WLSL'
+        else:
+            self.sl_suffix = 'WL'
 
         # Redshifts
         self.z_source = config['source_redshift']
@@ -456,6 +478,7 @@ class JWSTPipeline:
                 self.sources, xmax, flags=flags, use_flags=self.use_flags,
                 lens_type='NFW', z_lens=self.z_cluster,
                 use_strong_lensing=self.use_strong_lensing,
+                use_sl_in_selection=self.use_sl_in_selection,
             )
         elif self.lens_type == 'POWER_LAW':
             # main.fit_lensing_field as currently shipped does not accept
@@ -467,6 +490,7 @@ class JWSTPipeline:
                 self.sources, xmax, flags=flags, use_flags=self.use_flags,
                 lens_type='POWER_LAW', z_lens=self.z_cluster,
                 use_strong_lensing=self.use_strong_lensing,
+                use_sl_in_selection=self.use_sl_in_selection,
                 # theta_star=self.theta_star,
             )
 
@@ -806,7 +830,10 @@ class JWSTPipeline:
 
         # Title and total-mass label depend on lens_type
         # Title prefix indicating WL-only vs WL+SL reconstruction
-        sl_label = "WL+SL" if self.use_strong_lensing else "WL-only"
+        if self.use_strong_lensing:
+            sl_label = "WL+SL (two-pass)" if self.use_sl_in_selection else "WL+SL"
+        else:
+            sl_label = "WL-only"
 
         if self.lens_type == 'NFW':
             total_mass_hinv = float(np.nansum(
@@ -992,13 +1019,18 @@ VALID_ACTIONS = ['fit', 'visualize', 'errorbars']
 
 
 def _build_config(cluster_name, signal, theta_star, repo_root,
-                  use_strong_lensing=True):
+                  use_strong_lensing=True, use_sl_in_selection=True):
     """Construct a JWSTPipeline config dict for a (cluster, signal) pair.
 
     Strong lensing is enabled when (a) the cluster has a SL catalog
     in CLUSTERS, AND (b) use_strong_lensing=True.  Set
     use_strong_lensing=False to force a WL-only run regardless of
     catalog availability (useful for ablation studies).
+
+    When SL is enabled, use_sl_in_selection controls whether the
+    two-pass forward selection is used (Pass 1 WL-only → λ_SL → Pass 2
+    WL+λ_SL on rejected candidates) or the legacy single-pass WL
+    selection with post-selection λ_SL only.
     """
     base = CLUSTERS[cluster_name]
     cfg = {
@@ -1020,8 +1052,10 @@ def _build_config(cluster_name, signal, theta_star, repo_root,
         cfg['strong_lensing_catalog_path'] = str(repo_root / sl_path)
         cfg['sl_wl_reference_radec'] = base.get(
             'sl_wl_reference_radec', None)
+        cfg['use_sl_in_selection'] = use_sl_in_selection
     else:
         cfg['strong_lensing_catalog_path'] = None
+        cfg['use_sl_in_selection'] = False
     return cfg
 
 
@@ -1076,6 +1110,15 @@ def main_cli():
             "  # Jackknife error bars on a previously fit reconstruction\n"
             "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
             "      --signal all --mode NFW --action errorbars\n"
+            "\n"
+            "  # Three-way SL ablation on Abell 2744 (WL-only, legacy WL+SL,\n"
+            "  # two-pass WL+SL).  Each writes to a distinct sl_suffix.\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
+            "      --signal all --mode NFW --no-sl\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
+            "      --signal all --mode NFW --no-two-pass\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
+            "      --signal all --mode NFW\n"
         ),
     )
     p.add_argument('--cluster', choices=list(CLUSTERS.keys()) + ['ALL'],
@@ -1099,6 +1142,12 @@ def main_cli():
                    help="Disable strong lensing even for clusters that "
                         "have an SL catalog configured.  Useful for "
                         "WL-only ablation studies.")
+    p.add_argument('--no-two-pass', action='store_true', dest='no_two_pass',
+                   help="Disable two-pass forward selection (WL → λ_SL → "
+                        "WL+SL).  Falls back to the legacy single-pass WL "
+                        "selection with post-selection λ_SL.  Only "
+                        "meaningful when SL is enabled.  Useful for "
+                        "ablation against the legacy code path.")
     p.add_argument('--repo-root', type=str, default=None, dest='repo_root',
                    help="Repository root path (the parent of `pipelines/` "
                         "and `arch/`).  Default: auto-detected from this "
@@ -1122,6 +1171,7 @@ def main_cli():
     clusters = list(CLUSTERS.keys()) if args.cluster == 'ALL' else [args.cluster]
     signals  = VALID_SIGNALS         if args.signal  == 'ALL' else [args.signal]
     use_strong_lensing = not args.no_sl
+    use_sl_in_selection = not args.no_two_pass
 
     # Print a short header so the user can see what they're about to do
     n_jobs = len(clusters) * len(signals)
@@ -1136,6 +1186,9 @@ def main_cli():
     if args.mode == 'POWER_LAW' or args.mode == 'COMPARE':
         print(f"  theta_star : {args.theta_star}")
     print(f"  strong-lensing: {'enabled' if use_strong_lensing else 'DISABLED'}")
+    if use_strong_lensing:
+        print(f"  selection   : "
+              f"{'two-pass (WL → λ_SL → WL+SL)' if use_sl_in_selection else 'single-pass (legacy)'}")
     print(f"  total jobs : {n_jobs}")
     print()
 
@@ -1145,7 +1198,8 @@ def main_cli():
                   f"mode={args.mode} / action={args.action} ---")
             cfg = _build_config(cluster_name, signal,
                                 args.theta_star, repo_root,
-                                use_strong_lensing=use_strong_lensing)
+                                use_strong_lensing=use_strong_lensing,
+                                use_sl_in_selection=use_sl_in_selection)
             try:
                 _run_one(cfg, args.mode, args.action)
             except FileNotFoundError as e:
@@ -1157,4 +1211,4 @@ def main_cli():
 
 
 if __name__ == '__main__':
-    main_cli() 
+    main_cli()
