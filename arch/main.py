@@ -1,3 +1,5 @@
+"""Top-level ARCH driver: fit_lensing_field."""
+
 import arch.metric as metric
 import arch.pipeline as pipeline
 
@@ -10,6 +12,7 @@ def fit_lensing_field(
     lens_type="SIS",
     z_lens=0.5,
     use_strong_lensing: bool = False,
+    use_sl_in_selection: bool = False,
 ):
     """
     Reconstructs the gravitational lensing field based on observed
@@ -33,7 +36,15 @@ def fit_lensing_field(
         Lens redshift.  Default 0.5.
     use_strong_lensing : bool
         Include multiply-imaged systems from ``sources.strong_systems``
-        in the objective.  Default False.
+        in the post-selection objective (merging and strength
+        optimization).  Default False.
+    use_sl_in_selection : bool
+        Use strong-lensing information during forward selection via a
+        two-pass scheme (Pass 1 WL-only, Pass 2 WL+λ_SL on rejected
+        candidates).  Default False to preserve legacy single-pass
+        behaviour; recommended True for NFW and POWER_LAW when
+        ``use_strong_lensing=True`` AND ``sources.strong_systems`` is
+        populated.  Has no effect when use_strong_lensing is False.
 
     Returns
     -------
@@ -41,35 +52,46 @@ def fit_lensing_field(
 
     Notes
     -----
-    SL convention (NFW and POWER_LAW):
-        lambda_sl is computed AFTER forward selection, using the
-        post-selection lens model where the SL chi^2 is well-defined.
-        It is then FROZEN through the merge and strength stages.
+    Two-pass selection rationale:
+        The original SL-in-selection attempt (with λ_SL computed from
+        the initial guess and active during single-pass selection)
+        degraded NFW mass recovery from 58% to 23% on the Abell 2744
+        scenario.  The cause was a poorly-calibrated λ_SL combined
+        with the high curvature of χ²_SL near the correct solution,
+        which broke the greedy-monotonicity assumption.
 
-        Computing lambda_sl on the initial-guess lens model (which has
-        ~1000 random per-source halos) is unreliable because the SL
-        chi^2 evaluated on that model can be artificially small due to
-        the profile-model-uncertainty term in chi2_strong_source_plane_*
-        scaling with the (huge, random) deflection magnitudes.  Empirically
-        observed on Abell 2744 with NFW: pre-selection chi2_SL = 0.077
-        gave lambda_sl ~ 178000 (capped at 50), which then drove NFW
-        masses up by a factor of ~7 to satisfy the over-weighted SL.
+        The two-pass scheme calibrates λ_SL at the Pass 1 minimum
+        (where deflections are physical and the slope uncertainty is
+        small) and resumes selection only on candidates that Pass 1
+        rejected.  These are typically the small/peripheral candidates
+        that WL alone couldn't justify, but which SL geometry may
+        require — substructure halos near critical curves, mass-sheet
+        calibration shifts, etc.  Pass 2 cannot remove Pass 1 halos;
+        backward elimination is a future extension.
 
-        The post-selection convention sidesteps this: chi2_SL is
-        evaluated on the converged WL-only lens model, where the
-        deflections are physical and the SL contribution is well-
-        scaled.
+    SL convention (NFW and POWER_LAW), single-pass mode:
+        lambda_sl is computed AFTER forward selection on the post-
+        selection lens model where the SL χ² is well-defined.  Frozen
+        through merging and strength optimization.
+
+    SL convention (NFW and POWER_LAW), two-pass mode:
+        Same as single-pass but λ_SL is computed AFTER Pass 1 (not
+        AFTER all selection), and is also used during Pass 2.  Frozen
+        for merging and strength optimization downstream.
 
     SIS convention:
         Pre-computation via metric.compute_lambda_sl is retained for
         SIS to preserve legacy behavior on the (rarely-used) SIS path.
+        SIS does NOT yet have two-pass support — pass
+        use_sl_in_selection=False for SIS.
     """
     if use_flags is None:
         use_flags = [True, True, True]
 
     def log_step(message, lenses, reduced_chi2):
         if flags:
-            print(f"{message}\nLenses: {len(lenses.x)}, " f"Reduced Chi^2: {reduced_chi2:.4f}")
+            print(f"{message}\nLenses: {len(lenses.x)}, "
+                  f"Reduced Chi^2: {reduced_chi2:.4f}")
 
     # ── Step 1: Generate initial lens candidates ──
     lenses = pipeline.generate_initial_guess(sources, lens_type, z_lens)
@@ -77,7 +99,6 @@ def fit_lensing_field(
     log_step("Initial Guesses:", lenses, reduced_chi2)
 
     # ── Pre-compute lambda_sl (SIS only) ──
-    # NFW and POWER_LAW defer to after forward selection — see docstring.
     if use_strong_lensing and lens_type == "SIS":
         lambda_sl = metric.compute_lambda_sl(sources, lenses, use_flags, lens_type)
         if flags:
@@ -86,23 +107,13 @@ def fit_lensing_field(
         lambda_sl = None
 
     # ── Step 2: Optimize lens positions ──
-    # NFW and POWER_LAW: lambda_sl is None, so position optimization
-    # runs WL-only (matching the post-selection convention).
-    # SIS: pre-computed lambda_sl is used.
     lenses = pipeline.optimize_lens_positions(
-        sources,
-        lenses,
-        xmax,
-        use_flags,
-        lens_type,
+        sources, lenses, xmax, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
     )
     reduced_chi2 = pipeline.update_chi2_values(
-        sources,
-        lenses,
-        use_flags,
-        lens_type,
+        sources, lenses, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
     )
@@ -111,48 +122,49 @@ def fit_lensing_field(
     # ── Step 3: Filter out unsuitable lenses ──
     lenses = pipeline.filter_lens_positions(sources, lenses, xmax, lens_type=lens_type)
     reduced_chi2 = pipeline.update_chi2_values(
-        sources,
-        lenses,
-        use_flags,
-        lens_type,
+        sources, lenses, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
     )
     log_step("After Filtering:", lenses, reduced_chi2)
 
     # ── Step 4: Forward selection ──
-    # Both NFW and POWER_LAW: forward selection runs WL-only, then
-    # lambda_sl is computed at the post-selection minimum and frozen.
-    if use_strong_lensing and lens_type in ("NFW", "POWER_LAW"):
+    if use_strong_lensing and lens_type in ("NFW", "POWER_LAW") and use_sl_in_selection:
+        # ── Two-pass path: WL → λ_SL → WL+SL ──
+        lenses, _, lambda_sl, diag = pipeline.forward_lens_selection_two_pass(
+            sources, lenses, use_flags, lens_type,
+            return_diagnostics=True,
+        )
+        if flags:
+            print(
+                f"Two-pass selection:  pass1={diag['n_pass1']} halos, "
+                f"pass2 added {diag['n_pass2_added']}, "
+                f"lambda_sl={diag['lambda_sl']:.6f}, "
+                f"chi2: {diag['chi2_pass1']:.3f} -> {diag['chi2_final']:.3f}"
+            )
+
+    elif use_strong_lensing and lens_type in ("NFW", "POWER_LAW"):
+        # ── Single-pass path (legacy): WL-only selection, then compute λ_SL ──
         if lens_type == "POWER_LAW":
-            # POWER_LAW: forward_lens_selection has return_lambda_sl=True
-            # path that computes lambda_sl internally.
             selected, _, lambda_sl_post = pipeline.forward_lens_selection(
-                sources,
-                lenses,
-                use_flags,
-                lens_type,
-                use_strong_lensing=False,  # forced WL-only internally
-                lambda_sl=None,
+                sources, lenses, use_flags, lens_type,
+                use_strong_lensing=False, lambda_sl=None,
                 strong_systems=(
-                    sources.strong_systems if hasattr(sources, "strong_systems") else None
+                    sources.strong_systems
+                    if hasattr(sources, "strong_systems") else None
                 ),
                 return_lambda_sl=True,
             )
             lenses = selected
             lambda_sl = lambda_sl_post
         else:
-            # NFW: forward selection WL-only, then compute lambda_sl
-            # via metric.compute_lambda_sl on the post-selection model.
             lenses, _ = pipeline.forward_lens_selection(
-                sources,
-                lenses,
-                use_flags,
-                lens_type,
-                use_strong_lensing=False,
-                lambda_sl=None,
+                sources, lenses, use_flags, lens_type,
+                use_strong_lensing=False, lambda_sl=None,
             )
-            lambda_sl = metric.compute_lambda_sl(sources, lenses, use_flags, lens_type)
+            lambda_sl = metric.compute_lambda_sl(
+                sources, lenses, use_flags, lens_type
+            )
         if flags:
             print(
                 f"Post-selection lambda_sl = "
@@ -161,32 +173,26 @@ def fit_lensing_field(
     else:
         # SIS path with pre-computed lambda_sl, or WL-only run
         lenses, _ = pipeline.forward_lens_selection(
-            sources,
-            lenses,
-            use_flags,
-            lens_type,
+            sources, lenses, use_flags, lens_type,
             use_strong_lensing=use_strong_lensing,
             lambda_sl=lambda_sl,
         )
 
     reduced_chi2 = pipeline.update_chi2_values(
-        sources,
-        lenses,
-        use_flags,
-        lens_type,
+        sources, lenses, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
     )
     log_step("After Forward Selection:", lenses, reduced_chi2)
 
     # ── Step 5: Merge nearby lenses ──
-    merger_threshold = (len(sources.x) / (2 * xmax) ** 2) ** (-0.5) if len(sources.x) > 0 else 1.0
+    merger_threshold = (
+        (len(sources.x) / (2 * xmax) ** 2) ** (-0.5)
+        if len(sources.x) > 0 else 1.0
+    )
     lenses = pipeline.merge_close_lenses(lenses, merger_threshold, lens_type)
     reduced_chi2 = pipeline.update_chi2_values(
-        sources,
-        lenses,
-        use_flags,
-        lens_type,
+        sources, lenses, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
     )
@@ -195,10 +201,7 @@ def fit_lensing_field(
     # ── Step 6: Final optimization (strength) ──
     if lens_type == "POWER_LAW":
         lenses = pipeline.optimize_lens_strength(
-            sources,
-            lenses,
-            use_flags,
-            lens_type,
+            sources, lenses, use_flags, lens_type,
             use_strong_lensing=use_strong_lensing,
             lambda_sl=lambda_sl,
             strong_systems=(
@@ -209,19 +212,13 @@ def fit_lensing_field(
         )
     else:
         lenses = pipeline.optimize_lens_strength(
-            sources,
-            lenses,
-            use_flags,
-            lens_type,
+            sources, lenses, use_flags, lens_type,
             use_strong_lensing=use_strong_lensing,
             lambda_sl=lambda_sl,
         )
 
     reduced_chi2 = pipeline.update_chi2_values(
-        sources,
-        lenses,
-        [True, True, True],
-        lens_type,
+        sources, lenses, [True, True, True], lens_type,
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
     )

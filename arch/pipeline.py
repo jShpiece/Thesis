@@ -2,13 +2,17 @@
 Compatibility shim for arch.pipeline.
 
 All pipeline logic has been split into focused submodules under arch/:
-    arch.candidate_generation  — generate_initial_guess
-    arch.voting                — cast_votes_power_law, seed_from_votes, _find_peaks_2d
-    arch.position_optimization — optimize_lens_positions, _chi2_wrapper_power_law
-    arch.filter_merge          — filter_lens_positions, merge_close_lenses
-    arch.forward_selection     — forward_lens_selection
-    arch.strength_optimization — optimize_lens_strength, _strength_chi2_target_power_law
-    arch.chi2_wrappers         — chi2wrapper, update_chi2_values
+    arch.candidate_generation     — generate_initial_guess
+    arch.voting                   — cast_votes_power_law, seed_from_votes, _find_peaks_2d
+    arch.sl_candidate_generation  — cast_votes_sl, cast_votes_sl_sis,
+                                     cast_votes_sl_nfw, cast_votes_sl_power_law,
+                                     concat_candidates
+    arch.position_optimization    — optimize_lens_positions, _chi2_wrapper_power_law
+    arch.filter_merge             — filter_lens_positions, merge_close_lenses
+    arch.forward_selection        — forward_lens_selection (single-pass),
+                                     forward_lens_selection_two_pass (WL → λ_SL → WL+SL)
+    arch.strength_optimization    — optimize_lens_strength, _strength_chi2_target_power_law
+    arch.chi2_wrappers            — chi2wrapper, update_chi2_values
 
 Every name previously importable as arch.pipeline.<name> remains importable
 the same way via the re-exports below.
@@ -26,6 +30,15 @@ from arch.voting import (  # noqa: F401
     _find_peaks_2d,
 )
 
+# ── Re-exports: SL-driven candidate generation ───────────────────────────────
+from arch.sl_candidate_generation import (  # noqa: F401
+    cast_votes_sl,
+    cast_votes_sl_sis,
+    cast_votes_sl_nfw,
+    cast_votes_sl_power_law,
+    concat_candidates,
+)
+
 # ── Re-exports: position optimization ───────────────────────────────────────
 from arch.position_optimization import (  # noqa: F401
     optimize_lens_positions,
@@ -41,6 +54,7 @@ from arch.filter_merge import (  # noqa: F401
 # ── Re-exports: forward selection ───────────────────────────────────────────
 from arch.forward_selection import (  # noqa: F401
     forward_lens_selection,
+    forward_lens_selection_two_pass,
 )
 
 # ── Re-exports: strength optimization ───────────────────────────────────────
