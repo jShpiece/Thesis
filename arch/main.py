@@ -69,6 +69,22 @@ def fit_lensing_field(
         calibration shifts, etc.  Pass 2 cannot remove Pass 1 halos;
         backward elimination is a future extension.
 
+    Magnification-correction convention:
+        chi^2_SL during forward selection and the post-selection
+        "After Forward Selection" log step is computed with
+        use_magnification_correction_sl=False.  This matches the
+        convention used by metric.compute_lambda_sl to calibrate
+        λ_SL.  Subsequent steps (merging, strength optimization) use
+        the full magnification-corrected chi^2_SL.
+
+        See arch.forward_selection module docstring for the physical
+        rationale: applying the magnification correction during
+        selection inflates chi^2_SL by 100-10,000x near critical
+        curves, breaks the greedy monotonicity assumption, and drives
+        runaway candidate addition (observed on real Abell 2744
+        POWER_LAW data, where Pass 2 added 21 halos that pushed the
+        joint reduced chi^2 from ~16 to 2824).
+
     SL convention (NFW and POWER_LAW), single-pass mode:
         lambda_sl is computed AFTER forward selection on the post-
         selection lens model where the SL χ² is well-defined.  Frozen
@@ -129,12 +145,23 @@ def fit_lensing_field(
     log_step("After Filtering:", lenses, reduced_chi2)
 
     # ── Step 4: Forward selection ──
+    # Track whether the post-selection chi^2 should be reported with
+    # the magnification correction off (consistent with the chi^2 the
+    # selection actually minimised) or on (the converged-model chi^2).
+    # For the two-pass branch, report without — same convention as
+    # selection.  For all other branches, default True.
+    post_select_use_mag = True
+
     if use_strong_lensing and lens_type in ("NFW", "POWER_LAW") and use_sl_in_selection:
         # ── Two-pass path: WL → λ_SL → WL+SL ──
+        # use_magnification_correction_sl=False inside Pass 2 (and the
+        # Pass 1 cost calculation) is the default, set in
+        # forward_lens_selection_two_pass.
         lenses, _, lambda_sl, diag = pipeline.forward_lens_selection_two_pass(
             sources, lenses, use_flags, lens_type,
             return_diagnostics=True,
         )
+        post_select_use_mag = False  # report-consistent chi^2
         if flags:
             print(
                 f"Two-pass selection:  pass1={diag['n_pass1']} halos, "
@@ -182,6 +209,7 @@ def fit_lensing_field(
         sources, lenses, use_flags, lens_type,
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
+        use_magnification_correction_sl=post_select_use_mag,
     )
     log_step("After Forward Selection:", lenses, reduced_chi2)
 

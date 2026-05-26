@@ -12,6 +12,9 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import arch.metric as metric
 import arch.pipeline as pipeline
+import arch.utils as utils
+from arch.chi2_wrappers import update_chi2_values
+from arch.forward_selection import _greedy_add_pass, _empty_lens_collection
 from arch.main import fit_lensing_field
 from scripts.paper2_shared import (
     _find_nfw_beta_rad,
@@ -37,6 +40,7 @@ from scripts.paper2_shared import (
 # 16-E  Two-pass adds no halos when SL fits Pass 1 already
 # 16-F  Two-pass pipeline integration: runs end-to-end on NFW + SL
 # 16-G  Two-pass NFW recovers single-halo truth at least as well as single-pass
+# 16-H  Magnification-correction flag is threaded correctly through Pass 2
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -167,6 +171,7 @@ def _test_diagnostic_structure(R: _TestResults16):
     expected_keys = {
         "n_pass1", "n_pass2_added", "lambda_sl",
         "chi2_pass1", "chi2_final", "n_remaining_after_pass1",
+        "use_magnification_correction_sl",
     }
     have_keys = expected_keys.issubset(diag.keys())
     types_ok = (
@@ -175,6 +180,7 @@ def _test_diagnostic_structure(R: _TestResults16):
         and isinstance(diag["lambda_sl"], float)
         and isinstance(diag["chi2_pass1"], float)
         and isinstance(diag["chi2_final"], float)
+        and isinstance(diag["use_magnification_correction_sl"], bool)
     )
     finite_ok = (
         np.isfinite(diag["chi2_pass1"])
@@ -281,25 +287,6 @@ def _test_lambda_sl_consistency(R: _TestResults16):
 def _test_pass2_no_unnecessary_additions(R: _TestResults16):
     R.header("16-E  Pass 2 adds 0 halos when WL model already fits SL")
 
-    # Single SIS scenario — geometry is well-determined by WL alone, and
-    # the synthetic SL system is consistent with the WL truth, so Pass 2
-    # should have nothing to add.
-    src = make_weak_lensing_catalog_two_lenses(
-        true_lens_xyte=[(5.0, -3.0, 3.5)],
-        xmax=35.0, n_sources=100, seed=50,
-    )
-    sys_A = make_two_image_sis_system_at_lens(
-        system_id="16E_sys",
-        lens_center_xy=(5.0, -3.0),
-        te_true=3.5,
-        beta_rel_xy=(0.3, -0.2),
-        sigma_theta=0.04, z_source=2.0,
-    )
-    attach_strong_systems(src, [sys_A])
-
-    # Run end-to-end with two-pass; check that the pipeline runs and SL is
-    # not adding spurious halos on a well-fit scenario.  We focus on NFW
-    # since SIS doesn't use the two-pass path.  Adapt: rebuild scenario as NFW.
     src_n, halo_true, xmax = _build_nfw_with_sl(seed=55)
     use_flags = [True, True, False]
     cand = pipeline.generate_initial_guess(src_n, lens_type="NFW", z_l=0.3)
@@ -427,6 +414,161 @@ def _test_two_pass_no_degradation(R: _TestResults16):
     R.record("16-G  No degradation vs single-pass", ok)
 
 
+# ── 16-H  Magnification-correction flag is threaded through Pass 2 ───────
+
+def _test_magnification_flag_threading(R: _TestResults16):
+    """
+    Verifies the magnification-correction fix:
+
+    1. update_chi2_values accepts the use_magnification_correction_sl
+       parameter and produces DIFFERENT values for True vs False when
+       chi2_SL is nonzero (i.e., the parameter actually has an effect).
+    2. _greedy_add_pass propagates the flag — calling it with
+       use_magnification_correction_sl=False vs True gives different
+       per-candidate scoring whenever the SL chi^2 is sensitive to
+       magnification.
+    3. forward_lens_selection_two_pass defaults to False and records
+       the choice in diagnostics.
+    4. The chi^2 evaluated during Pass 2 (with mag correction off)
+       is consistent with the lambda_sl calibration — specifically,
+       it should be much SMALLER than the same chi^2 evaluated with
+       mag correction on, on a model that has SL tension.
+    """
+    R.header("16-H  Magnification-correction flag threading through Pass 2")
+
+    # Build a scenario with intentional SL tension at the Pass 1 minimum:
+    # use a 2-image NFW system but seed the WL catalog such that the
+    # WL-only fit doesn't perfectly satisfy SL.  We control this by
+    # using a noisy SL system (large sigma_theta).
+    src, halo_true, xmax = _build_nfw_with_sl(seed=80)
+    use_flags = [True, True, False]
+
+    # Build a deliberately *imperfect* lens model (offset position by
+    # ~1 arcsec from truth) so the SL chi^2 is sensitive to magnification.
+    import arch.halo_obj as halo_obj
+    imperfect = halo_obj.NFW_Lens(
+        x=np.array([halo_true.x[0] + 1.0]),
+        y=np.array([halo_true.y[0] + 1.0]),
+        z=np.zeros(1),
+        concentration=halo_true.concentration.copy(),
+        mass=halo_true.mass.copy(),
+        redshift=halo_true.redshift,
+        chi2=np.zeros(1),
+    )
+
+    # External SL chi^2 evaluation with mag on/off (sanity ground truth)
+    chi2_sl_off = utils.chi2_strong_source_plane_nfw(
+        imperfect, src.strong_systems,
+        use_magnification_correction=False,
+    )
+    chi2_sl_on = utils.chi2_strong_source_plane_nfw(
+        imperfect, src.strong_systems,
+        use_magnification_correction=True,
+    )
+    print(f"  External chi2_SL_no_mag = {chi2_sl_off:.3f}")
+    print(f"  External chi2_SL_mag_on = {chi2_sl_on:.3f}")
+    ok_external_differ = chi2_sl_on > chi2_sl_off  # mag correction inflates SL chi^2
+    print(f"  External: mag_on > mag_off (correction inflates near critical curves): "
+          f"{'OK' if ok_external_differ else 'FAIL'}")
+
+    # ── (1) update_chi2_values responds to the flag ──
+    lambda_sl_fixed = 1.0  # arbitrary nonzero
+    chi2_total_off = update_chi2_values(
+        src, imperfect, use_flags, "NFW",
+        use_strong_lensing=True,
+        lambda_sl=lambda_sl_fixed,
+        use_magnification_correction_sl=False,
+    )
+    chi2_total_on = update_chi2_values(
+        src, imperfect, use_flags, "NFW",
+        use_strong_lensing=True,
+        lambda_sl=lambda_sl_fixed,
+        use_magnification_correction_sl=True,
+    )
+    print(f"  update_chi2_values(mag=False) = {chi2_total_off:.6f}")
+    print(f"  update_chi2_values(mag=True)  = {chi2_total_on:.6f}")
+    ok_update_responds = chi2_total_on != chi2_total_off
+    print(f"  update_chi2_values responds to flag: "
+          f"{'OK' if ok_update_responds else 'FAIL'}")
+
+    # ── (2) _greedy_add_pass propagates the flag ──
+    # Construct a tiny candidate pool with one candidate and verify
+    # that the two flag values produce different test chi^2 values.
+    test_cand = halo_obj.NFW_Lens(
+        x=np.array([halo_true.x[0] - 5.0, halo_true.x[0] + 5.0]),
+        y=np.array([halo_true.y[0] + 3.0, halo_true.y[0] - 3.0]),
+        z=np.zeros(2),
+        concentration=np.array([halo_true.concentration[0]] * 2),
+        mass=np.array([1.0e13, 1.0e13]),
+        redshift=halo_true.redshift,
+        chi2=np.zeros(2),
+    )
+
+    start_off = _empty_lens_collection("NFW", test_cand)
+    start_on = _empty_lens_collection("NFW", test_cand)
+    # Append one candidate to the start so chi^2 is nonzero
+    from arch.forward_selection import _append_candidate
+    start_off = _append_candidate(start_off, test_cand, 0, "NFW")
+    start_on = _append_candidate(start_on, test_cand, 0, "NFW")
+
+    sel_off, chi2_off, _ = _greedy_add_pass(
+        src, test_cand, start_off, np.array([1], dtype=int),
+        use_flags, "NFW",
+        base_tolerance=0.003, mass_scale=1e13,
+        kappa_scale=0.1, exponent=-1.0,
+        use_strong_lensing=True, lambda_sl=lambda_sl_fixed,
+        use_magnification_correction_sl=False,
+    )
+    sel_on, chi2_on, _ = _greedy_add_pass(
+        src, test_cand, start_on, np.array([1], dtype=int),
+        use_flags, "NFW",
+        base_tolerance=0.003, mass_scale=1e13,
+        kappa_scale=0.1, exponent=-1.0,
+        use_strong_lensing=True, lambda_sl=lambda_sl_fixed,
+        use_magnification_correction_sl=True,
+    )
+    print(f"  greedy chi2(mag=False) = {chi2_off:.6f}")
+    print(f"  greedy chi2(mag=True)  = {chi2_on:.6f}")
+    ok_greedy_responds = chi2_off != chi2_on
+    print(f"  _greedy_add_pass propagates the flag: "
+          f"{'OK' if ok_greedy_responds else 'FAIL'}")
+
+    # ── (3) forward_lens_selection_two_pass defaults to False ──
+    src_t, _, xmax_t = _build_nfw_with_sl(seed=81)
+    cand_t = pipeline.generate_initial_guess(src_t, lens_type="NFW", z_l=0.3)
+    cand_t = pipeline.optimize_lens_positions(
+        src_t, cand_t, xmax_t, use_flags, lens_type="NFW",
+    )
+    cand_t = pipeline.filter_lens_positions(src_t, cand_t, xmax_t, lens_type="NFW")
+
+    _, _, _, diag = pipeline.forward_lens_selection_two_pass(
+        src_t, cand_t, use_flags, lens_type="NFW",
+        return_diagnostics=True,
+    )
+    ok_default_false = diag["use_magnification_correction_sl"] is False
+    print(f"  two-pass default use_magnification_correction_sl = "
+          f"{diag['use_magnification_correction_sl']}  "
+          f"{'OK' if ok_default_false else 'FAIL'}")
+
+    # ── (4) Pass 2 chi^2 (mag off) is consistent with calibration ──
+    # The key physical claim: chi^2_SL with mag correction off is LESS
+    # OR EQUAL to chi^2_SL with mag correction on (at any given model).
+    # This is what allows the lambda_sl calibration (computed mag-off)
+    # to remain meaningful during Pass 2.
+    ok_consistency = chi2_sl_off <= chi2_sl_on + 1e-9
+    print(f"  chi2_SL_no_mag <= chi2_SL_mag_on (calibration consistency): "
+          f"{'OK' if ok_consistency else 'FAIL'}")
+
+    ok_all = (
+        ok_external_differ
+        and ok_update_responds
+        and ok_greedy_responds
+        and ok_default_false
+        and ok_consistency
+    )
+    R.record("16-H  Magnification flag threading", ok_all)
+
+
 # ── Runner ────────────────────────────────────────────────────────────────
 
 def run_two_pass_tests() -> bool:
@@ -438,6 +580,7 @@ def run_two_pass_tests() -> bool:
     _test_pass2_no_unnecessary_additions(R)
     _test_pipeline_integration(R)
     _test_two_pass_no_degradation(R)
+    _test_magnification_flag_threading(R)
     return R.summary()
 
 

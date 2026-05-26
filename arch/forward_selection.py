@@ -1,11 +1,11 @@
 """Greedy forward lens selection (single-pass and two-pass).
 
-The single-pass path is the original `forward_lens_selection` —
-WL-only candidate addition with adaptive tolerance.  Behaviour and
-return signatures are unchanged.
+The single-pass path is the original `forward_lens_selection` — WL-only
+candidate addition with adaptive tolerance.  Behaviour and return
+signatures are unchanged.
 
-The two-pass path adds SL information to the selection criterion in
-a way that respects the failure modes of the previous attempt:
+The two-pass path adds SL information to the selection criterion in a
+way that respects the failure modes of the previous attempt:
 
   Pass 1: WL-only forward selection.  Identifies the major mass
           concentrations on WL evidence alone.
@@ -14,8 +14,22 @@ a way that respects the failure modes of the previous attempt:
           matching the post-selection convention from
           main.fit_lensing_field).
   Pass 2: Resume forward selection on the candidates REJECTED by
-          Pass 1, now with the WL+λ_SL objective.  Pass 1 halos
+          Pass 1, now with the WL + λ_SL * SL objective.  Pass 1 halos
           remain in the model; Pass 2 can only ADD, not remove.
+
+Magnification-correction handling:
+    During Pass 2 (and during the Pass 1 cost calculation), the SL
+    chi^2 is evaluated with use_magnification_correction_sl=False.
+    This matches the convention used by metric.compute_lambda_sl to
+    calibrate λ_SL.  If selection chi^2 used the magnification
+    correction (which compresses sigma_beta by |mu|, inflating chi^2
+    by 100-10,000x near critical curves) the effective weight of SL
+    in the joint objective would be many times the calibrated λ_SL,
+    and Pass 2 would chase noise-fitting halos that drive the joint
+    chi^2 up dramatically.  The full magnification correction is
+    still applied downstream during strength optimization, where
+    the model can adjust globally to converge with the corrected
+    chi^2 landscape.
 
 Why two passes rather than single-pass WL+SL:
 
@@ -143,15 +157,18 @@ def _greedy_add_pass(
     exponent,
     use_strong_lensing,
     lambda_sl,
+    use_magnification_correction_sl: bool = True,
 ):
     """
     Run one greedy-add pass: while remaining candidates can lower the
-    reduced chi^2 by more than the adaptive tolerance, add the best one.
+    reduced chi^2 by more than the adaptive tolerance, add the best
+    one.
 
     The initial best chi^2 is computed from `selected_lenses` under the
-    objective specified by (use_strong_lensing, lambda_sl).  Starting
-    from a non-empty selection lets the two-pass driver resume after
-    Pass 1 with the new objective.
+    objective specified by (use_strong_lensing, lambda_sl,
+    use_magnification_correction_sl).  Starting from a non-empty
+    selection lets the two-pass driver resume after Pass 1 with the
+    new objective.
 
     Parameters
     ----------
@@ -169,6 +186,12 @@ def _greedy_add_pass(
     base_tolerance, mass_scale, kappa_scale, exponent : adaptive-tolerance params
     use_strong_lensing : bool
     lambda_sl : float or None
+    use_magnification_correction_sl : bool
+        Forwarded to update_chi2_values (and through to
+        metric.calculate_total_chi2).  False is the right choice during
+        selection to keep the chi^2 metric consistent with the
+        lambda_sl calibration; True is appropriate for converged-model
+        evaluations (strength optimization).
 
     Returns
     -------
@@ -177,27 +200,19 @@ def _greedy_add_pass(
     remaining_indices : np.ndarray
         Candidates still not selected (rejected by this pass).
     """
-    # ── Initialise the best reduced chi^2 from the current selection ──
+    # Import update_chi2_values once for the inner loop.
+    from arch.chi2_wrappers import update_chi2_values
+
+    # Initialise the best reduced chi^2 from the current selection.
     if len(selected_lenses.x) > 0:
-        best_reduced_chi2 = metric.update_chi2_values(
+        best_reduced_chi2 = update_chi2_values(
             sources, selected_lenses, use_flags, lens_type,
             use_strong_lensing=use_strong_lensing,
             lambda_sl=lambda_sl,
-        ) if hasattr(metric, "update_chi2_values") else float("inf")
-
-        # Fallback: import from chi2_wrappers if not on metric
-        if not np.isfinite(best_reduced_chi2):
-            from arch.chi2_wrappers import update_chi2_values
-            best_reduced_chi2 = update_chi2_values(
-                sources, selected_lenses, use_flags, lens_type,
-                use_strong_lensing=use_strong_lensing,
-                lambda_sl=lambda_sl,
-            )
+            use_magnification_correction_sl=use_magnification_correction_sl,
+        )
     else:
         best_reduced_chi2 = np.inf
-
-    # Import update_chi2_values once for inner loop (cheap caching)
-    from arch.chi2_wrappers import update_chi2_values
 
     improved = True
     while improved and len(remaining_indices) > 0:
@@ -213,6 +228,7 @@ def _greedy_add_pass(
                 sources, test_lenses, use_flags, lens_type,
                 use_strong_lensing=use_strong_lensing,
                 lambda_sl=lambda_sl,
+                use_magnification_correction_sl=use_magnification_correction_sl,
             )
             chi2_list.append(test_chi2)
             idx_list.append(idx)
@@ -264,6 +280,7 @@ def forward_lens_selection(
     kappa_scale: float = 0.1,
     strong_systems=None,
     return_lambda_sl: bool = False,
+    use_magnification_correction_sl: bool = False,
 ):
     """
     Single-pass greedy forward selection (legacy behaviour).
@@ -272,14 +289,23 @@ def forward_lens_selection(
         - SIS:        Includes SL if use_strong_lensing=True and a
                       pre-computed lambda_sl is supplied.
         - NFW:        Same as SIS (caller's choice).
-        - POWER_LAW:  SL is FORCED OFF during the greedy loop; lambda_sl
-                      is computed once post-selection via
+        - POWER_LAW:  SL is FORCED OFF during the greedy loop;
+                      lambda_sl is computed once post-selection via
                       metric._compute_lambda_sl_power_law and returned
                       when return_lambda_sl=True.
 
     For SL-aware selection on NFW or POWER_LAW, prefer
     `forward_lens_selection_two_pass` — it handles the λ_SL
     calibration and the Pass 1 / Pass 2 separation correctly.
+
+    Parameters
+    ----------
+    use_magnification_correction_sl : bool
+        Default False during selection.  See the module docstring for
+        rationale (consistency with λ_SL calibration).  Pass True
+        only if you specifically need the magnification-corrected
+        chi^2 evaluated at every candidate, which is generally NOT
+        what you want during selection.
 
     Returns
     -------
@@ -298,6 +324,7 @@ def forward_lens_selection(
         use_flags, lens_type, base_tolerance, mass_scale, kappa_scale, exponent,
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
+        use_magnification_correction_sl=use_magnification_correction_sl,
     )
 
     if len(selected_lenses.x) == 0:
@@ -333,6 +360,7 @@ def forward_lens_selection_two_pass(
     exponent=-1.0,
     kappa_scale=0.1,
     return_diagnostics: bool = False,
+    use_magnification_correction_sl: bool = False,
 ):
     """
     Two-pass forward selection that incorporates strong-lensing
@@ -342,7 +370,9 @@ def forward_lens_selection_two_pass(
             concentrations from WL evidence.
     λ_SL:   Computed at the Pass 1 minimum via metric.compute_lambda_sl
             (SIS/NFW) or metric._compute_lambda_sl_power_law (POWER_LAW).
-            Frozen for Pass 2.
+            Both helpers internally use use_magnification_correction=False
+            for the same reason this function defaults the same way
+            during Pass 2.  Frozen for Pass 2.
     Pass 2: Greedy selection resumed on the candidates rejected by
             Pass 1, now with the WL + λ_SL * SL objective.  Pass 1
             halos remain in the model.
@@ -357,8 +387,16 @@ def forward_lens_selection_two_pass(
     candidate_lenses, use_flags, lens_type, base_tolerance, mass_scale,
     exponent, kappa_scale : same as forward_lens_selection.
     return_diagnostics : bool
-        If True, return (lenses, chi2, lambda_sl, diagnostics_dict)
-        where diagnostics include Pass 1/2 counts and chi2 values.
+        If True, return (lenses, chi2, lambda_sl, diagnostics_dict).
+    use_magnification_correction_sl : bool
+        Default False.  Controls how chi^2_SL is computed during the
+        candidate evaluations of BOTH passes.  False keeps the
+        selection chi^2 consistent with the λ_SL calibration; True
+        would inflate chi^2_SL by 100-10,000x near critical curves
+        and break the greedy monotonicity assumption (this was the
+        cause of the runaway behavior observed on real Abell 2744
+        data, where Pass 2 added 21 halos that drove the joint
+        reduced chi^2 from ~16 to 2824).
 
     Returns
     -------
@@ -374,6 +412,7 @@ def forward_lens_selection_two_pass(
         use_flags, lens_type, base_tolerance, mass_scale, kappa_scale, exponent,
         use_strong_lensing=False,
         lambda_sl=None,
+        use_magnification_correction_sl=use_magnification_correction_sl,
     )
 
     n_pass1 = len(selected_lenses.x)
@@ -385,6 +424,7 @@ def forward_lens_selection_two_pass(
             "lambda_sl": 0.0,
             "chi2_pass1": np.inf, "chi2_final": np.inf,
             "n_remaining_after_pass1": int(len(remaining_indices)),
+            "use_magnification_correction_sl": bool(use_magnification_correction_sl),
         }
         if return_diagnostics:
             return None, np.inf, 0.0, diag
@@ -404,6 +444,7 @@ def forward_lens_selection_two_pass(
             "lambda_sl": 0.0,
             "chi2_pass1": float(chi2_pass1), "chi2_final": float(chi2_pass1),
             "n_remaining_after_pass1": int(len(remaining_indices)),
+            "use_magnification_correction_sl": bool(use_magnification_correction_sl),
         }
         if return_diagnostics:
             return selected_lenses, chi2_pass1, 0.0, diag
@@ -425,6 +466,7 @@ def forward_lens_selection_two_pass(
         use_flags, lens_type, base_tolerance, mass_scale, kappa_scale, exponent,
         use_strong_lensing=True,
         lambda_sl=lambda_sl,
+        use_magnification_correction_sl=use_magnification_correction_sl,
     )
 
     n_pass2_added = len(selected_lenses.x) - n_pass1
@@ -436,6 +478,7 @@ def forward_lens_selection_two_pass(
         "chi2_pass1": float(chi2_pass1),
         "chi2_final": float(chi2_final),
         "n_remaining_after_pass1": int(len(remaining_indices) + n_pass2_added),
+        "use_magnification_correction_sl": bool(use_magnification_correction_sl),
     }
 
     if return_diagnostics:

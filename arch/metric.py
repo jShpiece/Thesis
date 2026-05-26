@@ -453,17 +453,31 @@ def calculate_total_chi2(
     )
 
     if has_sl and use_strong_lensing:
-        # Source-plane scatter (positional constraint)
+        # Source-plane scatter (positional constraint).
+        # use_magnification_correction_sl flag forwards to the chi2_scatter
+        # functions.  Pass False during forward selection (so the chi2
+        # metric matches the lambda_sl calibration, which is also computed
+        # without magnification correction); pass True during strength
+        # optimization (where the model is converged enough that |mu|
+        # predictions are reliable).
         if lens_type == "SIS":
-            chi2_scatter = utils.chi2_strong_source_plane_sis(lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_sis(
+                lenses, sources.strong_systems,
+                use_magnification_correction=use_magnification_correction_sl,
+            )
         elif lens_type == "NFW":
-            chi2_scatter = utils.chi2_strong_source_plane_nfw(lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_nfw(
+                lenses, sources.strong_systems,
+                use_magnification_correction=use_magnification_correction_sl,
+            )
         elif lens_type == "POWER_LAW":
-            chi2_scatter = utils.chi2_strong_source_plane_power_law(lenses, sources.strong_systems)
+            chi2_scatter = utils.chi2_strong_source_plane_power_law(
+                lenses, sources.strong_systems,
+                use_magnification_correction=use_magnification_correction_sl,
+            )
         else:
             raise NotImplementedError(
-                f"Strong-lensing chi2 not implemented for lens_type='{lens_type}'."
-            )
+                f"Strong-lensing chi2 not implemented for lens_type='{lens_type}'.")
 
         # Flux ratios (mass constraint — only for systems with flux data)
         if lens_type == "SIS":

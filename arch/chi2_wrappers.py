@@ -13,6 +13,7 @@ def update_chi2_values(
     lens_type="NFW",
     use_strong_lensing: bool = False,
     lambda_sl: float = None,
+    use_magnification_correction_sl: bool = True,
 ):
     """
     Updates per-lens chi2 (WL-only per-lens is fine) and returns reduced
@@ -55,13 +56,14 @@ def update_chi2_values(
     will raise NotImplementedError.
     """
     chi2_total, dof_total, comps = metric.calculate_total_chi2(
-        sources,
-        lenses,
-        use_flags,
-        lens_type=lens_type,
-        use_strong_lensing=use_strong_lensing,
-        lambda_sl=lambda_sl,
-    )
+            sources,
+            lenses,
+            use_flags,
+            lens_type=lens_type,
+            use_strong_lensing=use_strong_lensing,
+            lambda_sl=lambda_sl,
+            use_magnification_correction_sl=use_magnification_correction_sl,
+        )
     reduced_chi2 = chi2_total / dof_total if dof_total != 0 else np.inf
 
     # --- Per-lens bookkeeping (WL-only, by design) ---
