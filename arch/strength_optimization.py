@@ -186,7 +186,7 @@ def optimize_lens_strength(
             method="Nelder-Mead",
             bounds=bounds,
             options={
-                "maxiter": int(1e6),
+                "maxiter": min(2000 * N_h, 20000),  # Scale maxiter with N_h, but cap at 20k
                 "xatol": 1e-5,
                 "fatol": 1e-5,
                 "adaptive": True,
