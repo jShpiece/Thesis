@@ -78,8 +78,8 @@ import arch.source_obj as source_obj
 # ─── Defaults ────────────────────────────────────────────────────────────────
 
 # Field geometry
-DEFAULT_FIELD_HALF_WIDTH = 50.0   # arcsec — 300" x 300" field (~25 arcmin^2)
-DEFAULT_N_SOURCES = 500           # ~60 / arcmin^2 at default field size (JWST-like)
+DEFAULT_FIELD_HALF_WIDTH = 150.0   # arcsec — 300" x 300" field (~25 arcmin^2)
+DEFAULT_N_SOURCES = 1500           # ~60 / arcmin^2 at default field size (JWST-like)
 
 # Redshifts
 DEFAULT_Z_LENS = 0.3
