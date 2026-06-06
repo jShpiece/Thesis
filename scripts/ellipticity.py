@@ -917,6 +917,24 @@ A2744_LITERATURE_TEMPLATE = A2744_LITERATURE
 # CSV loading
 # =============================================================================
 
+def _resolve_ellipticity_output_dir(csv_path: Path) -> Path:
+    """
+    Decide where to place ellipticity PDFs given an input lens CSV.
+
+    If the CSV lives in a directory named 'NFW' or 'POWER_LAW' (the
+    layout produced by pipelines/read_jwst.py with per-mode subdirs),
+    place outputs in a sibling 'Ellipticity/' directory under the same
+    cluster parent.  Otherwise, fall back to the CSV's own directory
+    (legacy behavior).
+    """
+    parent = csv_path.parent
+    if parent.name in ("NFW", "POWER_LAW"):
+        out = parent.parent / "Ellipticity"
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+    return parent
+
+
 def load_lenses_from_csv(csv_path, lens_type, theta_star=30.0):
     csv_path = str(csv_path)
     if lens_type == "NFW":
@@ -1033,7 +1051,8 @@ def main():
         compare_to_literature(results, A2744_LITERATURE_TEMPLATE)
 
     if args.plot:
-        plot_path = csv_path.with_name(csv_path.stem + "_ellipticity.pdf")
+        out_dir = _resolve_ellipticity_output_dir(csv_path)
+        plot_path = out_dir / (csv_path.stem + "_ellipticity.pdf")
         plot_ellipticity_overlay(
             lenses, args.z_source, results, lens_type=args.lens_type,
             out_path=str(plot_path), sky_mirrored=args.sky_mirrored,
@@ -1044,7 +1063,8 @@ def main():
                      if e.get("q") is not None
                      and e.get("PA_astro_deg") is not None]
         if populated:
-            comp_path = csv_path.with_name(
+            out_dir = _resolve_ellipticity_output_dir(csv_path)
+            comp_path = out_dir / (
                 csv_path.stem + "_ellipticity_vs_literature.pdf"
             )
             plot_ellipticity_with_literature(

@@ -123,6 +123,13 @@ class JWSTPipeline:
                 f"Invalid lens_type {self.lens_type!r}. "
                 f"Must be 'NFW' or 'POWER_LAW'.")
 
+        # Per-mode output subdirectory: Output/JWST/<cluster>/NFW/ or
+        # .../POWER_LAW/.  Created here so the rest of the pipeline can
+        # write into it without further mkdir calls.  Ellipticity outputs
+        # live in a sibling Ellipticity/ directory under the same parent.
+        self.mode_dir = self.output_dir / self.lens_type
+        self.mode_dir.mkdir(parents=True, exist_ok=True)
+
         # POWER_LAW pivot radius (only used if lens_type == 'POWER_LAW')
         self.theta_star = float(config.get('theta_star', 30.0))
 
@@ -214,9 +221,12 @@ class JWSTPipeline:
         self.match_sources()
         self.initialize_sources()
 
-        output_path = (f"jackknife_results_{self.cluster_name}_"
-                       f"{self.signal_choice}_{self.lens_type}_"
-                       f"{self.sl_suffix}.csv")
+        output_path = str(
+            self.mode_dir
+            / (f"jackknife_results_{self.cluster_name}_"
+               f"{self.signal_choice}_{self.lens_type}_"
+               f"{self.sl_suffix}.csv")
+        )
         # Per-lens-type column header
         if self.lens_type == 'NFW':
             header = ["i", "x", "y", "M200", "concentration"]
@@ -510,7 +520,7 @@ class JWSTPipeline:
             self.lenses.mass *= hubble_param
 
         # Save
-        file_name = (self.output_dir
+        file_name = (self.mode_dir
                      / f"lenses_{self.cluster_name}_{self.signal_choice}"
                      f"_{self.lens_type}_{self.sl_suffix}.csv")
         self.lenses.export_to_csv(file_name)
@@ -848,7 +858,7 @@ class JWSTPipeline:
                           rf"(power-law, $\langle n\rangle={slope_med:.2f}$, "
                           rf"{self.signal_choice})")
 
-        save_main = (Path(self.output_dir)
+        save_main = (self.mode_dir
                      / f"{self.cluster_name}_clu_{self.signal_choice}"
                      f"_{self.lens_type}_{self.sl_suffix}.pdf")
 
@@ -863,10 +873,10 @@ class JWSTPipeline:
         # Mass comparison — now supports both NFW and POWER_LAW
         utils.compare_mass_estimates(
             self.lenses,
-            Path(self.output_dir) / (f"mass_{self.cluster_name}"
-                                      f"_{self.signal_choice}"
-                                      f"_{self.lens_type}"
-                                      f"_{self.sl_suffix}.pdf"),
+            self.mode_dir / (f"mass_{self.cluster_name}"
+                             f"_{self.signal_choice}"
+                             f"_{self.lens_type}"
+                             f"_{self.sl_suffix}.pdf"),
             f"Mass Comparison: {self.cluster_name} "
             f"({self.lens_type}, {sl_label}, signals: {self.signal_choice})",
             self.cluster_name,
@@ -879,7 +889,7 @@ class JWSTPipeline:
         return img_data
 
     def import_lenses(self):
-        file_name = (self.output_dir
+        file_name = (self.mode_dir
                      / f"lenses_{self.cluster_name}_{self.signal_choice}"
                      f"_{self.lens_type}_{self.sl_suffix}.csv")
         if self.lens_type == 'NFW':
