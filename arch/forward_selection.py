@@ -4,56 +4,45 @@ The single-pass path is the original `forward_lens_selection` — WL-only
 candidate addition with adaptive tolerance.  Behaviour and return
 signatures are unchanged.
 
-The two-pass path adds SL information to the selection criterion in a
-way that respects the failure modes of the previous attempt:
+The two-pass path adds SL information to the selection criterion in
+three steps:
 
-  Pass 1: WL-only forward selection.  Identifies the major mass
-          concentrations on WL evidence alone.
-  λ_SL:   Computed at the Pass 1 minimum (post-convergence, where
-          deflections are physical and slope uncertainty is small —
-          matching the post-selection convention from
-          main.fit_lensing_field).
-  Pass 2: Resume forward selection on the candidates REJECTED by
-          Pass 1, now with the WL + λ_SL * SL objective.  Pass 1 halos
-          remain in the model; Pass 2 can only ADD, not remove.
+  Pass 1:  WL-only forward selection (legacy tolerance).
+  λ_SL:    Computed at the Pass 1 minimum.
+  Refine:  Joint refinement of Pass 1 halos under the WL + λ_SL × SL
+           objective.  Preserves halo count; lets the existing halos
+           absorb the SL pull before Pass 2 looks for additions.
+  Pass 2:  Greedy candidate addition under WL + λ_SL × SL, with a
+           tolerance multiplier (default 10x) on top of the legacy
+           adaptive tolerance to suppress marginal additions.
+
+Adaptive tolerance and the Pass 2 multiplier:
+
+  The base adaptive tolerance is
+
+      tau(strength) = base_tolerance * (strength / scale)^exponent
+
+  with exponent = -1.  For NFW with M ~ 1e16, scale = 1e13, this gives
+  tau ~ 3e-6 — any nonzero chi^2 improvement passes.  That's correct
+  for WL, where a massive halo touches many sources strongly.  It is
+  NOT correct for Pass 2 with SL active: a massive halo far from any
+  SL image still contributes ~1/r to alpha at the image positions, so
+  it can produce a small SL chi^2 improvement.  The tolerance formula
+  then rewards that small improvement because the halo is large.
+
+  pass2_tolerance_multiplier (default 10.0) rescales tau by that
+  factor during Pass 2 only.  Pass 1 keeps multiplier=1.0 (legacy
+  behaviour) since the WL-only objective doesn't have this failure
+  mode.  Set pass2_tolerance_multiplier=1.0 to recover the previous
+  two-pass behaviour.
 
 Magnification-correction handling:
-    During Pass 2 (and during the Pass 1 cost calculation), the SL
-    chi^2 is evaluated with use_magnification_correction_sl=False.
-    This matches the convention used by metric.compute_lambda_sl to
-    calibrate λ_SL.  If selection chi^2 used the magnification
-    correction (which compresses sigma_beta by |mu|, inflating chi^2
-    by 100-10,000x near critical curves) the effective weight of SL
-    in the joint objective would be many times the calibrated λ_SL,
-    and Pass 2 would chase noise-fitting halos that drive the joint
-    chi^2 up dramatically.  The full magnification correction is
-    still applied downstream during strength optimization, where
-    the model can adjust globally to converge with the corrected
-    chi^2 landscape.
 
-Why two passes rather than single-pass WL+SL:
-
-  Greedy monotonicity requires the marginal benefit of adding one
-  halo to be a stable quantity.  With λ_SL active from step 1, that
-  benefit depends on which other halos are present in a non-additive
-  way, and on the initial-model deflection magnitudes (which drive
-  the profile-uncertainty term in chi2_SL).  Empirically, this
-  configuration produced lambda_sl ~ 5e4 on real data, pulling
-  candidates toward SL-satisfying configurations at WL expense and
-  degrading mass recovery from 58% to 23%.
-
-  Two-pass sidesteps this by computing λ_SL at the Pass 1 minimum,
-  where the model is good enough that χ²_SL has a calibrated
-  absolute value and a locally quadratic landscape.  Pass 2's
-  greedy additions are small perturbations on top of M_1, the
-  regime where additivity is approximately valid.
-
-Why Pass 2 can only add, not remove:
-
-  Backward elimination during selection is a larger change.  If a
-  Pass 1 halo is bad for SL, the position+strength optimization
-  downstream can shrink its mass; complete removal is a future
-  extension (a Bayesian model-comparison step).
+  Selection, refinement, and the Pass 1 cost evaluation all use
+  use_magnification_correction_sl=False.  This matches the convention
+  used by metric.compute_lambda_sl to calibrate λ_SL.  The full
+  magnification correction is applied downstream during strength
+  optimization.
 """
 
 import numpy as np
@@ -94,7 +83,7 @@ def _empty_lens_collection(lens_type, candidate_lenses):
 
 
 def _append_candidate(selected, candidate_lenses, idx, lens_type):
-    """Return a new lens collection with candidate_lenses[idx] appended to selected."""
+    """Return a new lens collection with candidate_lenses[idx] appended."""
     if lens_type == "NFW":
         return halo_obj.NFW_Lens(
             x=np.append(selected.x, candidate_lenses.x[idx]),
@@ -141,6 +130,173 @@ def _candidate_strength(candidate_lenses, idx, lens_type, mass_scale, kappa_scal
 
 
 # ===========================================================================
+# Joint refinement of Pass 1 halos (Option A)
+# ===========================================================================
+
+_REFINE_PENALTY = 1.0e20
+
+
+def _joint_refine_pass1(
+    sources,
+    lenses,
+    use_flags,
+    lens_type,
+    lambda_sl,
+    xmax,
+    use_magnification_correction_sl: bool = False,
+    maxiter: int = None,
+    verbose: bool = False,
+):
+    """Joint refinement of Pass 1 halos under WL + λ_SL × SL.  See module docstring."""
+    from scipy.optimize import minimize
+    from arch.chi2_wrappers import update_chi2_values
+
+    n_halos = len(np.atleast_1d(lenses.x))
+    if n_halos == 0:
+        return lenses, np.inf, np.inf
+
+    if lens_type == "SIS":
+        return lenses, np.inf, np.inf
+
+    pos_bound = 1.2 * float(xmax)
+
+    chi2_before = update_chi2_values(
+        sources, lenses, use_flags, lens_type,
+        use_strong_lensing=True,
+        lambda_sl=lambda_sl,
+        use_magnification_correction_sl=use_magnification_correction_sl,
+    )
+
+    if lens_type == "NFW":
+        n_per_halo = 3
+        log_m_lo, log_m_hi = 10.0, 17.0
+        x0 = np.empty(n_per_halo * n_halos, dtype=float)
+        for i in range(n_halos):
+            x0[3 * i + 0] = float(lenses.x[i])
+            x0[3 * i + 1] = float(lenses.y[i])
+            mass_i = max(float(lenses.mass[i]), 10.0 ** log_m_lo)
+            x0[3 * i + 2] = np.log10(mass_i)
+
+        def _obj_nfw(p):
+            xs = p[0::3]; ys = p[1::3]; log_m = p[2::3]
+            if np.any(np.abs(xs) > pos_bound) or np.any(np.abs(ys) > pos_bound):
+                return _REFINE_PENALTY
+            if np.any(log_m < log_m_lo) or np.any(log_m > log_m_hi):
+                return _REFINE_PENALTY
+            test = halo_obj.NFW_Lens(
+                x=xs.copy(), y=ys.copy(),
+                z=np.zeros(n_halos),
+                concentration=np.zeros(n_halos),
+                mass=10.0 ** log_m,
+                redshift=lenses.redshift,
+                chi2=np.zeros(n_halos),
+            )
+            test.calculate_concentration()
+            return float(update_chi2_values(
+                sources, test, use_flags, lens_type,
+                use_strong_lensing=True, lambda_sl=lambda_sl,
+                use_magnification_correction_sl=use_magnification_correction_sl,
+            ))
+
+        objective = _obj_nfw
+
+    elif lens_type == "POWER_LAW":
+        n_per_halo = 4
+        log_k_lo, log_k_hi = -6.0, 1.0
+        slope_lo, slope_hi = 0.4, 1.7
+        x0 = np.empty(n_per_halo * n_halos, dtype=float)
+        for i in range(n_halos):
+            x0[4 * i + 0] = float(lenses.x[i])
+            x0[4 * i + 1] = float(lenses.y[i])
+            k_i = max(float(lenses.kappa_star[i]), 10.0 ** log_k_lo)
+            x0[4 * i + 2] = np.log10(k_i)
+            x0[4 * i + 3] = float(lenses.slope[i])
+
+        def _obj_pl(p):
+            xs = p[0::4]; ys = p[1::4]; log_k = p[2::4]; n_slope = p[3::4]
+            if np.any(np.abs(xs) > pos_bound) or np.any(np.abs(ys) > pos_bound):
+                return _REFINE_PENALTY
+            if np.any(log_k < log_k_lo) or np.any(log_k > log_k_hi):
+                return _REFINE_PENALTY
+            if np.any(n_slope < slope_lo) or np.any(n_slope > slope_hi):
+                return _REFINE_PENALTY
+            test = halo_obj.PowerLawHalo(
+                x=xs.copy(), y=ys.copy(),
+                kappa_star=10.0 ** log_k,
+                slope=n_slope.copy(),
+                theta_star=lenses.theta_star,
+                redshift=lenses.redshift,
+                chi2=np.zeros(n_halos),
+            )
+            return float(update_chi2_values(
+                sources, test, use_flags, lens_type,
+                use_strong_lensing=True, lambda_sl=lambda_sl,
+                use_magnification_correction_sl=use_magnification_correction_sl,
+            ))
+
+        objective = _obj_pl
+
+    else:
+        raise ValueError(f"Unsupported lens_type for refinement: {lens_type!r}")
+
+    n_params = n_per_halo * n_halos
+    max_it = maxiter if maxiter is not None else max(500, 200 * n_params)
+
+    try:
+        res = minimize(
+            objective, x0,
+            method="Nelder-Mead",
+            options={
+                "xatol": 1.0e-4, "fatol": 1.0e-5,
+                "maxiter": max_it, "adaptive": True,
+            },
+        )
+        chi2_after = float(res.fun)
+        best_p = np.asarray(res.x, dtype=float)
+    except Exception as e:
+        if verbose:
+            print(f"  Joint refinement failed ({type(e).__name__}: {e})")
+        return lenses, float(chi2_before), float(chi2_before)
+
+    if not np.isfinite(chi2_after) or chi2_after >= chi2_before:
+        if verbose:
+            print(f"  Refinement did not improve chi^2 "
+                  f"({chi2_before:.4f} -> {chi2_after:.4f})")
+        return lenses, float(chi2_before), float(chi2_before)
+
+    if lens_type == "NFW":
+        xs = best_p[0::3]; ys = best_p[1::3]; log_m = best_p[2::3]
+        refined = halo_obj.NFW_Lens(
+            x=xs, y=ys,
+            z=np.zeros(n_halos),
+            concentration=np.zeros(n_halos),
+            mass=10.0 ** log_m,
+            redshift=lenses.redshift,
+            chi2=np.asarray(lenses.chi2, dtype=float).copy(),
+        )
+        refined.calculate_concentration()
+    else:  # POWER_LAW
+        xs = best_p[0::4]; ys = best_p[1::4]
+        log_k = best_p[2::4]; n_slope = best_p[3::4]
+        refined = halo_obj.PowerLawHalo(
+            x=xs, y=ys,
+            kappa_star=10.0 ** log_k,
+            slope=n_slope,
+            theta_star=lenses.theta_star,
+            redshift=lenses.redshift,
+            chi2=np.asarray(lenses.chi2, dtype=float).copy(),
+        )
+
+    if verbose:
+        delta = chi2_before - chi2_after
+        print(f"  Joint Pass 1 refinement: chi^2 {chi2_before:.4f} -> "
+              f"{chi2_after:.4f}  (improvement {delta:.4f}, "
+              f"{100.0 * delta / max(chi2_before, 1e-12):.1f}%)")
+
+    return refined, float(chi2_before), float(chi2_after)
+
+
+# ===========================================================================
 # Inner greedy loop (shared by single-pass and two-pass)
 # ===========================================================================
 
@@ -158,52 +314,23 @@ def _greedy_add_pass(
     use_strong_lensing,
     lambda_sl,
     use_magnification_correction_sl: bool = True,
+    tolerance_multiplier: float = 1.0,
 ):
     """
-    Run one greedy-add pass: while remaining candidates can lower the
-    reduced chi^2 by more than the adaptive tolerance, add the best
-    one.
-
-    The initial best chi^2 is computed from `selected_lenses` under the
-    objective specified by (use_strong_lensing, lambda_sl,
-    use_magnification_correction_sl).  Starting from a non-empty
-    selection lets the two-pass driver resume after Pass 1 with the
-    new objective.
+    Run one greedy-add pass.
 
     Parameters
     ----------
-    sources : Source
-    candidate_lenses : SIS_Lens, NFW_Lens, or PowerLawHalo
-        The full candidate pool.  `remaining_indices` indexes into this.
-    selected_lenses : same type as candidate_lenses
-        Current selection (may be empty).  Will be extended by appending.
-    remaining_indices : np.ndarray of int
-        Indices into `candidate_lenses` of candidates still available
-        for selection.
-    use_flags : sequence of three bool
-    lens_type : str
-        'SIS', 'NFW', or 'POWER_LAW'.
-    base_tolerance, mass_scale, kappa_scale, exponent : adaptive-tolerance params
-    use_strong_lensing : bool
-    lambda_sl : float or None
-    use_magnification_correction_sl : bool
-        Forwarded to update_chi2_values (and through to
-        metric.calculate_total_chi2).  False is the right choice during
-        selection to keep the chi^2 metric consistent with the
-        lambda_sl calibration; True is appropriate for converged-model
-        evaluations (strength optimization).
+    tolerance_multiplier : float
+        Multiplies the adaptive tolerance for every candidate evaluation
+        in this pass.  Default 1.0 (legacy).  Higher values make
+        acceptance stricter.  Used by forward_lens_selection_two_pass
+        to apply pass2_tolerance_multiplier to Pass 2 only.
 
-    Returns
-    -------
-    selected_lenses : updated selection
-    best_reduced_chi2 : float
-    remaining_indices : np.ndarray
-        Candidates still not selected (rejected by this pass).
+    See module docstring for the full physical context.
     """
-    # Import update_chi2_values once for the inner loop.
     from arch.chi2_wrappers import update_chi2_values
 
-    # Initialise the best reduced chi^2 from the current selection.
     if len(selected_lenses.x) > 0:
         best_reduced_chi2 = update_chi2_values(
             sources, selected_lenses, use_flags, lens_type,
@@ -240,12 +367,13 @@ def _greedy_add_pass(
         best_test_chi2 = chi2_list[min_pos]
         idx_to_add = idx_list[min_pos]
 
-        # Adaptive tolerance based on the candidate's strength
         strength, scale = _candidate_strength(
             candidate_lenses, idx_to_add, lens_type, mass_scale, kappa_scale
         )
         scaled = max(strength / scale, 1.0e-12)
-        adaptive_tolerance = base_tolerance * (scaled ** exponent)
+        adaptive_tolerance = (
+            base_tolerance * float(tolerance_multiplier) * (scaled ** exponent)
+        )
 
         if best_test_chi2 < best_reduced_chi2 - adaptive_tolerance:
             selected_lenses = _append_candidate(
@@ -281,40 +409,12 @@ def forward_lens_selection(
     strong_systems=None,
     return_lambda_sl: bool = False,
     use_magnification_correction_sl: bool = False,
+    tolerance_multiplier: float = 1.0,
 ):
-    """
-    Single-pass greedy forward selection (legacy behaviour).
-
-    Strong-lensing handling differs by lens type:
-        - SIS:        Includes SL if use_strong_lensing=True and a
-                      pre-computed lambda_sl is supplied.
-        - NFW:        Same as SIS (caller's choice).
-        - POWER_LAW:  SL is FORCED OFF during the greedy loop;
-                      lambda_sl is computed once post-selection via
-                      metric._compute_lambda_sl_power_law and returned
-                      when return_lambda_sl=True.
-
-    For SL-aware selection on NFW or POWER_LAW, prefer
-    `forward_lens_selection_two_pass` — it handles the λ_SL
-    calibration and the Pass 1 / Pass 2 separation correctly.
-
-    Parameters
-    ----------
-    use_magnification_correction_sl : bool
-        Default False during selection.  See the module docstring for
-        rationale (consistency with λ_SL calibration).  Pass True
-        only if you specifically need the magnification-corrected
-        chi^2 evaluated at every candidate, which is generally NOT
-        what you want during selection.
-
-    Returns
-    -------
-    selected_lenses, best_reduced_chi2 [, lambda_sl_final if requested]
-    """
+    """Single-pass greedy forward selection (legacy behaviour)."""
     selected_lenses = _empty_lens_collection(lens_type, candidate_lenses)
     remaining_indices = np.arange(len(candidate_lenses.x))
 
-    # POWER_LAW: force WL-only during the loop, per design.
     if lens_type == "POWER_LAW":
         use_strong_lensing = False
         lambda_sl = None
@@ -325,6 +425,7 @@ def forward_lens_selection(
         use_strong_lensing=use_strong_lensing,
         lambda_sl=lambda_sl,
         use_magnification_correction_sl=use_magnification_correction_sl,
+        tolerance_multiplier=tolerance_multiplier,
     )
 
     if len(selected_lenses.x) == 0:
@@ -333,7 +434,6 @@ def forward_lens_selection(
             return None, np.inf, 0.0
         return None, np.inf
 
-    # POWER_LAW post-selection lambda
     if lens_type == "POWER_LAW":
         lambda_sl_final = metric._compute_lambda_sl_power_law(
             sources, selected_lenses, use_flags,
@@ -347,7 +447,7 @@ def forward_lens_selection(
 
 
 # ===========================================================================
-# Public two-pass selection (WL → λ_SL → WL+SL)
+# Public two-pass selection (WL → λ_SL → joint refine → WL+SL)
 # ===========================================================================
 
 def forward_lens_selection_two_pass(
@@ -361,42 +461,44 @@ def forward_lens_selection_two_pass(
     kappa_scale=0.1,
     return_diagnostics: bool = False,
     use_magnification_correction_sl: bool = False,
+    joint_refine_pass1: bool = True,
+    xmax: float = None,
+    refine_verbose: bool = False,
+    pass2_tolerance_multiplier: float = 10.0,
 ):
     """
-    Two-pass forward selection that incorporates strong-lensing
-    constraints into the selection criterion in a controlled way.
+    Two-pass forward selection with joint refinement and Pass 2 tolerance
+    multiplier.
 
-    Pass 1: WL-only greedy selection.  Identifies major mass
-            concentrations from WL evidence.
-    λ_SL:   Computed at the Pass 1 minimum via metric.compute_lambda_sl
-            (SIS/NFW) or metric._compute_lambda_sl_power_law (POWER_LAW).
-            Both helpers internally use use_magnification_correction=False
-            for the same reason this function defaults the same way
-            during Pass 2.  Frozen for Pass 2.
-    Pass 2: Greedy selection resumed on the candidates rejected by
-            Pass 1, now with the WL + λ_SL * SL objective.  Pass 1
-            halos remain in the model.
-
-    See module docstring for the physical rationale.
+    Pass 1:    WL-only greedy selection (tolerance_multiplier=1.0, legacy).
+    λ_SL:      Computed at the Pass 1 minimum.
+    Refine:    (if joint_refine_pass1=True)  Joint refinement of Pass 1
+               halos under the WL + λ_SL × SL objective.
+    Pass 2:    Greedy candidate addition under WL + λ_SL × SL, with
+               tolerance multiplied by pass2_tolerance_multiplier.
 
     Parameters
     ----------
-    sources : Source
-        Must have `strong_systems` attached for Pass 2 to have any
-        effect (otherwise behaves as single-pass WL).
-    candidate_lenses, use_flags, lens_type, base_tolerance, mass_scale,
-    exponent, kappa_scale : same as forward_lens_selection.
+    sources, candidate_lenses, use_flags, lens_type, base_tolerance,
+    mass_scale, exponent, kappa_scale : as in forward_lens_selection.
     return_diagnostics : bool
         If True, return (lenses, chi2, lambda_sl, diagnostics_dict).
     use_magnification_correction_sl : bool
-        Default False.  Controls how chi^2_SL is computed during the
-        candidate evaluations of BOTH passes.  False keeps the
-        selection chi^2 consistent with the λ_SL calibration; True
-        would inflate chi^2_SL by 100-10,000x near critical curves
-        and break the greedy monotonicity assumption (this was the
-        cause of the runaway behavior observed on real Abell 2744
-        data, where Pass 2 added 21 halos that drove the joint
-        reduced chi^2 from ~16 to 2824).
+        Default False.  Forwarded to selection and refinement.
+    joint_refine_pass1 : bool
+        Default True.  When True, joint refinement runs between λ_SL
+        computation and Pass 2.
+    xmax : float or None
+        Position-bound half-width for joint refinement.  If None,
+        derived from sources.
+    refine_verbose : bool
+        If True, print refinement chi^2 progress.
+    pass2_tolerance_multiplier : float
+        Default 10.0.  Multiplies the adaptive tolerance during Pass 2
+        only.  Pass 1 keeps the legacy multiplier of 1.0.  Higher values
+        suppress marginal Pass 2 additions; set to 1.0 to recover the
+        previous (pre-multiplier) two-pass behavior.  See module
+        docstring for the physical rationale.
 
     Returns
     -------
@@ -406,13 +508,14 @@ def forward_lens_selection_two_pass(
     selected_lenses = _empty_lens_collection(lens_type, candidate_lenses)
     remaining_indices = np.arange(len(candidate_lenses.x))
 
-    # ── Pass 1: WL-only ──
+    # ── Pass 1: WL-only (legacy tolerance) ──
     selected_lenses, chi2_pass1, remaining_indices = _greedy_add_pass(
         sources, candidate_lenses, selected_lenses, remaining_indices,
         use_flags, lens_type, base_tolerance, mass_scale, kappa_scale, exponent,
         use_strong_lensing=False,
         lambda_sl=None,
         use_magnification_correction_sl=use_magnification_correction_sl,
+        tolerance_multiplier=1.0,
     )
 
     n_pass1 = len(selected_lenses.x)
@@ -425,6 +528,11 @@ def forward_lens_selection_two_pass(
             "chi2_pass1": np.inf, "chi2_final": np.inf,
             "n_remaining_after_pass1": int(len(remaining_indices)),
             "use_magnification_correction_sl": bool(use_magnification_correction_sl),
+            "joint_refine_pass1": bool(joint_refine_pass1),
+            "chi2_refine_before": np.inf,
+            "chi2_refine_after": np.inf,
+            "refine_applied": False,
+            "pass2_tolerance_multiplier": float(pass2_tolerance_multiplier),
         }
         if return_diagnostics:
             return None, np.inf, 0.0, diag
@@ -438,13 +546,17 @@ def forward_lens_selection_two_pass(
     )
 
     if not has_sl:
-        # No SL data → Pass 2 has nothing to add.  Return as if single-pass.
         diag = {
             "n_pass1": n_pass1, "n_pass2_added": 0,
             "lambda_sl": 0.0,
             "chi2_pass1": float(chi2_pass1), "chi2_final": float(chi2_pass1),
             "n_remaining_after_pass1": int(len(remaining_indices)),
             "use_magnification_correction_sl": bool(use_magnification_correction_sl),
+            "joint_refine_pass1": bool(joint_refine_pass1),
+            "chi2_refine_before": float(chi2_pass1),
+            "chi2_refine_after": float(chi2_pass1),
+            "refine_applied": False,
+            "pass2_tolerance_multiplier": float(pass2_tolerance_multiplier),
         }
         if return_diagnostics:
             return selected_lenses, chi2_pass1, 0.0, diag
@@ -460,13 +572,34 @@ def forward_lens_selection_two_pass(
             sources, selected_lenses, use_flags, lens_type=lens_type,
         )
 
-    # ── Pass 2: WL + λ_SL on remaining candidates ──
+    # ── Joint refinement of Pass 1 (Option A) ──
+    chi2_refine_before = float("inf")
+    chi2_refine_after = float("inf")
+    refine_applied = False
+
+    if joint_refine_pass1 and lens_type != "SIS":
+        if xmax is None:
+            xmax = float(np.max(np.hypot(
+                np.atleast_1d(sources.x),
+                np.atleast_1d(sources.y),
+            )))
+        selected_lenses, chi2_refine_before, chi2_refine_after = _joint_refine_pass1(
+            sources, selected_lenses, use_flags, lens_type,
+            lambda_sl=lambda_sl,
+            xmax=xmax,
+            use_magnification_correction_sl=use_magnification_correction_sl,
+            verbose=refine_verbose,
+        )
+        refine_applied = chi2_refine_after < chi2_refine_before
+
+    # ── Pass 2: WL + λ_SL on remaining candidates, with tolerance multiplier ──
     selected_lenses, chi2_final, remaining_indices = _greedy_add_pass(
         sources, candidate_lenses, selected_lenses, remaining_indices,
         use_flags, lens_type, base_tolerance, mass_scale, kappa_scale, exponent,
         use_strong_lensing=True,
         lambda_sl=lambda_sl,
         use_magnification_correction_sl=use_magnification_correction_sl,
+        tolerance_multiplier=pass2_tolerance_multiplier,
     )
 
     n_pass2_added = len(selected_lenses.x) - n_pass1
@@ -479,6 +612,11 @@ def forward_lens_selection_two_pass(
         "chi2_final": float(chi2_final),
         "n_remaining_after_pass1": int(len(remaining_indices) + n_pass2_added),
         "use_magnification_correction_sl": bool(use_magnification_correction_sl),
+        "joint_refine_pass1": bool(joint_refine_pass1),
+        "chi2_refine_before": float(chi2_refine_before),
+        "chi2_refine_after": float(chi2_refine_after),
+        "refine_applied": bool(refine_applied),
+        "pass2_tolerance_multiplier": float(pass2_tolerance_multiplier),
     }
 
     if return_diagnostics:

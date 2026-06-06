@@ -13,6 +13,8 @@ def fit_lensing_field(
     z_lens=0.5,
     use_strong_lensing: bool = False,
     use_sl_in_selection: bool = False,
+    joint_refine_pass1: bool = True,
+    pass2_tolerance_multiplier: float = 10.0,
 ):
     """
     Reconstructs the gravitational lensing field based on observed
@@ -21,8 +23,6 @@ def fit_lensing_field(
     Parameters
     ----------
     sources : Source
-        Source catalog.  If ``use_strong_lensing`` is True,
-        ``sources.strong_systems`` must be populated.
     xmax : float
         Maximum field radius for lens consideration (arcsec).
     flags : bool
@@ -36,15 +36,19 @@ def fit_lensing_field(
         Lens redshift.  Default 0.5.
     use_strong_lensing : bool
         Include multiply-imaged systems from ``sources.strong_systems``
-        in the post-selection objective (merging and strength
-        optimization).  Default False.
+        in the post-selection objective.  Default False.
     use_sl_in_selection : bool
-        Use strong-lensing information during forward selection via a
-        two-pass scheme (Pass 1 WL-only, Pass 2 WL+λ_SL on rejected
-        candidates).  Default False to preserve legacy single-pass
-        behaviour; recommended True for NFW and POWER_LAW when
-        ``use_strong_lensing=True`` AND ``sources.strong_systems`` is
-        populated.  Has no effect when use_strong_lensing is False.
+        Use strong-lensing information during forward selection via the
+        two-pass scheme.  Default False.
+    joint_refine_pass1 : bool
+        Default True.  When two-pass is active, run joint refinement of
+        Pass 1 halos between λ_SL computation and Pass 2.
+    pass2_tolerance_multiplier : float
+        Default 10.0.  Multiplies the adaptive tolerance during Pass 2
+        of two-pass selection only, suppressing marginal additions.
+        Higher values are stricter.  Set to 1.0 to recover the pre-
+        multiplier behavior.  See forward_selection module docstring
+        for the physical rationale.
 
     Returns
     -------
@@ -52,54 +56,27 @@ def fit_lensing_field(
 
     Notes
     -----
-    Two-pass selection rationale:
-        The original SL-in-selection attempt (with λ_SL computed from
-        the initial guess and active during single-pass selection)
-        degraded NFW mass recovery from 58% to 23% on the Abell 2744
-        scenario.  The cause was a poorly-calibrated λ_SL combined
-        with the high curvature of χ²_SL near the correct solution,
-        which broke the greedy-monotonicity assumption.
+    Pass 2 tolerance multiplier rationale:
+        The base adaptive tolerance scales inversely with candidate
+        strength: tau ~ base / strength.  A 10^16 M_sun candidate has
+        tau ~ 3e-6, so any nonzero chi^2 improvement passes.  That's
+        correct for WL where a massive halo touches many sources, but
+        problematic for Pass 2 with SL active: a distant massive halo
+        still contributes ~1/r to alpha at SL image positions, so
+        small SL chi^2 improvements get rewarded as "easy" because
+        the halo is large.
 
-        The two-pass scheme calibrates λ_SL at the Pass 1 minimum
-        (where deflections are physical and the slope uncertainty is
-        small) and resumes selection only on candidates that Pass 1
-        rejected.  These are typically the small/peripheral candidates
-        that WL alone couldn't justify, but which SL geometry may
-        require — substructure halos near critical curves, mass-sheet
-        calibration shifts, etc.  Pass 2 cannot remove Pass 1 halos;
-        backward elimination is a future extension.
+        On A2744 NFW, pass2_tolerance_multiplier=1.0 (legacy) admitted
+        a 1.14e16 M_sun halo at (139, 102) — 73 arcsec northeast of
+        the refined Pass 1 halo and far outside the SL field — that
+        contributed 78% of the recovered total mass but added negligible
+        physical information.  pass2_tolerance_multiplier=10.0 makes
+        Pass 2 require 10x larger chi^2 improvement per addition,
+        suppressing this failure mode.
 
-    Magnification-correction convention:
-        chi^2_SL during forward selection and the post-selection
-        "After Forward Selection" log step is computed with
-        use_magnification_correction_sl=False.  This matches the
-        convention used by metric.compute_lambda_sl to calibrate
-        λ_SL.  Subsequent steps (merging, strength optimization) use
-        the full magnification-corrected chi^2_SL.
-
-        See arch.forward_selection module docstring for the physical
-        rationale: applying the magnification correction during
-        selection inflates chi^2_SL by 100-10,000x near critical
-        curves, breaks the greedy monotonicity assumption, and drives
-        runaway candidate addition (observed on real Abell 2744
-        POWER_LAW data, where Pass 2 added 21 halos that pushed the
-        joint reduced chi^2 from ~16 to 2824).
-
-    SL convention (NFW and POWER_LAW), single-pass mode:
-        lambda_sl is computed AFTER forward selection on the post-
-        selection lens model where the SL χ² is well-defined.  Frozen
-        through merging and strength optimization.
-
-    SL convention (NFW and POWER_LAW), two-pass mode:
-        Same as single-pass but λ_SL is computed AFTER Pass 1 (not
-        AFTER all selection), and is also used during Pass 2.  Frozen
-        for merging and strength optimization downstream.
-
-    SIS convention:
-        Pre-computation via metric.compute_lambda_sl is retained for
-        SIS to preserve legacy behavior on the (rarely-used) SIS path.
-        SIS does NOT yet have two-pass support — pass
-        use_sl_in_selection=False for SIS.
+    See arch.forward_selection module docstring for the full two-pass
+    rationale (magnification-correction handling, joint refinement,
+    etc.).
     """
     if use_flags is None:
         use_flags = [True, True, True]
@@ -145,33 +122,42 @@ def fit_lensing_field(
     log_step("After Filtering:", lenses, reduced_chi2)
 
     # ── Step 4: Forward selection ──
-    # Track whether the post-selection chi^2 should be reported with
-    # the magnification correction off (consistent with the chi^2 the
-    # selection actually minimised) or on (the converged-model chi^2).
-    # For the two-pass branch, report without — same convention as
-    # selection.  For all other branches, default True.
     post_select_use_mag = True
 
     if use_strong_lensing and lens_type in ("NFW", "POWER_LAW") and use_sl_in_selection:
-        # ── Two-pass path: WL → λ_SL → WL+SL ──
-        # use_magnification_correction_sl=False inside Pass 2 (and the
-        # Pass 1 cost calculation) is the default, set in
-        # forward_lens_selection_two_pass.
+        # ── Two-pass path: WL → λ_SL → joint refine → WL+SL ──
         lenses, _, lambda_sl, diag = pipeline.forward_lens_selection_two_pass(
             sources, lenses, use_flags, lens_type,
             return_diagnostics=True,
+            joint_refine_pass1=joint_refine_pass1,
+            xmax=xmax,
+            refine_verbose=flags,
+            pass2_tolerance_multiplier=pass2_tolerance_multiplier,
         )
-        post_select_use_mag = False  # report-consistent chi^2
+        post_select_use_mag = False
         if flags:
+            refine_note = ""
+            if diag["joint_refine_pass1"]:
+                if diag["refine_applied"]:
+                    delta = diag["chi2_refine_before"] - diag["chi2_refine_after"]
+                    refine_note = (
+                        f", refine: chi^2 {diag['chi2_refine_before']:.3f} -> "
+                        f"{diag['chi2_refine_after']:.3f} "
+                        f"(-{100.0 * delta / max(diag['chi2_refine_before'], 1e-12):.1f}%)"
+                    )
+                else:
+                    refine_note = ", refine: skipped (no improvement)"
             print(
-                f"Two-pass selection:  pass1={diag['n_pass1']} halos, "
-                f"pass2 added {diag['n_pass2_added']}, "
+                f"Two-pass selection:  pass1={diag['n_pass1']} halos"
+                f"{refine_note}, "
+                f"pass2 added {diag['n_pass2_added']} "
+                f"(tol_mult={diag['pass2_tolerance_multiplier']:.1f}), "
                 f"lambda_sl={diag['lambda_sl']:.6f}, "
-                f"chi2: {diag['chi2_pass1']:.3f} -> {diag['chi2_final']:.3f}"
+                f"final chi^2={diag['chi2_final']:.3f}"
             )
 
     elif use_strong_lensing and lens_type in ("NFW", "POWER_LAW"):
-        # ── Single-pass path (legacy): WL-only selection, then compute λ_SL ──
+        # ── Single-pass path (legacy) ──
         if lens_type == "POWER_LAW":
             selected, _, lambda_sl_post = pipeline.forward_lens_selection(
                 sources, lenses, use_flags, lens_type,
@@ -198,7 +184,6 @@ def fit_lensing_field(
                 f"{(lambda_sl if lambda_sl is not None else 0.0):.6f}"
             )
     else:
-        # SIS path with pre-computed lambda_sl, or WL-only run
         lenses, _ = pipeline.forward_lens_selection(
             sources, lenses, use_flags, lens_type,
             use_strong_lensing=use_strong_lensing,
