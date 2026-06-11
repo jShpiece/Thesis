@@ -127,7 +127,7 @@ def optimize_lens_strength(
         # the formal (0.05, 1.95) power-law range to exclude the
         # near-uniform-sheet (n -> 0) and near-singular (n -> 2) limits.
         LOG10_K_LO, LOG10_K_HI = -6.0, 1.0
-        N_LO, N_HI = 0.4, 1.7
+        N_LO, N_HI = 0.1, 1.7
 
         guess = np.empty(2 * N_h)
         bounds = []
