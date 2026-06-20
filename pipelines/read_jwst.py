@@ -27,8 +27,7 @@ plt.style.use('scientific_presentation.mplstyle')
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-# Redshifts
-hubble_param = 0.67  # Hubble constant
+hubble_param = COSMO.H0.value / 100.0  # h = H0 / 100 km/s/Mpc
 
 
 def unpack_and_run_jackknife(args):
@@ -59,13 +58,13 @@ def jackknife_worker(i, self_obj, sources):
         return [
             [i, x, y, m, c]
             for x, y, m, c in zip(lenses.x, lenses.y,
-                                  lenses.mass, lenses.concentration)
+                                lenses.mass, lenses.concentration)
         ]
     elif self_obj.lens_type == 'POWER_LAW':
         return [
             [i, x, y, k, n]
             for x, y, k, n in zip(lenses.x, lenses.y,
-                                  lenses.kappa_star, lenses.slope)
+                                lenses.kappa_star, lenses.slope)
         ]
     else:
         raise ValueError(f"Unsupported lens_type for jackknife: {self_obj.lens_type}")
@@ -86,7 +85,7 @@ class JWSTPipeline:
     Strong-lensing handling (when strong_lensing_catalog_path is set):
         use_sl_in_selection=True (default): two-pass forward selection
             (Pass 1 WL-only → compute λ_SL at the Pass 1 minimum →
-             Pass 2 WL+λ_SL on rejected candidates).
+            Pass 2 WL+λ_SL on rejected candidates).
         use_sl_in_selection=False: legacy single-pass WL selection
             with post-selection λ_SL applied only to merging and
             strength optimization.
@@ -124,9 +123,7 @@ class JWSTPipeline:
                 f"Must be 'NFW' or 'POWER_LAW'.")
 
         # Per-mode output subdirectory: Output/JWST/<cluster>/NFW/ or
-        # .../POWER_LAW/.  Created here so the rest of the pipeline can
-        # write into it without further mkdir calls.  Ellipticity outputs
-        # live in a sibling Ellipticity/ directory under the same parent.
+        # .../POWER_LAW/.  
         self.mode_dir = self.output_dir / self.lens_type
         self.mode_dir.mkdir(parents=True, exist_ok=True)
 
@@ -246,7 +243,7 @@ class JWSTPipeline:
             with concurrent.futures.ProcessPoolExecutor() as executor:
                 for result in tqdm.tqdm(
                     executor.map(unpack_and_run_jackknife, args_list,
-                                 chunksize=3),
+                                chunksize=3),
                     total=len(indices_to_use),
                     desc=f"Computing error bars ({self.lens_type})"
                 ):
@@ -306,7 +303,7 @@ class JWSTPipeline:
         self.chi2 = self.chi2[~bad_indices]
 
         print(f"Filtered flexion catalog to {len(self.IDs)} entries "
-              f"after applying updated cuts.")
+            f"after applying updated cuts.")
 
     def match_sources(self):
         label_to_index = {label: idx for idx, label in enumerate(self.labels)}
@@ -318,7 +315,7 @@ class JWSTPipeline:
                 yc_list.append(self.y_centroids[idx])
             else:
                 warnings.warn(f"ID '{ID}' not found in source catalog. "
-                              f"Assigning NaN.")
+                            f"Assigning NaN.")
                 xc_list.append(np.nan)
                 yc_list.append(np.nan)
         self.xc = np.array(xc_list) * self.CDELT
@@ -394,87 +391,11 @@ class JWSTPipeline:
             keep_locations=self.sl_keep_locations,
             require_zspec=True,
         )
-        print_sl_summary(systems, diag,
-                         header_text=f"SL catalog ({self.cluster_name})")
+        # print_sl_summary(systems, diag, header_text=f"SL catalog ({self.cluster_name})")
 
         # Attach to Source so fit_lensing_field can find them
         self.sources.strong_systems = systems
 
-        # Coordinate-alignment sanity check.  Print the spatial overlap
-        # between the WL source distribution and the SL image positions.
-        # If they don't overlap (e.g., misaligned by tens of arcsec),
-        # the SL constraints will pull the recovered halos away from
-        # the actual cluster center and inflate masses to match — a
-        # silent failure mode that's hard to diagnose post-hoc.
-        self._print_sl_alignment_check(systems)
-
-    def _print_sl_alignment_check(self, systems):
-        """
-        Diagnostic printout of WL vs SL spatial extent in the centered
-        frame.  If SL positions don't overlap WL sources, the fit will
-        be wrong; this prints the ranges so you can verify visually.
-        """
-        if not systems:
-            return
-
-        wl_x = np.asarray(self.sources.x)
-        wl_y = np.asarray(self.sources.y)
-        sl_x = np.concatenate([np.atleast_1d(s.theta_x) for s in systems])
-        sl_y = np.concatenate([np.atleast_1d(s.theta_y) for s in systems])
-
-        # WL field extent (already centroid-subtracted)
-        wl_xmin, wl_xmax = float(wl_x.min()), float(wl_x.max())
-        wl_ymin, wl_ymax = float(wl_y.min()), float(wl_y.max())
-        sl_xmin, sl_xmax = float(sl_x.min()), float(sl_x.max())
-        sl_ymin, sl_ymax = float(sl_y.min()), float(sl_y.max())
-
-        # Compute centroid offset between SL and WL
-        wl_cx, wl_cy = float(wl_x.mean()), float(wl_y.mean())
-        sl_cx, sl_cy = float(sl_x.mean()), float(sl_y.mean())
-        offset = np.hypot(sl_cx - wl_cx, sl_cy - wl_cy)
-
-        # SL image fraction within WL extent
-        in_field = ((sl_x >= wl_xmin) & (sl_x <= wl_xmax)
-                    & (sl_y >= wl_ymin) & (sl_y <= wl_ymax))
-        n_in_field = int(in_field.sum())
-        n_total = sl_x.size
-
-        print(f"\n=== Coordinate alignment check ({self.cluster_name}) ===")
-        print(f"  WL source extent (arcsec): "
-              f"x=[{wl_xmin:+7.1f}, {wl_xmax:+7.1f}], "
-              f"y=[{wl_ymin:+7.1f}, {wl_ymax:+7.1f}]")
-        print(f"  SL image extent  (arcsec): "
-              f"x=[{sl_xmin:+7.1f}, {sl_xmax:+7.1f}], "
-              f"y=[{sl_ymin:+7.1f}, {sl_ymax:+7.1f}]")
-        print(f"  WL centroid: ({wl_cx:+.2f}, {wl_cy:+.2f})  (should be ~ 0,0)")
-        print(f"  SL centroid: ({sl_cx:+.2f}, {sl_cy:+.2f})")
-        print(f"  Centroid offset: {offset:.1f} arcsec")
-        print(f"  SL images inside WL field: {n_in_field}/{n_total} "
-              f"({100 * n_in_field / n_total:.0f}%)")
-
-        # Diagnose alignment status.  Two failure modes:
-        #   1. Few SL images inside WL field (< 50%): genuine
-        #      coordinate misalignment.
-        #   2. Most SL images in field but centroid offset is large:
-        #      could be either misalignment OR a real cluster offset
-        #      (the WL source-distribution centroid does NOT have to
-        #      coincide with the cluster mass centroid; sources are
-        #      background galaxies whose distribution depends on
-        #      photometric depth, not cluster mass).
-        if n_in_field < 0.5 * n_total:
-            print(f"  *** WARNING: < 50% of SL images fall within the "
-                  f"WL source field.  Likely coordinate misalignment.  "
-                  f"Check the FITS WCS or sl_wl_reference_radec.")
-        elif offset > 30.0:
-            print(f"  Note: SL centroid is offset {offset:.0f} arcsec "
-                  f"from the WL source centroid, but {100*n_in_field/n_total:.0f}% "
-                  f"of SL images sit inside the WL field.  This is "
-                  f"normal — the WL source centroid is set by photometric "
-                  f"depth, not cluster mass, and the cluster's actual "
-                  f"BCG/mass center can sit several tens of arcsec from "
-                  f"the source-distribution centroid.")
-        else:
-            print(f"  Alignment looks reasonable.")
 
     # ------------------------------------------------------------------
     # Lens fitting — dispatches by lens_type
@@ -494,8 +415,6 @@ class JWSTPipeline:
             # main.fit_lensing_field as currently shipped does not accept
             # theta_star; the pipeline branches on lens_type internally
             # and uses the default 30" pivot from generate_initial_guess.
-            # If you've extended fit_lensing_field to take theta_star,
-            # uncomment the kwarg.
             self.lenses, _ = main.fit_lensing_field(
                 self.sources, xmax, flags=flags, use_flags=self.use_flags,
                 lens_type='POWER_LAW', z_lens=self.z_cluster,
@@ -515,7 +434,7 @@ class JWSTPipeline:
         self.sources.x += self.centroid_x
         self.sources.y += self.centroid_y
 
-        # NFW-only post-processing: convert mass to h^-1 M_sun
+        # NFW post-processing: convert mass to h^-1 M_sun
         if self.lens_type == 'NFW':
             self.lenses.mass *= hubble_param
 
@@ -539,13 +458,13 @@ class JWSTPipeline:
         if self.lens_type == 'NFW':
             print(f"\n  NFW fit summary ({self.lenses.x.size} halos):")
             print(f"  {'idx':>3} {'x':>8} {'y':>8} "
-                  f"{'mass':>13} {'conc':>6}")
+                f"{'mass':>13} {'conc':>6}")
             print("  " + "-" * 50)
             for i in range(self.lenses.x.size):
                 print(f"  {i:>3d} "
-                      f"{self.lenses.x[i]:>8.2f} {self.lenses.y[i]:>8.2f} "
-                      f"{self.lenses.mass[i]:>13.3e} "
-                      f"{self.lenses.concentration[i]:>6.2f}")
+                    f"{self.lenses.x[i]:>8.2f} {self.lenses.y[i]:>8.2f} "
+                    f"{self.lenses.mass[i]:>13.3e} "
+                    f"{self.lenses.concentration[i]:>6.2f}")
             print(f"  Sum mass: {np.nansum(self.lenses.mass):.3e} M_sun")
 
         elif self.lens_type == 'POWER_LAW':
@@ -580,10 +499,12 @@ class JWSTPipeline:
                 float(self.lenses.calc_mass_2d(theta_ref, self.z_source)[i])
                 for i in range(self.lenses.x.size)
             ])
+            # Convert M_ref_arr to h^-1 M_sun for easier comparison to NFW masses
+            M_ref_arr *= hubble_param
 
             print(f"\n  POWER_LAW fit summary ({self.lenses.x.size} halos):")
             print(f"  {'idx':>3} {'x':>8} {'y':>8} {'kappa*':>8} "
-                  f"{'n':>6} {'theta_E':>10} {'M(<250kpc)':>13}  flag")
+                f"{'n':>6} {'theta_E':>10} {'M(<250kpc)':>13}  flag")
             print("  " + "-" * 75)
             for i in range(self.lenses.x.size):
                 flags = []
@@ -593,19 +514,19 @@ class JWSTPipeline:
                     flags.append("n_pinned")
                 flag_str = "+".join(flags) if flags else ""
                 print(f"  {i:>3d} "
-                      f"{self.lenses.x[i]:>8.2f} {self.lenses.y[i]:>8.2f} "
-                      f"{self.lenses.kappa_star[i]:>8.4f} "
-                      f"{self.lenses.slope[i]:>6.3f} "
-                      f"{theta_E_arr[i]:>9.2f}\" "
-                      f"{M_ref_arr[i]:>13.3e}  {flag_str}")
+                    f"{self.lenses.x[i]:>8.2f} {self.lenses.y[i]:>8.2f} "
+                    f"{self.lenses.kappa_star[i]:>8.4f} "
+                    f"{self.lenses.slope[i]:>6.3f} "
+                    f"{theta_E_arr[i]:>9.2f}\" "
+                    f"{M_ref_arr[i]:>13.3e}  {flag_str}")
             print("  " + "-" * 75)
             print(f"  Total: kappa_star pinned: {int(k_pinned.sum())}/{self.lenses.x.size}, "
-                  f"slope pinned: {int(n_pinned.sum())}/{self.lenses.x.size}")
+                f"slope pinned: {int(n_pinned.sum())}/{self.lenses.x.size}")
             print(f"  Median: kappa_star = {np.median(self.lenses.kappa_star):.4f}, "
-                  f"slope = {np.median(self.lenses.slope):.3f}, "
-                  f"theta_E = {np.median(theta_E_arr):.2f}\"")
+                f"slope = {np.median(self.lenses.slope):.3f}, "
+                f"theta_E = {np.median(theta_E_arr):.2f}\"")
             print(f"  Sum M(<{ref_radius_kpc:.0f}kpc): "
-                  f"{np.nansum(M_ref_arr):.3e} M_sun")
+                f"{np.nansum(M_ref_arr):.3e} h^-1 M_sun")
 
     # ------------------------------------------------------------------
     # Plotting
@@ -677,9 +598,9 @@ class JWSTPipeline:
                     ha="center", va="bottom", fontsize=8)
 
         def _plot_single_panel(img_data, img_extent, X, Y, kappa, levels,
-                               peaks, title, sum_mass_hinv,
-                               z_lens=None, smooth_sigma=1.0,
-                               save_pdf_path=None, cluster_name=None):
+                            peaks, title, sum_mass_hinv,
+                            z_lens=None, smooth_sigma=1.0,
+                            save_pdf_path=None, cluster_name=None):
 
             def _rotate_cw90_panel(img_data, img_extent, X, Y, kappa, peaks=None):
                 xmin, xmax, ymin, ymax = img_extent
@@ -694,7 +615,7 @@ class JWSTPipeline:
                 return img_r, extent_r, X_r, Y_r, kappa_r, peaks_r
 
             kappa_disp = (gaussian_filter(kappa, smooth_sigma)
-                          if smooth_sigma else kappa)
+                        if smooth_sigma else kappa)
 
             if cluster_name == "EL_GORDO":
                 img_data, img_extent, X, Y, kappa_disp, peaks = _rotate_cw90_panel(
@@ -703,22 +624,22 @@ class JWSTPipeline:
             fig, ax = plt.subplots(figsize=(4.8, 4.9), dpi=600)
 
             norm = ImageNormalize(img_data,
-                                  vmin=np.percentile(img_data, 1),
-                                  vmax=np.percentile(img_data, 99.7),
-                                  stretch=LogStretch())
+                                vmin=np.percentile(img_data, 1),
+                                vmax=np.percentile(img_data, 99.7),
+                                stretch=LogStretch())
             ax.imshow(img_data, cmap="gray_r", origin="lower",
-                      extent=img_extent, norm=norm)
+                    extent=img_extent, norm=norm)
 
             try:
                 ax.contour(X, Y, kappa_disp, levels=levels,
-                           colors='C1', linewidths=1.1)
+                        colors='C1', linewidths=1.1)
             except Exception:
                 kmax = np.nanmax(kappa_disp)
                 lvls = ([0.3 * kmax, 0.6 * kmax]
                         if np.isfinite(kmax) and kmax > 0
                         else [0.02, 0.04])
                 ax.contour(X, Y, kappa_disp, levels=lvls,
-                           colors='C1', linewidths=1.1)
+                        colors='C1', linewidths=1.1)
 
             if peaks:
                 for i, (px, py) in enumerate(peaks, start=1):
@@ -734,11 +655,11 @@ class JWSTPipeline:
             ax.set_ylabel("Dec offset (arcsec)")
 
             lv_str = (", ".join([f"{lv:.2f}" for lv in levels[:5]])
-                      + ("…" if len(levels) > 5 else ""))
+                    + ("…" if len(levels) > 5 else ""))
             ax.text(0.02, 0.98, rf"$\kappa$ levels: {lv_str}",
                     transform=ax.transAxes, ha="left", va="top", fontsize=8,
                     bbox=dict(boxstyle='round,pad=0.2',
-                              fc='white', ec='0.2', lw=0.8))
+                            fc='white', ec='0.2', lw=0.8))
 
             _draw_compass_and_scalebar(ax, img_extent, z_lens=z_lens)
 
@@ -849,18 +770,18 @@ class JWSTPipeline:
             total_mass_hinv = float(np.nansum(
                 getattr(self.lenses, "mass", np.array([np.nan]))))
             title_main = (rf"{self.cluster_name}: JWST {sl_label} Reconstruction "
-                          rf"(NFW, {self.signal_choice})")
+                        rf"(NFW, {self.signal_choice})")
         else:  # POWER_LAW
             total_mass_hinv = np.nan
             slope_med = float(np.median(getattr(self.lenses, "slope",
                                                 np.array([np.nan]))))
             title_main = (rf"{self.cluster_name}: JWST {sl_label} Reconstruction "
-                          rf"(power-law, $\langle n\rangle={slope_med:.2f}$, "
-                          rf"{self.signal_choice})")
+                        rf"(power-law, $\langle n\rangle={slope_med:.2f}$, "
+                        rf"{self.signal_choice})")
 
         save_main = (self.mode_dir
-                     / f"{self.cluster_name}_clu_{self.signal_choice}"
-                     f"_{self.lens_type}_{self.sl_suffix}.pdf")
+                    / f"{self.cluster_name}_clu_{self.signal_choice}"
+                    f"_{self.lens_type}_{self.sl_suffix}.pdf")
 
         _plot_single_panel(
             img_data=img_data, img_extent=img_extent,
@@ -874,9 +795,9 @@ class JWSTPipeline:
         utils.compare_mass_estimates(
             self.lenses,
             self.mode_dir / (f"mass_{self.cluster_name}"
-                             f"_{self.signal_choice}"
-                             f"_{self.lens_type}"
-                             f"_{self.sl_suffix}.pdf"),
+                            f"_{self.signal_choice}"
+                            f"_{self.lens_type}"
+                            f"_{self.sl_suffix}.pdf"),
             f"Mass Comparison: {self.cluster_name} "
             f"({self.lens_type}, {sl_label}, signals: {self.signal_choice})",
             self.cluster_name,
@@ -1029,7 +950,7 @@ VALID_ACTIONS = ['fit', 'visualize', 'errorbars']
 
 
 def _build_config(cluster_name, signal, theta_star, repo_root,
-                  use_strong_lensing=True, use_sl_in_selection=True):
+                use_strong_lensing=True, use_sl_in_selection=True):
     """Construct a JWSTPipeline config dict for a (cluster, signal) pair.
 
     Strong lensing is enabled when (a) the cluster has a SL catalog
@@ -1198,14 +1119,14 @@ def main_cli():
     print(f"  strong-lensing: {'enabled' if use_strong_lensing else 'DISABLED'}")
     if use_strong_lensing:
         print(f"  selection   : "
-              f"{'two-pass (WL → λ_SL → WL+SL)' if use_sl_in_selection else 'single-pass (legacy)'}")
+            f"{'two-pass (WL → λ_SL → WL+SL)' if use_sl_in_selection else 'single-pass (legacy)'}")
     print(f"  total jobs : {n_jobs}")
     print()
 
     for cluster_name in clusters:
         for signal in signals:
             print(f"\n--- {cluster_name} / signal={signal} / "
-                  f"mode={args.mode} / action={args.action} ---")
+                f"mode={args.mode} / action={args.action} ---")
             cfg = _build_config(cluster_name, signal,
                                 args.theta_star, repo_root,
                                 use_strong_lensing=use_strong_lensing,

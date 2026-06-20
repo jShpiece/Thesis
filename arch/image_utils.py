@@ -11,6 +11,7 @@ import arch.halo_obj as halo_obj
 from arch.cosmology import critical_surface_density
 from arch.nfw_lensing import nfw_projected_mass
 
+hubble_param = cosmo.H0.value / 100.0  # h = H0 / 100 km/s/Mpc
 
 def CIC_2d(fsize, npixels, xpos, ypos, signal_values):
     """
@@ -262,7 +263,6 @@ def estimate_mass_sheet_factor(kappa):
     k = 1 / (1 - mean_edge_kappa)
     return k
 
-
 def mass_sheet_transformation(kappa, k):
     """
     Applies the mass-sheet transformation to a convergence map.
@@ -276,62 +276,102 @@ def mass_sheet_transformation(kappa, k):
     """
     return k * kappa + (1 - k)
 
-
 def compare_mass_estimates(
-    halos, plot_name, plot_title, cluster_name="Abell_2744", lens_type="NFW"
+    halos,
+    plot_name,
+    plot_title,
+    cluster_name="ABELL_2744",
+    lens_type="NFW",
+    mass_err=None,
+    y_range=None,
+    show_title=False,
 ):
     """
-    Compares the cluster-level mass reconstruction to literature
-    estimates for Abell 2744 or El Gordo.
+    Compare the ARCH cluster-level mass reconstruction to literature
+    estimates, as cumulative projected mass M(<r) versus distance from
+    the mass-weighted core centroid.  Supports both NFW and POWER_LAW
+    lens types and both clusters (Abell 2744, El Gordo).
 
-    Supports both NFW and POWER_LAW lens types via the `lens_type`
-    parameter.  The workflow is identical for both:
+    UNITS
+    -----
+    For ABELL_2744 the literature values have been verified against the
+    source papers and converted to a single, consistent unit system,
+    h^-1 M_sun (h = 0.7):
 
-        1. For each halo, compute its convergence (kappa) contribution
-           on a 2D kpc grid centered on the cluster's mass-weighted
-           centroid.  This uses `nfw_projected_mass(return_2d=True)`
-           or `power_law_projected_mass(return_2d=True)` accordingly.
-        2. Sum kappa across halos and apply a cluster-specific mass-
-           sheet transformation (k=2 by literature convention).
-        3. Convert kappa -> Sigma -> M_2D per pixel, then compute the
-           cumulative aperture mass M(<r) by summing pixels within r.
-        4. Overlay literature mass estimates (mass, radius) on the
-           cumulative-mass plot for direct comparison.
+      Merten+2011        : 2.24e14 M_sun  -> *0.7 = 1.568e14  r = 250 kpc  (core total)
+      GRALE (Sebesta+18) : 2.25e14 M_sun  -> *0.7 = 1.575e14  r = 250 kpc  (core total)
+      MARS (Cha+2024)    : 1.73e14 M_sun  -> *0.7 = 1.211e14  r = 200 kpc  (BCG-N peak only)
+
+    The reconstruction is produced in plain M_sun internally and
+    converted once (``* hubble_param``) so both sides of the comparison
+    share h^-1 M_sun.
+
+    EL_GORDO literature values are CARRIED OVER UNCHANGED from the prior
+    version and have NOT been unit-verified against their source papers.
+    They are flagged below; verify and convert before relying on the
+    El Gordo percentages.  The plotting fixes apply to both clusters.
 
     Parameters
     ----------
     halos : NFW_Lens or PowerLawHalo
         Lens collection.
     plot_name : str
-        Path to save the output figure.
+        Output figure path.
     plot_title : str
-        Figure title.
+        Figure title (drawn only if show_title=True).
     cluster_name : str
         'ABELL_2744' or 'EL_GORDO'.
     lens_type : str
-        'NFW' (default, backward-compatible) or 'POWER_LAW'.
+        'NFW' (default, backward compatible) or 'POWER_LAW'.
+    mass_err : np.ndarray, optional
+        1-sigma uncertainty on the reconstructed M(<r) curve, same length
+        as the returned radius grid, in h^-1 M_sun.  If supplied (e.g. from
+        the jackknife in compute_error_bars) a shaded +/-1sigma band is
+        drawn.  If None, no band is drawn.
+    y_range : (lo, hi), optional
+        Fixed y-axis range in h^-1 M_sun, shared across panels for direct
+        visual comparison.  If None, autoscale per panel.  For the Abell
+        4-signal set, all/shear_f/shear_g fit ~(3e13, 5e14) but f_g
+        overshoots to ~4e15; use a common (3e13, 5e15) if all four must
+        share one axis.
+    show_title : bool, optional
+        Draw the code-generated title (review aid).  Leave False for
+        thesis figures and let the LaTeX caption carry the metadata.
 
-    Notes
-    -----
-    For POWER_LAW the mass-weighted centroid uses kappa_star as the
-    weight (analogous to NFW's mass-weighted centroid).  This is a
-    proxy for true mass; halos with larger kappa_star contribute the
-    majority of the projected mass.
+    Returns
+    -------
+    r : np.ndarray
+        Radius grid (kpc).
+    mass_enclosed : np.ndarray
+        Cumulative reconstructed mass M(<r) in h^-1 M_sun.
     """
-    # Literature mass estimates: dictionary of form {label: (mass, radius)}
+    if lens_type not in ("NFW", "POWER_LAW"):
+        raise ValueError("Invalid lens_type. Choose 'NFW' or 'POWER_LAW'.")
+
+    H = hubble_param  # 0.7
+
+    # ------------------------------------------------------------------
+    # Literature estimates.
+    # Schema: label -> (mass_hinv, radius_kpc, err_hinv_or_None, kind)
+    #   kind: 'total' = cluster-core total mass within r (filled marker)
+    #         'peak'  = single BCG/peak mass, not a core total (open marker)
+    # ------------------------------------------------------------------
     mass_estimates_abell = {
-        "MARS": (1.73e14, 200),
-        "Bird": (1.93e14, 200),
-        "GRALE": (2.25e14, 250),
-        "Merten et al.": (2.24e14, 250),
-    }
-    mass_estimates_elgordo = {
-        "Cerny et al.": (1.1e15, 500),
-        "Caminha et all.": (1.84e15, 1000),
-        "Diego et al": (0.8e15, 500),
+        "Merten+2011 (WL+SL)":    (2.24e14 * H, 250, 0.55e14 * H, "total"),
+        "GRALE (Sebesta+2018)":   (2.25e14 * H, 250, 0.06e14 * H, "total"),
+        "MARS (Cha+2024, BCG-N)": (1.73e14 * H, 200, None,        "peak"),
     }
 
-    # Choose a cluster
+    # EL GORDO: carried over unchanged from the prior version.
+    # TODO: verify values, radii, and units against source papers and
+    # convert to h^-1 M_sun as was done for Abell.  Units below are
+    # UNVERIFIED.  'kind' set to 'total' provisionally.
+    mass_estimates_elgordo = {
+        "Cerny et al.":    (1.1e15,  500,  None, "total"),
+        "Caminha et al.":  (1.84e15, 1000, None, "total"),
+        "Diego et al.":    (0.8e15,  500,  None, "total"),
+    }
+
     if cluster_name == "ABELL_2744":
         mass_estimates = mass_estimates_abell
         z_cluster = 0.308
@@ -341,214 +381,261 @@ def compare_mass_estimates(
         z_cluster = 0.870
         z_source = 4.25
     else:
-        raise ValueError("Invalid cluster name. Choose from 'ABELL_2744' or 'EL_GORDO'.")
+        raise ValueError("Invalid cluster name. Choose 'ABELL_2744' or 'EL_GORDO'.")
 
-    if lens_type not in ("NFW", "POWER_LAW"):
-        raise ValueError("Invalid lens_type. Choose from 'NFW' or 'POWER_LAW'.")
+    # ------------------------------------------------------------------
+    # Radius grid: span the literature radii with margin.
+    # ------------------------------------------------------------------
+    radii_lit = [r_lit for (_, r_lit, _, _) in mass_estimates.values()]
+    r_min, r_max = min(radii_lit), max(radii_lit)
+    r = np.linspace(r_min * 0.6, 1.3 * r_max, 200)
 
-    # Radii in kpc — span the literature radii with margin
-    r_min = min([r for _, r in mass_estimates.values()])
-    r_max = max([r for _, r in mass_estimates.values()])
-    r = np.linspace(r_min * 0.75, 1.25 * r_max, 100)
-
-    # Mass-weighted centroid; for POWER_LAW use kappa_star as the proxy
-    if lens_type == "NFW":
-        weight = halos.mass
-    else:  # POWER_LAW
-        weight = halos.kappa_star
-
+    # ------------------------------------------------------------------
+    # Mass-weighted core centroid (kappa_star proxy for POWER_LAW,
+    # mass for NFW), then recenter halos on it.
+    # ------------------------------------------------------------------
+    weight = halos.kappa_star if lens_type == "POWER_LAW" else halos.mass
     weight_total = float(np.sum(weight))
     if weight_total <= 0:
-        raise ValueError(f"Cannot compute mass-weighted centroid: total weight = {weight_total}")
-    centroid = np.array(
-        [
-            np.sum(halos.x * weight) / weight_total,
-            np.sum(halos.y * weight) / weight_total,
-        ]
-    )
+        raise ValueError(
+            f"Cannot compute mass-weighted centroid: total weight = {weight_total}"
+        )
+    centroid = np.array([
+        np.sum(halos.x * weight) / weight_total,
+        np.sum(halos.y * weight) / weight_total,
+    ])
     halos.x -= centroid[0] + 0.5
     halos.y -= centroid[1] + 0.5
 
-    if lens_type == "POWER_LAW":
-        # For POWER_LAW we use the closed-form M_2D(<r) directly,
-        # bypassing the kappa-grid path entirely.  The Phase 0 result
-        #   M_2D(<r) = 2 * pi * Sigma_cr * beta * kappa_star
-        #              * r_pivot^n * r^(2-n) / (2 - n)
-        # is exact (no integration), positive by construction (no
-        # mass-sheet transform needed), and additive across halos at
-        # different positions provided we evaluate cumulative mass
-        # within r of the cluster centroid (mass-weighted).
-        #
-        # The mass-sheet transformation used by the kappa-grid path
-        # (kappa_total = 2*kappa - 1 for k=2) drives kappa negative
-        # wherever the input kappa is below 0.5, producing negative
-        # masses for POWER_LAW where the kappa map is mostly subdued
-        # outside halo cores.  The closed-form route avoids this
-        # issue entirely.
-        z_l = z_cluster
-        kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_l).to(u.kpc / u.arcsec).value
-        # critical_surface_density returns kg/m^2 as a plain float;
-        # convert to M_sun/kpc^2 explicitly (the pattern used at
-        # line 270 of utils.py).  The version that just attaches
-        # units (.value after multiplying by u.M_sun/u.kpc**2)
-        # is a unit-attachment bug that masks the kg/m^2 number
-        # as M_sun/kpc^2, leaving the result ~5e8 too small.
-        sigma_c_kg_per_m2 = critical_surface_density(z_l, z_source)
-        sigma_c = (sigma_c_kg_per_m2 * u.kg / u.m**2).to(u.M_sun / u.kpc**2).value
+    try:
+        kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_cluster).to(
+            u.kpc / u.arcsec
+        ).value
 
-        # Compute M(<r) cumulative as the SUM over all halos of each
-        # halo's individual M_2D(<r_to_halo).  For each radius r in our
-        # query grid (centered on the mass-weighted cluster centroid),
-        # we evaluate per-halo M(<r_eff_i) where r_eff_i is the radius
-        # measured from the halo center, not from the cluster centroid.
-        #
-        # For halos at the cluster center, r_eff = r and the per-halo
-        # M_2D matches the global cumulative.  For off-center halos,
-        # r_eff < r when the aperture encloses the halo, and r_eff = 0
-        # before that.  This is the correct generalization of the
-        # NFW-grid workflow to multi-halo POWER_LAW.
-        #
-        # Approximation: for cluster-scale halos clustered near the
-        # centroid (typical case), all halos contribute fully once the
-        # aperture is wider than the typical halo offset (~tens of
-        # arcsec).  At smaller r the per-halo offset matters.
-
-        halo_offsets = np.hypot(halos.x, halos.y)  # arcsec from centroid
-        halo_offsets_kpc = halo_offsets * kpc_per_arcsec
-
-        n_arr = np.atleast_1d(halos.slope).astype(float)
-        kappa_star_arr = np.atleast_1d(halos.kappa_star).astype(float)
-        theta_star_arcsec = float(halos.theta_star)
-        r_pivot_kpc = theta_star_arcsec * kpc_per_arcsec
-
-        # Beta(z_s) at this source redshift
-        if z_source <= z_l:
-            beta = 0.0
+        if lens_type == "POWER_LAW":
+            mass_enclosed = _powerlaw_cumulative_mass(
+                halos, r, z_cluster, z_source, kpc_per_arcsec
+            )
         else:
-            D_s = cosmo.angular_diameter_distance(z_source).to(u.m).value
-            D_ls = cosmo.angular_diameter_distance_z1z2(z_l, z_source).to(u.m).value
-            beta = D_ls / D_s
-
-        mass_enclosed = np.zeros_like(r)
-        for i, radius in enumerate(r):
-            total = 0.0
-            for k in range(len(halos.x)):
-                # Effective radius from this halo center: clip to (0, radius)
-                r_eff = max(0.0, radius - halo_offsets_kpc[k])
-                if r_eff <= 0:
-                    continue
-                denom = 2.0 - n_arr[k]
-                if abs(denom) < 1e-6:
-                    denom = 1e-6
-                M_halo = (
-                    2.0
-                    * np.pi
-                    * sigma_c
-                    * beta
-                    * kappa_star_arr[k]
-                    * r_pivot_kpc ** n_arr[k]
-                    * r_eff**denom
-                    / denom
-                )
-                total += float(M_halo)
-            mass_enclosed[i] = total
-
-    else:
-        # NFW path — use the existing kappa-grid + mass-sheet workflow
-        # 2D grid setup (in kpc)
-        x_range, y_range = (-r[-1], r[-1]), (-r[-1], r[-1])
-        nx, ny = int(x_range[1] - x_range[0]), int(y_range[1] - y_range[0])
-        x_vals = np.linspace(x_range[0], x_range[1], nx)
-        y_vals = np.linspace(y_range[0], y_range[1], ny)
-        kappa_total = np.zeros((ny, nx), dtype=float)
-
-        # Convert halo positions from arcsec to kpc using lens-redshift kpc/arcsec
-        kpc_per_arcsec = cosmo.kpc_proper_per_arcmin(z_cluster).to(u.kpc / u.arcsec).value
-        halo_x_kpc = halos.x * kpc_per_arcsec
-        halo_y_kpc = halos.y * kpc_per_arcsec
-
-        # Sum the kappa grids from all halos
-        area_per_pixel = None
-        for i in range(len(halos.x)):
-            halo = halo_obj.NFW_Lens(
-                halos.x[i],
-                halos.y[i],
-                [0],
-                halos.concentration[i],
-                halos.mass[i],
-                z_cluster,
-                halos.chi2[i],
-            )
-            kappa, area_per_pixel = nfw_projected_mass(
-                halo,
-                r_p=0,
-                return_2d=True,
-                nx=nx,
-                ny=ny,
-                x_range=x_range,
-                y_range=y_range,
-                x_center=halo_x_kpc[i],
-                y_center=halo_y_kpc[i],
-                z_source=z_source,
+            mass_enclosed = _nfw_cumulative_mass(
+                halos, r, z_cluster, z_source, kpc_per_arcsec
             )
 
-            if np.any(np.isinf(kappa)) or np.any(np.isnan(kappa)):
-                print(
-                    f"Warning: NaN/Inf values in kappa for halo {i} at "
-                    f"({halos.x[i]:.2f}, {halos.y[i]:.2f}). Skipping."
-                )
-                continue
-            kappa_total += kappa
+        # Single, explicit conversion to h^-1 M_sun.
+        mass_enclosed = mass_enclosed * hubble_param
 
-        # Mass-sheet degeneracy: k value taken from literature convention
-        if cluster_name == "ABELL_2744":
-            kappa_total = mass_sheet_transformation(kappa_total, k=2)
-        elif cluster_name == "EL_GORDO":
-            kappa_total = mass_sheet_transformation(kappa_total, k=2)
+        # --------------------------------------------------------------
+        # Console report: per-point agreement, unit-consistent.
+        # --------------------------------------------------------------
+        print(f"\n  Mass comparison ({cluster_name}, {lens_type}, h^-1 M_sun):")
+        print(f"    {'Reference':24s} {'r':>5s}  {'lit':>10s} {'recon':>10s}  "
+              f"{'err':>8s}  kind")
+        print("    " + "-" * 66)
+        for label, (m_lit, r_lit, e_lit, kind) in mass_estimates.items():
+            m_rec = float(np.interp(r_lit, r, mass_enclosed))
+            pct = 100.0 * (m_rec - m_lit) / m_lit
+            print(f"    {label:24s} {r_lit:5.0f}  {m_lit:10.3e} {m_rec:10.3e}  "
+                  f"{pct:+7.1f}%  {kind}")
 
-        # Convert kappa back to a 2D mass distribution
-        sigma_c = critical_surface_density(z_cluster, z_source)
-        sigma_c = sigma_c * u.M_sun / u.kpc**2
-        sigma_c = sigma_c.value
-        M_2D_total = kappa_total * sigma_c * area_per_pixel
+        # --------------------------------------------------------------
+        # Plot.
+        # --------------------------------------------------------------
+        _plot_mass_comparison(
+            r, mass_enclosed, mass_estimates, plot_name, plot_title,
+            lens_type, mass_err, y_range=y_range, show_title=show_title,
+        )
 
-        # Coordinates of each pixel in the grid
-        XX, YY = np.meshgrid(x_vals, y_vals)
-        RR = np.sqrt(XX**2 + YY**2)
-
-        # Compute the enclosed mass at each radius in r
-        mass_enclosed = np.zeros_like(r)
-        for i, radius in enumerate(r):
-            mask = RR <= radius
-            mass_enclosed[i] = np.sum(M_2D_total[mask])
-
-    # Tell me how far off we are from the literature estimates
-    print(f"\n  Mass comparison ({lens_type}):")
-    for label, (mass_lit, r_lit) in mass_estimates.items():
-        mass_recon = np.interp(r_lit, r, mass_enclosed)
-        mass_lit_val = f"{mass_lit:.2e}"
-        mass_recon_val = f"{mass_recon:.2e}"
-        pct = 100 * (mass_recon - mass_lit) / mass_lit
-        print(f"    {label}: lit={mass_lit_val}, recon={mass_recon_val}, " f"err={pct:+.1f}%")
-
-    # Plot results
-    fig, ax = plt.subplots()
-    fig.suptitle(plot_title)
-    ax.plot(r, mass_enclosed, label=f"Reconstruction ({lens_type})")
-
-    markers = ["o", "s", "D", "^"]
-    for i, (label, (mass_lit, r_lit)) in enumerate(mass_estimates.items()):
-        ax.scatter(r_lit, mass_lit, label=label, marker=markers[i % len(markers)])
-
-    ax.set_xlabel("Radius (kpc)")
-    ax.set_ylabel(r"Mass ($M_\odot$)")
-    ax.set_yscale("log")
-    ax.legend()
-    plt.savefig(plot_name)
-    plt.close(fig)
-
-    # Put the halos back where they were
-    halos.x += centroid[0] + 0.5
-    halos.y += centroid[1] + 0.5
+    finally:
+        # Always restore halo positions, even if an error was raised.
+        halos.x += centroid[0] + 0.5
+        halos.y += centroid[1] + 0.5
 
     return r, mass_enclosed
+
+
+def _powerlaw_cumulative_mass(halos, r, z_l, z_source, kpc_per_arcsec):
+    """
+    Closed-form cumulative projected mass M(<r) for a set of power-law
+    halos, summed over halos, within radius r of the mass-weighted
+    cluster centroid.  Returns plain M_sun (caller applies h^-1).
+
+        M_2D(<r) = 2*pi*Sigma_cr*beta*kappa_star*r_pivot^n*r^(2-n)/(2-n)
+
+    per halo, with r measured from each halo's own center (clipped to the
+    aperture).  No kappa grid, no mass-sheet transform, so positive by
+    construction.
+    """
+    # Critical surface density: convert kg/m^2 -> M_sun/kpc^2 explicitly.
+    # (Attaching M_sun/kpc^2 units to the kg/m^2 number is a known bug
+    # that leaves the result ~5e8 too small; convert, don't relabel.)
+    sigma_c_kg_per_m2 = critical_surface_density(z_l, z_source)
+    sigma_c = (sigma_c_kg_per_m2 * u.kg / u.m**2).to(u.M_sun / u.kpc**2).value
+
+    halo_offsets_kpc = np.hypot(halos.x, halos.y) * kpc_per_arcsec
+    n_arr = np.atleast_1d(halos.slope).astype(float)
+    kappa_star_arr = np.atleast_1d(halos.kappa_star).astype(float)
+    r_pivot_kpc = float(halos.theta_star) * kpc_per_arcsec
+
+    if z_source <= z_l:
+        beta = 0.0
+    else:
+        D_s = cosmo.angular_diameter_distance(z_source).to(u.m).value
+        D_ls = cosmo.angular_diameter_distance_z1z2(z_l, z_source).to(u.m).value
+        beta = D_ls / D_s
+
+    mass_enclosed = np.zeros_like(r)
+    for i, radius in enumerate(r):
+        total = 0.0
+        for k in range(len(halos.x)):
+            r_eff = max(0.0, radius - halo_offsets_kpc[k])
+            if r_eff <= 0:
+                continue
+            denom = 2.0 - n_arr[k]
+            if abs(denom) < 1e-6:
+                denom = 1e-6
+            M_halo = (
+                2.0 * np.pi * sigma_c * beta * kappa_star_arr[k]
+                * r_pivot_kpc ** n_arr[k] * r_eff ** denom / denom
+            )
+            total += float(M_halo)
+        mass_enclosed[i] = total
+    return mass_enclosed
+
+
+def _nfw_cumulative_mass(halos, r, z_l, z_source, kpc_per_arcsec):
+    """
+    Cumulative projected mass M(<r) for NFW halos via the kappa-grid +
+    mass-sheet workflow.  Returns plain M_sun (caller applies h^-1).
+    """
+    x_range, y_range = (-r[-1], r[-1]), (-r[-1], r[-1])
+    nx, ny = int(x_range[1] - x_range[0]), int(y_range[1] - y_range[0])
+    x_vals = np.linspace(x_range[0], x_range[1], nx)
+    y_vals = np.linspace(y_range[0], y_range[1], ny)
+    kappa_total = np.zeros((ny, nx), dtype=float)
+
+    halo_x_kpc = halos.x * kpc_per_arcsec
+    halo_y_kpc = halos.y * kpc_per_arcsec
+
+    area_per_pixel = None
+    for i in range(len(halos.x)):
+        halo = halo_obj.NFW_Lens(
+            halos.x[i], halos.y[i], [0], halos.concentration[i],
+            halos.mass[i], z_l, halos.chi2[i],
+        )
+        kappa, area_per_pixel = nfw_projected_mass(
+            halo, r_p=0, return_2d=True, nx=nx, ny=ny,
+            x_range=x_range, y_range=y_range,
+            x_center=halo_x_kpc[i], y_center=halo_y_kpc[i],
+            z_source=z_source,
+        )
+        if np.any(np.isinf(kappa)) or np.any(np.isnan(kappa)):
+            print(f"Warning: NaN/Inf in kappa for halo {i}; skipping.")
+            continue
+        kappa_total += kappa
+
+    kappa_total = mass_sheet_transformation(kappa_total, k=2)
+
+    sigma_c = critical_surface_density(z_l, z_source)
+    sigma_c = (sigma_c * u.M_sun / u.kpc**2).value
+    M_2D_total = kappa_total * sigma_c * area_per_pixel
+
+    XX, YY = np.meshgrid(x_vals, y_vals)
+    RR = np.sqrt(XX**2 + YY**2)
+
+    mass_enclosed = np.zeros_like(r)
+    for i, radius in enumerate(r):
+        mass_enclosed[i] = np.sum(M_2D_total[RR <= radius])
+    return mass_enclosed
+
+
+def _plot_mass_comparison(
+    r, mass_enclosed, mass_estimates, plot_name, plot_title,
+    lens_type, mass_err, y_range=None, show_title=False,
+):
+    """Thesis-quality cumulative-mass comparison figure.
+
+    Cluster-agnostic: works for both Abell 2744 and El Gordo.  Filled
+    markers denote cluster-core totals, open markers single-peak masses.
+    Coincident-radius points are spread symmetrically so none is hidden.
+    """
+    fig, ax = plt.subplots(figsize=(7.2, 5.0))
+
+    recon_label = f"ARCH reconstruction ({lens_type.replace('_', '-').title()})"
+    ax.plot(r, mass_enclosed, color="k", lw=2.0, zorder=5, label=recon_label)
+
+    # Optional +/-1sigma band on the reconstruction.
+    if mass_err is not None:
+        mass_err = np.asarray(mass_err, dtype=float)
+        if mass_err.shape == mass_enclosed.shape:
+            ax.fill_between(
+                r, mass_enclosed - mass_err, mass_enclosed + mass_err,
+                color="k", alpha=0.15, zorder=1,
+                label=r"ARCH $\pm1\sigma$ (jackknife)",
+            )
+        else:
+            print(f"Warning: mass_err shape {mass_err.shape} != "
+                  f"{mass_enclosed.shape}; band not drawn.")
+
+    # Marker styles by kind. A small palette cycles if there are more
+    # points than preset markers, so this works for El Gordo's 3 points
+    # and Abell's 4 alike.
+    total_marker_cycle = ["o", "s", "P", "X"]
+    peak_marker_cycle = ["D", "^", "v", "<"]
+    total_color, peak_color = "#1f77b4", "#d62728"
+
+    # De-overlap points that share a radius (e.g. Merten and GRALE both at
+    # 250 kpc with nearly identical mass would otherwise hide one another).
+    # Spread coincident points symmetrically about their true radius by a
+    # small cosmetic offset (noted in the caption).
+    radius_groups = {}
+    for label, (_, r_lit, _, _) in mass_estimates.items():
+        radius_groups.setdefault(r_lit, []).append(label)
+    x_offset = {}
+    jitter_kpc = 4.0
+    for r_lit, labels in radius_groups.items():
+        n = len(labels)
+        if n == 1:
+            x_offset[labels[0]] = 0.0
+        else:
+            for j, label in enumerate(labels):
+                x_offset[label] = (j - (n - 1) / 2.0) * jitter_kpc
+
+    n_total = n_peak = 0
+    for label, (m_lit, r_lit, e_lit, kind) in mass_estimates.items():
+        r_plot = r_lit + x_offset[label]
+        if kind == "total":
+            mk = total_marker_cycle[n_total % len(total_marker_cycle)]
+            n_total += 1
+            ax.errorbar(
+                r_plot, m_lit, yerr=e_lit, marker=mk,
+                ms=9, mfc=total_color, mec="k", ecolor=total_color,
+                capsize=4, lw=0, elinewidth=1.5, zorder=6, label=label,
+            )
+        else:  # peak
+            mk = peak_marker_cycle[n_peak % len(peak_marker_cycle)]
+            n_peak += 1
+            ax.errorbar(
+                r_plot, m_lit, yerr=e_lit, marker=mk,
+                ms=9, mfc="none", mec=peak_color, ecolor=peak_color,
+                capsize=4, lw=0, elinewidth=1.5, mew=1.6, zorder=6, label=label,
+            )
+
+    ax.set_xlabel("Projected radius from core (kpc)")
+    ax.set_ylabel(r"Enclosed projected mass $M(<r)\ \ [h^{-1}\,M_\odot]$")
+    ax.set_yscale("log")
+    if y_range is not None:
+        ax.set_ylim(*y_range)
+    if show_title:
+        ax.set_title(plot_title)
+    ax.grid(True, which="both", ls=":", alpha=0.4)
+
+    # Legend outside the axes so it never collides with data/error bars.
+    leg = ax.legend(
+        loc="center left", bbox_to_anchor=(1.02, 0.5),
+        fontsize=9, framealpha=0.95, borderaxespad=0.0,
+    )
+    leg.set_title("filled = core total\nopen = single-peak",
+                  prop={"size": 8})
+
+    fig.savefig(plot_name, dpi=200, bbox_inches="tight")
+    plt.close(fig)
