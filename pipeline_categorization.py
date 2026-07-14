@@ -52,21 +52,27 @@ def stable_jitter(name: str, scale: float = 0.035) -> Tuple[float, float]:
 # ----------------------------
 # Regime encoding
 # ----------------------------
+# Colorblind-safe categorical palette (fixed hue order, validated for CVD
+# separation): blue / teal / violet / orange / neutral gray. Marker shape is
+# varied in tandem so identity never depends on color alone.
 COLOR_MAP = {
-    "Strong": "red",
-    "Weak": "blue",
-    "Flexion": "green",
-    "Multi": "purple",
-    "Other": "gray",
+    "Strong": "#2a78d6",   # blue
+    "Weak": "#1baf7a",     # teal
+    "Flexion": "#4a3aa7",  # violet
+    "Multi": "#eb6834",    # orange
+    "Other": "#898781",    # neutral gray
 }
 
 MARKER_MAP = {
-    "Multi": "D",
     "Strong": "o",
-    "Weak": "o",
-    "Flexion": "o",
-    "Other": "o",
+    "Weak": "s",
+    "Flexion": "^",
+    "Multi": "D",
+    "Other": "X",
 }
+
+RING_COLOR = "black"  # secondary "flexion-enabled" halo; kept neutral so it
+                       # never collides with a categorical hue
 
 
 def dominant_regime(signals: List[str]) -> str:
@@ -163,11 +169,33 @@ def axes_to_data(xa: float, ya: float, xmin: float, xmax: float, ymin: float, ym
     return xd, yd
 
 
-def label_offset_axes(name: str, base: float = 0.035) -> Tuple[float, float]:
-    # Use stable_jitter with scale=1 for deterministic direction, then normalize
-    dx, dy = stable_jitter(name, scale=1.0)
+def label_offset_axes(name: str, base: float = 0.035, direction: Tuple[float, float] | None = None) -> Tuple[float, float]:
+    # Direction can be pinned explicitly (to resolve collisions between
+    # nearby points); otherwise fall back to a deterministic hash direction.
+    if direction is not None:
+        dx, dy = direction
+    else:
+        dx, dy = stable_jitter(name, scale=1.0)
     norm = (dx * dx + dy * dy) ** 0.5 or 1.0
     return base * (dx / norm), base * (dy / norm)
+
+
+# Manual routing for labels whose anchor points sit close together in data
+# space (deterministic hashing alone can still send neighbors toward each
+# other). (offset_scale, (dir_x, dir_y)) - tuned by inspecting the render.
+LABEL_OVERRIDES: Dict[str, Tuple[float, Tuple[float, float]]] = {
+    "LENSTOOL": (0.11, (0.15, 1.0)),
+    "GLAFIC": (0.10, (1.0, -0.15)),
+    "Zitrin_LTM": (0.08, (-1.0, -0.5)),
+    "WSLAP_plus": (0.075, (-1.0, -0.3)),
+    "SaWLens": (0.075, (1.0, 0.6)),
+    "Bradac_2005": (0.075, (0.5, 1.0)),
+    "Lanusse_2016": (0.08, (-0.8, 1.0)),
+    "Kaiser_Squires": (0.045, (0.0, -1.0)),
+    "PixeLens": (0.045, (0.7, -0.6)),
+    "GRALE": (0.045, (0.7, -0.6)),
+    "ARCH": (0.06, (-0.2, -1.0)),
+}
 
 
 # ----------------------------
@@ -175,6 +203,18 @@ def label_offset_axes(name: str, base: float = 0.035) -> Tuple[float, float]:
 # ----------------------------
 def main() -> None:
     apply_style()
+
+    # Presentation-scale overrides: the .mplstyle is tuned for a printed page;
+    # a defense slide is viewed from across a room, so bump everything up.
+    plt.rcParams.update(
+        {
+            "font.size": 13,
+            "axes.titlesize": 22,
+            "axes.labelsize": 18,
+            "legend.fontsize": 13,
+            "figure.constrained_layout.use": False,
+        }
+    )
 
     pipelines: Dict[str, Dict[str, object]] = {
         "LENSTOOL": {
@@ -282,7 +322,7 @@ def main() -> None:
         )
 
 
-    fig, ax = plt.subplots(figsize=(9,9))
+    fig, ax = plt.subplots(figsize=(12, 10.5))
 
     # Background bands for representation categories (subtle)
     ax.axvspan(-1.1, -0.33, alpha=0.06, zorder=0)  # Parametric
@@ -297,10 +337,12 @@ def main() -> None:
     # Hide numeric axis ticks/labels (subjective map)
     ax.set_xticks([])
     ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.4)
 
     # Reference lines
-    ax.axhline(0, color="black", linewidth=1, linestyle="--", alpha=0.5, zorder=1)
-    ax.axvline(0, color="black", linewidth=1, linestyle="--", alpha=0.5, zorder=1)
+    ax.axhline(0, color="black", linewidth=1.2, linestyle="--", alpha=0.5, zorder=1)
+    ax.axvline(0, color="black", linewidth=1.2, linestyle="--", alpha=0.5, zorder=1)
 
     # Scatter by regime
     regime_groups = defaultdict(list)
@@ -311,11 +353,11 @@ def main() -> None:
         ax.scatter(
             [g["x"] for g in group],
             [g["y"] for g in group],
-            s=110,
+            s=180,
             c=[g["color"] for g in group],
             marker=MARKER_MAP[regime],
             edgecolors="black",
-            linewidths=0.6,
+            linewidths=0.9,
             alpha=0.95,
             zorder=3,
         )
@@ -328,28 +370,24 @@ def main() -> None:
         ax.scatter(
             [p["x"] for p in flex_points],
             [p["y"] for p in flex_points],
-            s=190,                 # slightly larger than base markers
+            s=340,                 # visibly larger than base markers -> halo
             marker="o",            # ring shape (consistent visual)
             facecolors="none",     # hollow
-            edgecolors="green",    # ring color
-            linewidths=2.0,
-            alpha=0.95,
+            edgecolors=RING_COLOR,
+            linewidths=2.2,
+            alpha=0.9,
             zorder=4,
         )
 
-
-    # Grid
-    #ax.grid(True, alpha=0.25, zorder=0)
-
     # Axis labels/titles
-    #ax.set_xlabel("Mass Representation  (Parametric  $\u2192$  Hybrid  $\u2192$  Field-based)")
-    ax.set_ylabel("Inference Strategy  (Iterative / Local  $\u2192$  Global)", fontsize=16)
-    ax.set_title("Taxonomy of Cluster Lensing Reconstruction Pipelines", fontsize=16, weight="bold", pad=20)
+    ax.set_xlabel("Mass Representation", fontsize=18, labelpad=48)
+    ax.set_ylabel("Inference Strategy  (Iterative / Local  $\u2192$  Global)", fontsize=18)
+    ax.set_title("Taxonomy of Cluster Lensing Reconstruction Pipelines", fontsize=22, weight="bold", pad=22)
 
     # Category labels beneath x-axis
-    ax.text(-0.72, -1.18, "Parametric Reconstruction",  ha="center", va="top", fontsize=14)
-    ax.text( 0.00, -1.18, "Hybrid Reconstruction",      ha="center", va="top", fontsize=14)
-    ax.text( 0.72, -1.18, "Field-based Reconstruction", ha="center", va="top", fontsize=14)
+    ax.text(-0.715, -1.16, "Parametric",   ha="center", va="top", fontsize=15, weight="bold")
+    ax.text( 0.00,  -1.16, "Hybrid",       ha="center", va="top", fontsize=15, weight="bold")
+    ax.text( 0.715, -1.16, "Field-based",  ha="center", va="top", fontsize=15, weight="bold")
 
     # ----------------------------
     # Labeling (stable + thesis-friendly)
@@ -375,11 +413,11 @@ def main() -> None:
         xi, yi = p["x"], p["y"]
         xa, ya = data_to_axes(xi, yi, xmin, xmax, ymin, ymax)
 
-        base = 0.045 if name == "ARCH" else 0.035
-        ox, oy = label_offset_axes(name, base=base)
+        base, direction = LABEL_OVERRIDES.get(name, (0.045, None))
+        ox, oy = label_offset_axes(name, base=base, direction=direction)
 
-        xla = clamp01(xa + ox)
-        yla = clamp01(ya + oy)
+        xla = clamp01(xa + ox, lo=0.04, hi=0.92)
+        yla = clamp01(ya + oy, lo=0.04, hi=0.92)
         xl, yl = axes_to_data(xla, yla, xmin, xmax, ymin, ymax)
 
         is_arch = (name == "ARCH")
@@ -387,16 +425,19 @@ def main() -> None:
             name,
             xy=(xi, yi),
             xytext=(xl, yl),
-            fontsize=10 if is_arch else 9,
+            ha="center",
+            va="center",
+            fontsize=13 if is_arch else 12,
             weight="bold" if is_arch else "normal",
             bbox=dict(
-                boxstyle="round,pad=0.18",
+                boxstyle="round,pad=0.22",
                 fc="white",
                 ec="black" if is_arch else "none",
-                alpha=0.85,
+                alpha=0.9,
             ),
-            arrowprops=dict(arrowstyle="-", lw=0.7, color="black", alpha=0.6),
+            arrowprops=dict(arrowstyle="-", lw=0.9, color="black", alpha=0.65),
             zorder=5,
+            clip_on=False,
         )
 
     # ----------------------------
@@ -417,7 +458,7 @@ def main() -> None:
                 label=("Multi-signal" if key == "Multi" else key),
                 markerfacecolor=COLOR_MAP[key],
                 markeredgecolor="black",
-                markersize=9,
+                markersize=12,
             )
         )
 
@@ -430,16 +471,31 @@ def main() -> None:
                 color="w",
                 label="Flexion-enabled (ring)",
                 markerfacecolor="none",
-                markeredgecolor="green",
-                markeredgewidth=2.0,
-                markersize=10,
+                markeredgecolor=RING_COLOR,
+                markeredgewidth=2.2,
+                markersize=13,
             )
         )
 
-    ax.legend(handles=handles, loc="best", frameon=True)
+    legend = ax.legend(
+        handles=handles,
+        loc="lower left",
+        frameon=True,
+        fontsize=13,
+        borderpad=0.8,
+        handletextpad=0.8,
+    )
+    legend.get_frame().set_edgecolor("black")
 
-    plt.tight_layout()
-    plt.savefig("taxonomy_map.pdf", dpi=300)
+    # Footnote pointing to the full inventory (only a curated subset is labeled)
+    fig.text(
+        0.99, 0.01,
+        "See Table 2.1 for the complete pipeline list.",
+        ha="right", va="bottom", fontsize=10, color="#595959", style="italic",
+    )
+
+    fig.savefig("taxonomy_map.pdf", bbox_inches="tight")
+    fig.savefig("taxonomy_map.png", dpi=400, bbox_inches="tight")
     plt.show()
 
 

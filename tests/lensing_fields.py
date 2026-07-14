@@ -1,372 +1,216 @@
+"""
+lensing_fields.py
+
+Render a three-panel figure of the weak-lensing fields produced by a set of
+SIS halos: shear (gamma, spin-2), first flexion (F, spin-1), and second
+flexion (G, spin-3), each overlaid on the log-convergence map.
+
+Run directly to produce ``lensing_fields.png``.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+from matplotlib.colors import PowerNorm
 
 import arch.halo_obj as halo_obj
 import arch.source_obj as source_obj
-import arch.utils as utils
 
 
 # ===============================
 # Global geometry (arcseconds)
 # ===============================
-L_ARCSEC = 600.0          # 600" = 10 arcmin
+L_ARCSEC = 600.0                 # 600" = 10 arcmin
 ARCSEC_TO_ARCMIN = 1.0 / 60.0
+MASK_RADIUS_ARCSEC = 24.0        # ~0.4 arcmin; blanks out saturated cores
 
-# Three halos, positions now in arcseconds (5,2,8 arcmin → *60)
+# Three halos (positions and Einstein radii in arcseconds)
 HALO_X = np.array([300.0, 120.0, 480.0])
 HALO_Y = np.array([300.0, 420.0, 420.0])
-
-# Einstein radii: keep in arcsec (same values as before if they were already arcsec)
 HALO_THETA_E = np.array([20.0, 10.0, 10.0])
+
+# Heuristic global rescaling applied to each field before plotting.
+SHEAR_RESCALE = 0.6
+F_RESCALE = 2.0
+G_RESCALE = 1.0
 
 
 # ===============================
 # SIS convergence
 # ===============================
 def kappa_sis(X, Y, x0, y0, theta_E, core=2.0):
-    """
-    SIS convergence in the lens plane.
-
-    X, Y, x0, y0, theta_E, core all in arcseconds.
-    """
-    dx = X - x0
-    dy = Y - y0
-    R = np.sqrt(dx**2 + dy**2 + core**2)
+    """SIS convergence at (X, Y) for one halo. All inputs in arcseconds."""
+    R = np.sqrt((X - x0) ** 2 + (Y - y0) ** 2 + core ** 2)
     return theta_E / (2.0 * R)
 
 
-def kappa_sis_multi(X, Y, halo_x, halo_y, halo_theta_E, core=2.0):
-    kappa = np.zeros_like(X, dtype=float)
+def compute_kappa_grid(halo_x, halo_y, halo_theta_E, L=L_ARCSEC, n_pix=400):
+    """Convergence map summed over all halos on an (n_pix x n_pix) grid."""
+    x = np.linspace(0.0, L, n_pix)
+    X, Y = np.meshgrid(x, x)
+    kappa = np.zeros_like(X)
     for x0, y0, tE in zip(halo_x, halo_y, halo_theta_E):
-        kappa += kappa_sis(X, Y, x0, y0, tE, core=core)
+        kappa += kappa_sis(X, Y, x0, y0, tE)
     return kappa
 
 
-def compute_kappa_grid_arcsec(halo_x, halo_y, halo_theta_E,
-                              L=L_ARCSEC, n_pix=200):
-    x = np.linspace(0.0, L, n_pix)
-    y = np.linspace(0.0, L, n_pix)
-    X, Y = np.meshgrid(x, y)
-    kappa = kappa_sis_multi(X, Y, halo_x, halo_y, halo_theta_E, core=2.0)
-    return X, Y, kappa
-
-
 # ===============================
-# Source grid in arcseconds
+# Source grid
 # ===============================
-def make_source_grid_arcsec(L=L_ARCSEC, n_side=25):
-    x = np.linspace(L/(2*n_side), L - L/(2*n_side), n_side)
-    y = np.linspace(L/(2*n_side), L - L/(2*n_side), n_side)
-    Xs, Ys = np.meshgrid(x, y)
-    xs = Xs.ravel()
-    ys = Ys.ravel()
-
+def make_source_grid(L=L_ARCSEC, n_side=25):
+    """Regular grid of unlensed sources covering the field."""
+    edge = L / (2 * n_side)
+    x = np.linspace(edge, L - edge, n_side)
+    Xs, Ys = np.meshgrid(x, x)
+    xs, ys = Xs.ravel(), Ys.ravel()
     n = xs.size
-    src = source_obj.Source(
+
+    return source_obj.Source(
         xs, ys,
-        np.zeros(n), np.zeros(n),  # e1, e2
-        np.zeros(n), np.zeros(n),  # f1, f2
-        np.zeros(n), np.zeros(n),  # g1, g2
-        np.ones(n)*0.1,            # e-err
-        np.ones(n)*0.00075,          # f-err
-        np.ones(n)*0.008,          # g-err
-        np.ones(n)*0.8             # SNR / weight
+        np.zeros(n), np.zeros(n),     # e1, e2
+        np.zeros(n), np.zeros(n),     # f1, f2
+        np.zeros(n), np.zeros(n),     # g1, g2
+        np.ones(n) * 0.1,             # e-err
+        np.ones(n) * 0.003,         # f-err
+        np.ones(n) * 0.008,           # g-err
+        np.ones(n) * 0.8,             # SNR / weight
     )
-    return src
 
 
 # ===============================
-# Field preparation: mask/clip/rescale
+# Field preparation: rescale + mask
 # ===============================
-def clip_complex(z, clip):
-    amp = np.abs(z)
-    out = np.zeros_like(z, dtype=z.dtype)
-    m = amp > 0
-    factor = np.ones_like(amp)
-    big = amp > clip
-    factor[big] = clip / amp[big]
-    out[m] = z[m] * factor[m]
-    return out
-
-
 def prepare_lensing_fields(sources, halo_x, halo_y,
-                           mask_radius_arcsec=24.0,
-                           shear_rescale=0.6,   shear_clip=0.35,
-                           F_rescale=2,      F_clip=10,
-                           G_rescale=1,      G_clip=15):
+                           mask_radius_arcsec=MASK_RADIUS_ARCSEC):
     """
-    Rescale, clip, and mask γ, F, G.
+    Apply heuristic rescaling and mask out the saturated halo cores.
 
-    mask_radius_arcsec ≈ 0.4 arcmin.
+    Returns masked positions and field components:
+    (x, y, g1, g2, F1, F2, G1, G2).
     """
-    x = sources.x
-    y = sources.y
+    x, y = sources.x, sources.y
 
-    # mask out central regions around each halo
     mask = np.ones_like(x, dtype=bool)
     for hx, hy in zip(halo_x, halo_y):
-        r = np.sqrt((x - hx)**2 + (y - hy)**2)
+        r = np.sqrt((x - hx) ** 2 + (y - hy) ** 2)
         mask &= (r >= mask_radius_arcsec)
 
-    # complex fields with heuristic global rescaling
-    gamma = (sources.e1 + 1j*sources.e2) * shear_rescale
-    F     = (sources.f1 + 1j*sources.f2) * F_rescale
-    G     = (sources.g1 + 1j*sources.g2) * G_rescale
+    gamma = (sources.e1 + 1j * sources.e2) * SHEAR_RESCALE
+    F = (sources.f1 + 1j * sources.f2) * F_RESCALE
+    G = (sources.g1 + 1j * sources.g2) * G_RESCALE
 
-    # clip amplitudes
-    '''
-    gamma = clip_complex(gamma, shear_clip)
-    F     = clip_complex(F,     F_clip)
-    G     = clip_complex(G,     G_clip)
-    '''
-    # apply mask and split into components
-    x_m = x[mask]
-    y_m = y[mask]
-
-    g1_m = gamma.real[mask]
-    g2_m = gamma.imag[mask]
-    F1_m = F.real[mask]
-    F2_m = F.imag[mask]
-    G1_m = G.real[mask]
-    G2_m = G.imag[mask]
-
-    return x_m, y_m, g1_m, g2_m, F1_m, F2_m, G1_m, G2_m
+    return (x[mask], y[mask],
+            gamma.real[mask], gamma.imag[mask],
+            F.real[mask], F.imag[mask],
+            G.real[mask], G.imag[mask])
 
 
 # ===============================
-# Axis tick formatter: arcsec → arcmin
+# Background normalization (contrast)
 # ===============================
-def arcsec_to_arcmin_tick(x, pos):
-    return f"{x * ARCSEC_TO_ARCMIN:.1f}"
+def log_kappa_norm(kappa, low_pct=2.0, high_pct=99.5, gamma=0.6):
+    """
+    PowerNorm over log10(kappa), clipped to percentile limits.
+
+    The halo cores otherwise occupy the top ~1% of the range and crush all
+    surrounding structure to black; clipping spreads the gradient across the
+    colormap and the gamma lift brightens the midtones.
+    """
+    lk = np.log10(kappa)
+    vmin = np.percentile(lk, low_pct)
+    vmax = np.percentile(lk, high_pct)
+    return lk, PowerNorm(gamma=gamma, vmin=vmin, vmax=vmax)
+
+
+def draw_background(ax, log_kappa, norm):
+    ax.imshow(log_kappa, origin="lower",
+              extent=(0, L_ARCSEC, 0, L_ARCSEC),
+              cmap="gray_r", norm=norm, interpolation="bilinear")
 
 
 # ===============================
-# Plotting helpers
+# Panel plotters
 # ===============================
-def plot_shear_panel(ax, X, Y, kappa, x_m, y_m, g1_m, g2_m,
-                     stick_scale=0.03):
-    ax.imshow(
-        np.log10(kappa),
-        origin="lower",
-        extent=(0, L_ARCSEC, 0, L_ARCSEC),
-        cmap="gray_r",
-        #vmin=0.0,
-        #vmax=np.max(kappa)
-    )
-
-    E = g1_m + 1j*g2_m
+def plot_shear_panel(ax, log_kappa, norm, x, y, g1, g2, scale=0.03):
+    """Spin-2 sticks (no arrowheads, orientation = 0.5 * arg)."""
+    draw_background(ax, log_kappa, norm)
+    E = g1 + 1j * g2
     phi = 0.5 * np.angle(E)
-    L = np.abs(E) / stick_scale   # line length
+    length = np.abs(E) / scale
+    length = np.clip(length, 0, np.percentile(length, 97))
+    for xi, yi, Li, ang in zip(x, y, length, phi):
+        dx, dy = 0.5 * Li * np.cos(ang), 0.5 * Li * np.sin(ang)
+        ax.plot([xi - dx, xi + dx], [yi - dy, yi + dy], color="gold", lw=1.0)
 
-    for xi, yi, Li, ang in zip(x_m, y_m, L, phi):
-        dx = 0.5 * Li * np.cos(ang)
-        dy = 0.5 * Li * np.sin(ang)
-        ax.plot([xi - dx, xi + dx], [yi - dy, yi + dy],
-                color="k", linewidth=0.7)
 
-def plot_F_panel(ax, X, Y, kappa, x_m, y_m, F1_m, F2_m,
-                 arrow_scale=0.000000004):
-    ax.imshow(
-        np.log10(kappa),
-        origin="lower",
-        extent=(0, L_ARCSEC, 0, L_ARCSEC),
-        cmap="gray_r",
-        #vmin=0.0,
-        #vmax=np.max(kappa)
-    )
-
-    ax.quiver(
-        x_m, y_m, F1_m, F2_m,
-        angles="xy", scale_units="xy",
-        scale=1.0/arrow_scale,
-        color="k", linewidth=0.7  # slightly thicker for visibility
-    )
-
-def plot_G_panel(ax, X, Y, kappa, x_m, y_m, G1_m, G2_m,
-                 tri_scale=0.000005):
-    ax.imshow(
-        np.log10(kappa),
-        origin="lower",
-        extent=(0, L_ARCSEC, 0, L_ARCSEC),
-        cmap="gray_r",
-        #vmin=0.0,
-        #vmax=np.max(kappa)
-    )
-
-    G = G1_m + 1j*G2_m
-    amp = np.abs(G)
-
+def plot_F_panel(ax, log_kappa, norm, x, y, F1, F2, target_len=26.0):
+    """Spin-1 arrows."""
+    draw_background(ax, log_kappa, norm)
+    amp = np.hypot(F1, F2)
     if np.all(amp == 0):
         return
+    ax.quiver(x, y, F1, F2, angles="xy", scale_units="xy",
+              scale=amp.max() / target_len, color="gold", width=0.0035)
 
-    # spin-3 orientation
+
+def plot_G_panel(ax, log_kappa, norm, x, y, G1, G2, target_len=7.0):
+    """Spin-3 tri-stars (three arms at orientation arg/3)."""
+    draw_background(ax, log_kappa, norm)
+    G = G1 + 1j * G2
+    amp = np.abs(G)
+    if np.all(amp == 0):
+        return
     phi3 = np.angle(G) / 3.0
-
-    # arm length ∝ |G|
-    L3 = amp / tri_scale
-
-    # optional: clip extreme lengths so nothing blows up
-    L3 = np.clip(L3, 0, np.percentile(L3, 95))
-
-    for xi, yi, Li, ang in zip(x_m, y_m, L3, phi3):
-        # Create three arms for a tri-star marker rotated by spin-3 angle
-        angles = ang + np.array([0, 2*np.pi/3, 4*np.pi/3])
-        
-        # Plot three lines emanating from center
-        for arm_angle in angles:
-            dx = Li * np.cos(arm_angle)
-            dy = Li * np.sin(arm_angle)
-            ax.plot([xi, xi + dx], [yi, yi + dy],
-                    color='k', linewidth=0.7, alpha=0.9)
+    length = np.clip(amp / np.percentile(amp, 90) * target_len, 0, 9)
+    arms = np.array([0, 2 * np.pi / 3, 4 * np.pi / 3])
+    for xi, yi, Li, ang in zip(x, y, length, phi3):
+        for arm in ang + arms:
+            ax.plot([xi, xi + Li * np.cos(arm)],
+                    [yi, yi + Li * np.sin(arm)],
+                    color="gold", lw=0.9, alpha=0.95)
 
 
 # ===============================
-# Main script
+# Main
 # ===============================
-if __name__ == "__main__":
-
-    # Create a halo
-    masses = [1e14, 5e14, 1e15]  # in Msun
-    
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    for m in masses:
-
-        halo = halo_obj.NFW_Lens(0.0, 0.0, 0.0, 0.0, m, 0.2, 0.0)
-        halo.calculate_concentration()
-
-        r = np.linspace(0.01, 1000, 10000)
-        # put a source at each r, compute shear and flexion, and plot them as a function of r
-        sources = source_obj.Source(
-            r, np.zeros_like(r),
-            np.zeros_like(r), np.zeros_like(r),  # e1, e2
-            np.zeros_like(r), np.zeros_like(r),  # f1, f2
-            np.zeros_like(r), np.zeros_like(r),  # g1, g2
-            np.ones_like(r)*0.1,            # e-err
-            np.ones_like(r)*0.00075,          # f-err
-            np.ones_like(r)*0.008,          # g-err
-            np.ones_like(r)*0.8             # SNR / weight
-        )
-
-        kappa, shear_1, shear_2, flex_1, flex_2, gflex_1, gflex_2 = utils.calculate_lensing_signals_nfw(
-            halo, sources
-        )
-        e_mag = np.sqrt(shear_1**2 + shear_2**2)
-        f_mag = np.sqrt(flex_1**2 + flex_2**2)
-        g_mag = np.sqrt(gflex_1**2 + gflex_2**2)
-
-        # Plot kappa in logspace, handling sign changes
-        # Split into positive and negative regions to show full profile
-        pos_mask = kappa > 0
-        neg_mask = kappa < 0
-        
-        # Plot positive values as solid line
-        if np.any(pos_mask):
-            ax.loglog(r[pos_mask], kappa[pos_mask], 
-                 label=f"M={m:.1e} Msun", linewidth=2)
-        
-        # Plot negative values as dashed line (absolute value)
-        if np.any(neg_mask):
-            ax.loglog(r[neg_mask], np.abs(kappa[neg_mask]), 
-                 linestyle='--', linewidth=2, alpha=0.7)
-
-    ax.set_xlabel("Radius (arcsec)", fontsize=12)
-    ax.set_ylabel("Convergence κ", fontsize=12)
-    ax.set_title("NFW Halo Convergence Profiles", fontsize=14)
-    # Plot a line at kappa = 1 for reference (cutting line between strong and weak lensing)
-    ax.axhline(1, color="red", linestyle="--", linewidth=1, label="κ = 1")
-    ax.legend(fontsize=11)
-    ax.grid(True, which="both", ls="--", alpha=0.5)
-    plt.tight_layout()
-    plt.savefig("nfw_convergence_profiles.png", dpi=300)
-    plt.show()
-
-    '''
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    
-    # Left plot: Shear and Flexion comparison
-    ax1.loglog(r, e_mag, label="Shear |γ|", color="blue", linewidth=2)
-    ax1.loglog(r, f_mag, label="First Flexion |ℱ|", color="orange", linewidth=2)
-    #ax1.loglog(r, g_mag, label="Second Flexion |𝔾|", color="red", linewidth=2)
-    ax1.set_xlabel("Radius (arcsec)", fontsize=12)
-    ax1.set_ylabel("Magnitude", fontsize=12)
-    ax1.set_title("Shear and Flexion Profiles for NFW Halo", fontsize=14)
-    ax1.legend(fontsize=11)
-    ax1.grid(True, which="both", ls="--", alpha=0.5)
-    
-    # Right plot: Distance comparison
-    predicted_dist = 2 * e_mag / f_mag  # Your predicted distance from ratio
-    true_dist = r  # True radial distance
-    ax2.loglog(true_dist, predicted_dist, label="Predicted: |γ| / |ℱ|", 
-               color="green", linewidth=2)
-    ax2.loglog(true_dist, true_dist, label="True distance", 
-               color="black", linestyle="--", linewidth=2)
-    ax2.set_xlabel("True Radius (arcsec)", fontsize=12)
-    ax2.set_ylabel("Distance (arcsec)", fontsize=12)
-    ax2.set_title("Predicted vs True Distance", fontsize=14)
-    ax2.legend(fontsize=11)
-    ax2.grid(True, which="both", ls="--", alpha=0.5)
-    
-    plt.tight_layout()
-    plt.savefig("nfw_shear_flexion_profiles.png", dpi=300)
-    plt.show()
-    '''
-
-    raise SystemExit("lensing_fields.py is not intended to be run directly.")
-
-    # halo model for lensing (shear/flexion)
+def main():
     halos = halo_obj.SIS_Lens(HALO_X, HALO_Y, HALO_THETA_E,
                               np.ones_like(HALO_X))
 
-    # sources and lensing
-    sources = make_source_grid_arcsec(L_ARCSEC, n_side=25)
+    sources = make_source_grid(L_ARCSEC, n_side=25)
     sources.apply_lensing(halos)
     sources.apply_noise()
 
-    # preprocess fields (mask, clip, rescale)
-    (x_m, y_m,
-     g1_m, g2_m,
-     F1_m, F2_m,
-     G1_m, G2_m) = prepare_lensing_fields(
-        sources,
-        HALO_X, HALO_Y,
-        mask_radius_arcsec=24.0,   # 0.4 arcmin
-        shear_rescale=0.6, shear_clip=0.35,
-        F_rescale=5e11,  F_clip=0.06,
-        G_rescale=0.0009,  G_clip=0.04
-    )
+    x, y, g1, g2, F1, F2, G1, G2 = prepare_lensing_fields(
+        sources, HALO_X, HALO_Y)
 
-    # convergence map
-    X, Y, kappa = compute_kappa_grid_arcsec(
-        HALO_X, HALO_Y, HALO_THETA_E,
-        L=L_ARCSEC, n_pix=200
-    )
+    kappa = compute_kappa_grid(HALO_X, HALO_Y, HALO_THETA_E)
+    log_kappa, norm = log_kappa_norm(kappa)
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True, sharey=True)
 
-    # Shear γ
-    plot_shear_panel(axes[0], X, Y, kappa, x_m, y_m, g1_m, g2_m)
+    plot_shear_panel(axes[0], log_kappa, norm, x, y, g1, g2)
     axes[0].set_title(r"Shear $\gamma$")
 
-    # First flexion ℱ
-    plot_F_panel(axes[1], X, Y, kappa, x_m, y_m, F1_m, F2_m)
+    plot_F_panel(axes[1], log_kappa, norm, x, y, F1, F2)
     axes[1].set_title(r"First flexion $\mathcal{F}$")
 
-    # Second flexion 𝔾
-    plot_G_panel(axes[2], X, Y, kappa, x_m, y_m, G1_m, G2_m)
-    axes[2].set_title(r"Second flexion $\mathcal{G}$")
+    #plot_G_panel(axes[2], log_kappa, norm, x, y, G1, G2)
+    #axes[2].set_title(r"Second flexion $\mathcal{G}$")
 
-    # Common axis formatting: ticks in arcminutes
-    formatter = FuncFormatter(arcsec_to_arcmin_tick)
+    fmt = FuncFormatter(lambda v, _: f"{v * ARCSEC_TO_ARCMIN:.1f}")
     for ax in axes:
         ax.set_xlim(0.0, L_ARCSEC)
         ax.set_ylim(0.0, L_ARCSEC)
-        ax.xaxis.set_major_formatter(formatter)
-        ax.yaxis.set_major_formatter(formatter)
+        ax.xaxis.set_major_formatter(fmt)
+        ax.yaxis.set_major_formatter(fmt)
         ax.set_xlabel("x (arcmin)")
         ax.set_ylabel("y (arcmin)")
 
     plt.tight_layout()
-    plt.savefig("lensing_fields.png", dpi=300)
+    plt.savefig("lensing_fields.png", dpi=300, bbox_inches="tight")
     plt.show()
+
+
+if __name__ == "__main__":
+    main()

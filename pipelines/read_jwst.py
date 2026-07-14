@@ -710,25 +710,7 @@ class JWSTPipeline:
         # specific percentile band, so the contours always show the
         # actual structure of the reconstruction regardless of the
         # absolute kappa range.
-        #
-        # Why not absolute levels [0.05, 0.10, 0.20, 0.50, 1.00]:
-        # produced uninformative contour distributions on real data —
-        # the field is dominated by low kappa with localized spikes
-        # near halos, so most of the absolute range is empty and only
-        # 1-2 contours render.  Why not max-fractional levels:
-        # similar issue — kappa_max is set by the inner spike near a
-        # halo, and the rest of the field has kappa << kappa_max, so
-        # the lower-fractional contours all sit below where any
-        # extended structure lives.
-        #
-        # Quantile levels guarantee each contour band corresponds to
-        # a meaningful fraction of pixels, giving 5 visible contours
-        # that span the actual data distribution.  Defaults: 50%, 70%,
-        # 85%, 94%, 98% percentiles (concentrating the bands toward
-        # the high-kappa tail where structure lives).
-        #
-        # Override per-cluster: set self.kappa_levels in the config or
-        # instance before calling visualize() to use absolute levels.
+
         if not hasattr(self, "_kappa_levels"):
             self._kappa_levels = {}
         cache_key = (self.cluster_name, self.lens_type)

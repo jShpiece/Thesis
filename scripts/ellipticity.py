@@ -2457,7 +2457,7 @@ def main():
                 "kappa_dynamic_range": kmax / kmin if kmin > 0 else float("inf"),
             }
         out_dir = _resolve_ellipticity_output_dir(csv_path)
-        thr_path = out_dir / (csv_path.stem + "_ellipticity_vs_threshold.pdf")
+        thr_path = out_dir / (csv_path.stem + "_ellipticity_vs_threshold.png")
         plot_ellipticity_vs_threshold(
             thr_rows, out_path=str(thr_path),
             title_suffix=f"  ({args.lens_type})",
@@ -2498,7 +2498,7 @@ def main():
                 out_dir = _resolve_ellipticity_output_dir(csv_path)
                 comp_path = out_dir / (
                     csv_path.stem
-                    + f"_threshold_vs_{args.external_label.lower()}.pdf"
+                    + f"_threshold_vs_{args.external_label.lower()}.png"
                 )
                 plot_threshold_comparison(
                     arch_rows=thr_rows,
@@ -2562,7 +2562,7 @@ def main():
             tag = "_vs_".join(s.strip().lower()
                               for s in args.compare_literature_kappa.split(","))
             comp_path = out_dir / (
-                csv_path.stem + f"_threshold_vs_{tag}.pdf"
+                csv_path.stem + f"_threshold_vs_{tag}.png"
             )
             plot_threshold_comparison_multi(
                 arch_rows=thr_rows,
@@ -2573,7 +2573,7 @@ def main():
 
             # Chapter-quality 5-panel figure: κ maps + curves
             chap_path = out_dir / (
-                csv_path.stem + f"_chapter_comparison_{tag}.pdf"
+                csv_path.stem + f"_chapter_comparison_{tag}.png"
             )
             try:
                 plot_chapter_comparison_figure(
@@ -2594,7 +2594,7 @@ def main():
 
     if args.plot:
         out_dir = _resolve_ellipticity_output_dir(csv_path)
-        plot_path = out_dir / (csv_path.stem + "_ellipticity.pdf")
+        plot_path = out_dir / (csv_path.stem + "_ellipticity.png")
         plot_ellipticity_overlay(
             lenses, args.z_source, results, lens_type=args.lens_type,
             out_path=str(plot_path), sky_mirrored=args.sky_mirrored,
@@ -2618,14 +2618,14 @@ def main():
                 comp_path = out_dir / (
                     csv_path.stem
                     + f"_ellipticity_vs_literature_q"
-                    + f"{int(round(headline_row['quantile']*100)):02d}.pdf"
+                    + f"{int(round(headline_row['quantile']*100)):02d}.png"
                 )
                 source_tag = (f"ARCH at κ-quantile {headline_row['quantile']:.2f} "
                               f"({args.report_weighting}-weighted)")
             else:
                 arch_for_overlay = results
                 comp_path = out_dir / (
-                    csv_path.stem + "_ellipticity_vs_literature.pdf"
+                    csv_path.stem + "_ellipticity_vs_literature.png"
                 )
                 source_tag = "ARCH global aperture quadrupole"
 
