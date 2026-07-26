@@ -84,11 +84,18 @@ class JWSTPipeline:
 
     Strong-lensing handling (when strong_lensing_catalog_path is set):
         use_sl_in_selection=True (default): two-pass forward selection
-            (Pass 1 WL-only → compute λ_SL at the Pass 1 minimum →
-            Pass 2 WL+λ_SL on rejected candidates).
+            (Pass 1 WL-only -> compute lambda_SL at the Pass 1 minimum ->
+            Pass 2 WL+lambda_SL on rejected candidates).
         use_sl_in_selection=False: legacy single-pass WL selection
-            with post-selection λ_SL applied only to merging and
+            with post-selection lambda_SL applied only to merging and
             strength optimization.
+
+    Contour levels (presentation mode):
+        kappa_levels (optional): a sequence of absolute convergence
+            values.  When supplied, every panel this instance renders
+            uses exactly those contour levels instead of per-run
+            quantiles, so reconstructions of the same cluster can be
+            compared by eye.  See __init__ for the physical caveat.
     """
 
     def __init__(self, config):
@@ -123,12 +130,42 @@ class JWSTPipeline:
                 f"Must be 'NFW' or 'POWER_LAW'.")
 
         # Per-mode output subdirectory: Output/JWST/<cluster>/NFW/ or
-        # .../POWER_LAW/.  
+        # .../POWER_LAW/.
         self.mode_dir = self.output_dir / self.lens_type
         self.mode_dir.mkdir(parents=True, exist_ok=True)
 
         # POWER_LAW pivot radius (only used if lens_type == 'POWER_LAW')
         self.theta_star = float(config.get('theta_star', 30.0))
+
+        # ------------------------------------------------------------------
+        # Presentation-mode fixed kappa contour levels.
+        #
+        # Default None -> plot_results computes per-run quantile levels
+        # exactly as before (production behavior, unchanged).
+        #
+        # When set to a sequence of floats, EVERY panel produced by this
+        # pipeline instance uses those absolute kappa levels.  This makes
+        # reconstructions of the same cluster directly comparable by eye
+        # (NFW vs POWER_LAW, WL-only vs WL+SL, or across signal choices),
+        # because a given contour then means the same convergence in
+        # every panel rather than the same quantile of a per-panel
+        # distribution.
+        #
+        # Levels are only physically equivalent *within* a cluster:
+        # Sigma_crit depends on z_lens and z_source, so the same kappa
+        # corresponds to different physical surface densities in A2744
+        # (z=0.308, z_s=0.8) and El Gordo (z=0.873, z_s=1.2).  Compute
+        # and apply a separate level set per cluster.
+        # ------------------------------------------------------------------
+        self.kappa_levels = config.get('kappa_levels', None)
+        if self.kappa_levels is not None:
+            self.kappa_levels = sorted(float(lv) for lv in self.kappa_levels)
+            if len(self.kappa_levels) == 0:
+                self.kappa_levels = None
+
+        # Inner mask radius (arcsec) applied to the model kappa field
+        # before contouring; see compute_masked_kappa for the rationale.
+        self.inner_mask_radius = float(config.get('inner_mask_radius', 5.0))
 
         # Strong-lensing configuration (off by default — backward
         # compatible with existing NFW configs).  When the catalog
@@ -146,10 +183,11 @@ class JWSTPipeline:
         self.use_strong_lensing = bool(self.strong_lensing_catalog_path)
 
         # Whether to use SL information during forward selection (two-pass:
-        # WL → λ_SL → WL+SL).  Only meaningful when use_strong_lensing=True.
-        # Default True when SL is enabled — see forward_lens_selection_two_pass
-        # in arch.forward_selection for the physical justification.  Set False
-        # for ablation against the legacy post-selection-only SL path.
+        # WL -> lambda_SL -> WL+SL).  Only meaningful when
+        # use_strong_lensing=True.  Default True when SL is enabled — see
+        # forward_lens_selection_two_pass in arch.forward_selection for the
+        # physical justification.  Set False for ablation against the
+        # legacy post-selection-only SL path.
         self.use_sl_in_selection = bool(config.get(
             'use_sl_in_selection', self.use_strong_lensing))
 
@@ -200,7 +238,16 @@ class JWSTPipeline:
         self.initialize_sources()
         self.run_lens_fitting()
 
-    def visualize(self):
+    def load_for_plotting(self):
+        """
+        Restore the state `plot_results` needs without re-fitting: read
+        the catalogs, rebuild the Source object in sky coordinates, and
+        import the saved lenses from CSV.
+
+        This is the front half of `visualize()`, split out so that
+        `compute_pooled_kappa_levels` can reach a plot-ready state
+        without triggering a render.
+        """
         self.read_source_catalog()
         self.read_flexion_catalog()
         self.cut_flexion_catalog()
@@ -209,6 +256,9 @@ class JWSTPipeline:
         self.sources.x += self.centroid_x
         self.sources.y += self.centroid_y
         self.import_lenses()
+
+    def visualize(self):
+        self.load_for_plotting()
         self.plot_results()
 
     def compute_error_bars(self):
@@ -396,7 +446,6 @@ class JWSTPipeline:
         # Attach to Source so fit_lensing_field can find them
         self.sources.strong_systems = systems
 
-
     # ------------------------------------------------------------------
     # Lens fitting — dispatches by lens_type
     # ------------------------------------------------------------------
@@ -529,6 +578,44 @@ class JWSTPipeline:
                 f"{np.nansum(M_ref_arr):.3e} h^-1 M_sun")
 
     # ------------------------------------------------------------------
+    # Convergence field
+    # ------------------------------------------------------------------
+
+    def compute_masked_kappa(self, img_extent):
+        """
+        Build the model convergence field on the image grid, with the
+        inner region around each halo center masked to zero.
+
+        Factored out of `plot_results` so that the contour-level helper
+        (`compute_pooled_kappa_levels`) sees exactly the same field the
+        plotting path does.  If the two ever diverged, fixed levels
+        derived from the helper would no longer sit at the intended
+        quantiles of the plotted field.
+
+        The mask exists because neither profile is data-constrained
+        closer than the typical source distance from a halo (~5 arcsec
+        for JWST).  For POWER_LAW especially, kappa diverges as r^(-n),
+        so the inner pixels are pure model extrapolation that would
+        otherwise dominate any quantile-based level computation.  Both
+        NFW and POWER_LAW are masked identically for a fair comparison.
+
+        Returns
+        -------
+        X, Y, kappa : ndarray
+            Grid coordinates (arcsec) and the masked convergence field.
+        """
+        X, Y, kappa = utils.calculate_kappa(
+            self.lenses, extent=img_extent, lens_type=self.lens_type,
+            source_redshift=self.z_source,
+        )
+        inner_mask_radius = float(getattr(self, 'inner_mask_radius', 5.0))
+        if inner_mask_radius > 0 and self.lenses.x.size > 0:
+            for k in range(self.lenses.x.size):
+                R = np.hypot(X - self.lenses.x[k], Y - self.lenses.y[k])
+                kappa = np.where(R < inner_mask_radius, 0.0, kappa)
+        return X, Y, kappa
+
+    # ------------------------------------------------------------------
     # Plotting
     # ------------------------------------------------------------------
 
@@ -539,6 +626,11 @@ class JWSTPipeline:
         for both NFW and POWER_LAW lens types — calculate_kappa handles
         the dispatch internally; this method only differs in the title
         annotation and (for NFW) the total-mass label.
+
+        Contour levels come from `self.kappa_levels` when set
+        (presentation mode: identical absolute levels in every panel),
+        otherwise from per-run quantiles of the positive kappa
+        distribution (default production behavior).
         """
 
         def _fmt_sum_mass_hinv(m_hinv):
@@ -600,7 +692,8 @@ class JWSTPipeline:
         def _plot_single_panel(img_data, img_extent, X, Y, kappa, levels,
                             peaks, title, sum_mass_hinv,
                             z_lens=None, smooth_sigma=1.0,
-                            save_pdf_path=None, cluster_name=None):
+                            save_pdf_path=None, cluster_name=None,
+                            fixed_levels=False):
 
             def _rotate_cw90_panel(img_data, img_extent, X, Y, kappa, peaks=None):
                 xmin, xmax, ymin, ymax = img_extent
@@ -630,16 +723,28 @@ class JWSTPipeline:
             ax.imshow(img_data, cmap="gray_r", origin="lower",
                     extent=img_extent, norm=norm)
 
+            # In presentation mode the levels are deliberately identical
+            # across panels, so a level falling outside a given panel's
+            # kappa range is expected, not an error.  Do NOT silently
+            # substitute per-panel fallback levels there — that would
+            # break the comparability the fixed levels exist to provide.
             try:
                 ax.contour(X, Y, kappa_disp, levels=levels,
                         colors='C1', linewidths=1.1)
             except Exception:
-                kmax = np.nanmax(kappa_disp)
-                lvls = ([0.3 * kmax, 0.6 * kmax]
-                        if np.isfinite(kmax) and kmax > 0
-                        else [0.02, 0.04])
-                ax.contour(X, Y, kappa_disp, levels=lvls,
-                        colors='C1', linewidths=1.1)
+                if fixed_levels:
+                    warnings.warn(
+                        "Contouring failed with the fixed presentation "
+                        "levels; leaving this panel without contours "
+                        "rather than substituting per-panel levels, "
+                        "which would break cross-panel comparability.")
+                else:
+                    kmax = np.nanmax(kappa_disp)
+                    lvls = ([0.3 * kmax, 0.6 * kmax]
+                            if np.isfinite(kmax) and kmax > 0
+                            else [0.02, 0.04])
+                    ax.contour(X, Y, kappa_disp, levels=lvls,
+                            colors='C1', linewidths=1.1)
 
             if peaks:
                 for i, (px, py) in enumerate(peaks, start=1):
@@ -656,7 +761,9 @@ class JWSTPipeline:
 
             lv_str = (", ".join([f"{lv:.2f}" for lv in levels[:5]])
                     + ("…" if len(levels) > 5 else ""))
-            ax.text(0.02, 0.98, rf"$\kappa$ levels: {lv_str}",
+            label_prefix = "fixed " if fixed_levels else ""
+            ax.text(0.02, 0.98,
+                    rf"{label_prefix}$\kappa$ levels: {lv_str}",
                     transform=ax.transAxes, ha="left", va="top", fontsize=8,
                     bbox=dict(boxstyle='round,pad=0.2',
                             fc='white', ec='0.2', lw=0.8))
@@ -679,46 +786,39 @@ class JWSTPipeline:
         img_extent = (0.0, img_data.shape[1] * self.CDELT,
                       0.0, img_data.shape[0] * self.CDELT)
 
-        # Model kappa from current lenses.  We mask the inner
-        # `inner_mask_radius` arcsec around each halo center because
-        # neither profile is data-constrained closer than the typical
-        # source distance from a halo (~5 arcsec for JWST).  For
-        # POWER_LAW especially, the kappa profile diverges as r^(-n) so
-        # the inner pixels are pure model extrapolation that would
-        # otherwise dominate the contour-level computation.  Both NFW
-        # and POWER_LAW are masked equally for a fair comparison.
-        X, Y, kappa = utils.calculate_kappa(
-            self.lenses, extent=img_extent, lens_type=self.lens_type,
-            source_redshift=self.z_source,
-        )
-        inner_mask_radius = float(getattr(self, 'inner_mask_radius', 5.0))
-        if inner_mask_radius > 0 and self.lenses.x.size > 0:
-            for k in range(self.lenses.x.size):
-                R = np.hypot(X - self.lenses.x[k], Y - self.lenses.y[k])
-                kappa = np.where(R < inner_mask_radius, 0.0, kappa)
+        # Model kappa from current lenses, with the inner region around
+        # each halo masked (see compute_masked_kappa for the rationale).
+        X, Y, kappa = self.compute_masked_kappa(img_extent)
 
-        # Peaks within 300 kpc.  Compute these BEFORE masking would
-        # affect them (they're already past the masked inner region
-        # since peak detection finds large-scale halo centers).
+        # Peaks within 300 kpc.  Peak detection finds large-scale halo
+        # centers, so it is unaffected by the inner mask.
         peaks, _ = utils.find_peaks_and_masses(
             kappa, z_lens=self.z_cluster, z_source=self.z_source,
             radius_kpc=300,
         )
 
-        # Kappa contour levels.  We use QUANTILE-based levels of the
-        # unmasked, positive kappa values: each contour separates a
-        # specific percentile band, so the contours always show the
-        # actual structure of the reconstruction regardless of the
-        # absolute kappa range.
-
-        if not hasattr(self, "_kappa_levels"):
-            self._kappa_levels = {}
-        cache_key = (self.cluster_name, self.lens_type)
-        if cache_key not in self._kappa_levels:
-            if hasattr(self, 'kappa_levels') and self.kappa_levels is not None:
-                # User-supplied absolute levels
-                self._kappa_levels[cache_key] = list(self.kappa_levels)
-            else:
+        # ------------------------------------------------------------------
+        # Kappa contour levels.
+        #
+        # Presentation mode (self.kappa_levels set): use those absolute
+        # levels verbatim, bypassing the per-run cache.  Bypassing
+        # matters — the cache is keyed on (cluster, lens_type), so a
+        # cached quantile set from an earlier call in the same process
+        # would otherwise shadow the override.
+        #
+        # Default: QUANTILE-based levels of the unmasked, positive kappa
+        # values, so each contour separates a specific percentile band
+        # and the contours always show the structure of the
+        # reconstruction regardless of the absolute kappa range.
+        # ------------------------------------------------------------------
+        fixed_levels = self.kappa_levels is not None
+        if fixed_levels:
+            levels = list(self.kappa_levels)
+        else:
+            if not hasattr(self, "_kappa_levels"):
+                self._kappa_levels = {}
+            cache_key = (self.cluster_name, self.lens_type)
+            if cache_key not in self._kappa_levels:
                 kappa_finite = kappa[np.isfinite(kappa) & (kappa > 0)]
                 if kappa_finite.size > 20:
                     quantiles = [0.50, 0.70, 0.85, 0.94, 0.98]
@@ -739,7 +839,20 @@ class JWSTPipeline:
                     # Field nearly empty (heavy masking); fallback
                     self._kappa_levels[cache_key] = [
                         0.05, 0.10, 0.20, 0.50, 1.00]
-        levels = self._kappa_levels[cache_key]
+            levels = self._kappa_levels[cache_key]
+
+        # Report where the fixed levels sit in this particular panel, so
+        # it is obvious if one has landed off the end of the range.
+        if fixed_levels:
+            kf = kappa[np.isfinite(kappa) & (kappa > 0)]
+            if kf.size > 0:
+                kmin, kmax = float(np.min(kf)), float(np.max(kf))
+                outside = [lv for lv in levels if lv < kmin or lv > kmax]
+                print(f"  Fixed kappa levels {levels} "
+                      f"(panel range {kmin:.4f}–{kmax:.4f})")
+                if outside:
+                    print(f"    NOTE: {outside} fall outside this panel's "
+                          f"kappa range and will not render as contours.")
 
         # Title and total-mass label depend on lens_type
         # Title prefix indicating WL-only vs WL+SL reconstruction
@@ -761,9 +874,13 @@ class JWSTPipeline:
                         rf"(power-law, $\langle n\rangle={slope_med:.2f}$, "
                         rf"{self.signal_choice})")
 
+        # Presentation-mode outputs get a distinct filename so they never
+        # overwrite the production figures with their per-run levels.
+        level_suffix = "_fixedlev" if fixed_levels else ""
+
         save_main = (self.mode_dir
                     / f"{self.cluster_name}_clu_{self.signal_choice}"
-                    f"_{self.lens_type}_{self.sl_suffix}.pdf")
+                    f"_{self.lens_type}_{self.sl_suffix}{level_suffix}.pdf")
 
         _plot_single_panel(
             img_data=img_data, img_extent=img_extent,
@@ -771,9 +888,11 @@ class JWSTPipeline:
             title=title_main, sum_mass_hinv=total_mass_hinv,
             z_lens=self.z_cluster, smooth_sigma=1.0,
             save_pdf_path=str(save_main), cluster_name=self.cluster_name,
+            fixed_levels=fixed_levels,
         )
 
-        # Mass comparison — now supports both NFW and POWER_LAW
+        # Mass comparison — now supports both NFW and POWER_LAW.
+        # Unaffected by the contour-level override.
         utils.compare_mass_estimates(
             self.lenses,
             self.mode_dir / (f"mass_{self.cluster_name}"
@@ -811,6 +930,216 @@ class JWSTPipeline:
 
 
 # ======================================================================
+# Presentation-mode contour level selection
+# ======================================================================
+
+def compute_pooled_kappa_levels(cluster_name, repo_root,
+                                lens_types=('NFW', 'POWER_LAW'),
+                                signals=('all',),
+                                theta_star=30.0,
+                                quantiles=(0.50, 0.70, 0.85, 0.94, 0.98),
+                                use_strong_lensing=True,
+                                use_sl_in_selection=True,
+                                verbose=True):
+    """
+    Derive one fixed set of kappa contour levels for a single cluster by
+    pooling the convergence fields of several already-fit
+    reconstructions.
+
+    Rationale: choosing levels by eye from one panel tends to produce
+    contours that are informative for that reconstruction and degenerate
+    for the others — all crowded into the core, or all off the map.
+    Pooling the positive, inner-masked kappa pixels across the panels you
+    intend to show, then taking quantiles of the pooled distribution,
+    yields levels that land in a populated part of the range for every
+    panel while still being absolute numbers shared by all of them.
+
+    Reads the saved lens CSVs rather than re-fitting, so each
+    (lens_type, signal) combination must already have been fit.
+    Combinations with no saved CSV are skipped with a warning.
+
+    Pools within a single cluster only.  Sigma_crit depends on z_lens and
+    z_source, so a given kappa maps to different physical surface
+    densities in different clusters; sharing levels across clusters would
+    make contours visually comparable but physically inequivalent.
+
+    Parameters
+    ----------
+    cluster_name : str
+        Key into CLUSTERS.
+    repo_root : Path
+        Repository root (the parent of `arch/` and `pipelines/`).
+    lens_types : sequence of str
+        Which profiles to pool over.
+    signals : sequence of str
+        Which signal combinations to pool over.
+    theta_star : float
+        POWER_LAW pivot radius, in arcsec.
+    quantiles : sequence of float
+        Quantiles of the pooled positive kappa distribution to use.
+    use_strong_lensing, use_sl_in_selection : bool
+        Must match the run whose outputs you want to read, since these
+        determine the CSV filename suffix.
+    verbose : bool
+        Print a per-panel breakdown and a ready-to-paste CLI string.
+
+    Returns
+    -------
+    levels : list of float
+        Sorted contour levels, or an empty list if nothing could be read.
+    """
+    pooled = []
+    per_panel = []
+
+    for lens_type in lens_types:
+        for signal in signals:
+            cfg = _build_config(
+                cluster_name, signal, theta_star, repo_root,
+                use_strong_lensing=use_strong_lensing,
+                use_sl_in_selection=use_sl_in_selection,
+            )
+            cfg['lens_type'] = lens_type
+            pipe = JWSTPipeline(cfg)
+            try:
+                pipe.load_for_plotting()
+            except FileNotFoundError as e:
+                warnings.warn(
+                    f"Skipping {cluster_name}/{lens_type}/{signal}: "
+                    f"missing input ({e}).  Fit it first.")
+                continue
+            except Exception as e:
+                warnings.warn(
+                    f"Skipping {cluster_name}/{lens_type}/{signal}: "
+                    f"{type(e).__name__}: {e}")
+                continue
+
+            if pipe.lenses is None or pipe.lenses.x.size == 0:
+                warnings.warn(
+                    f"Skipping {cluster_name}/{lens_type}/{signal}: "
+                    f"no halos in the saved reconstruction.")
+                continue
+
+            img_data = pipe.get_image_data()
+            img_extent = (0.0, img_data.shape[1] * pipe.CDELT,
+                          0.0, img_data.shape[0] * pipe.CDELT)
+            _, _, kappa = pipe.compute_masked_kappa(img_extent)
+
+            vals = kappa[np.isfinite(kappa) & (kappa > 0)].ravel()
+            if vals.size == 0:
+                warnings.warn(
+                    f"Skipping {cluster_name}/{lens_type}/{signal}: "
+                    f"no positive kappa pixels after masking.")
+                continue
+
+            pooled.append(vals)
+            per_panel.append((lens_type, signal, vals.size,
+                              float(np.median(vals)), float(np.max(vals))))
+
+    if not pooled:
+        warnings.warn(
+            f"No usable reconstructions found for {cluster_name}; "
+            f"cannot compute pooled levels.")
+        return []
+
+    pooled = np.concatenate(pooled)
+    levels = sorted({round(float(np.quantile(pooled, q)), 4)
+                     for q in quantiles})
+
+    if verbose:
+        print(f"\n{'='*64}")
+        print(f"  Pooled kappa levels — {cluster_name}")
+        print(f"{'='*64}")
+        print(f"  {'profile':>10} {'signal':>9} {'n_pix':>10} "
+              f"{'median':>10} {'max':>10}")
+        print("  " + "-" * 54)
+        for lt, sg, n, med, mx in per_panel:
+            print(f"  {lt:>10} {sg:>9} {n:>10d} {med:>10.4f} {mx:>10.4f}")
+        print("  " + "-" * 54)
+        print(f"  pooled pixels : {pooled.size}")
+        print(f"  quantiles     : {list(quantiles)}")
+        print(f"  levels        : {levels}")
+        lv_str = ','.join(f"{lv:g}" for lv in levels)
+        print(f"\n  Apply to subsequent runs with:")
+        print(f"    --kappa-levels {lv_str}")
+        print(f"  or, in a multi-cluster sweep:")
+        print(f"    --kappa-levels {cluster_name}:{lv_str}")
+        print()
+
+    return levels
+
+
+def parse_kappa_levels_arg(arg, cluster_names):
+    """
+    Parse the --kappa-levels CLI argument into {cluster_name: [levels]}.
+
+    Two accepted forms:
+
+      "0.05,0.10,0.20"
+          A bare comma-separated list, applied to every cluster in the
+          sweep.  Fine when running one cluster; when running several,
+          note that the same kappa means a different physical surface
+          density in each, so prefer the per-cluster form.
+
+      "ABELL_2744:0.05,0.10;EL_GORDO:0.03,0.07"
+          Semicolon-separated CLUSTER:levels pairs, so a single
+          `--cluster ALL` sweep can carry a distinct, physically
+          appropriate level set for each cluster.
+
+    Returns
+    -------
+    dict
+        Maps cluster name -> sorted list of floats.  Clusters absent from
+        the mapping fall back to per-run quantile levels.
+    """
+    if arg is None:
+        return {}
+
+    arg = arg.strip()
+    if not arg:
+        return {}
+
+    def _parse_list(s, ctx):
+        vals = []
+        for tok in s.split(','):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                vals.append(float(tok))
+            except ValueError:
+                raise ValueError(
+                    f"Could not parse {tok!r} as a kappa level in {ctx!r}.")
+        if not vals:
+            raise ValueError(f"No kappa levels parsed from {ctx!r}.")
+        if any(v <= 0 for v in vals):
+            raise ValueError(
+                f"Kappa levels must be positive; got {vals} in {ctx!r}.")
+        return sorted(set(vals))
+
+    if ':' not in arg:
+        levels = _parse_list(arg, arg)
+        return {name: list(levels) for name in cluster_names}
+
+    mapping = {}
+    for chunk in arg.split(';'):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if ':' not in chunk:
+            raise ValueError(
+                f"Malformed --kappa-levels entry {chunk!r}.  Expected "
+                f"CLUSTER:level,level,... when using the per-cluster form.")
+        name, _, rest = chunk.partition(':')
+        name = name.strip()
+        if name not in CLUSTERS:
+            raise ValueError(
+                f"Unknown cluster {name!r} in --kappa-levels.  "
+                f"Valid names: {list(CLUSTERS.keys())}")
+        mapping[name] = _parse_list(rest, chunk)
+    return mapping
+
+
+# ======================================================================
 # NFW vs POWER_LAW comparison helper
 # ======================================================================
 
@@ -822,7 +1151,9 @@ def run_nfw_vs_power_law(base_config):
 
     Both runs share the same source catalog and the same signal_choice,
     so any differences in the recovered mass map come purely from the
-    profile assumption.
+    profile assumption.  If `base_config` carries a `kappa_levels` entry,
+    both panels are drawn with those same absolute contour levels, which
+    is the intended presentation configuration for this comparison.
 
     Parameters
     ----------
@@ -928,11 +1259,12 @@ CLUSTERS = {
 
 VALID_SIGNALS = ['all', 'shear_f', 'f_g', 'shear_g']
 VALID_MODES = ['NFW', 'POWER_LAW', 'COMPARE']
-VALID_ACTIONS = ['fit', 'visualize', 'errorbars']
+VALID_ACTIONS = ['fit', 'visualize', 'errorbars', 'kappa-levels']
 
 
 def _build_config(cluster_name, signal, theta_star, repo_root,
-                use_strong_lensing=True, use_sl_in_selection=True):
+                use_strong_lensing=True, use_sl_in_selection=True,
+                kappa_levels=None):
     """Construct a JWSTPipeline config dict for a (cluster, signal) pair.
 
     Strong lensing is enabled when (a) the cluster has a SL catalog
@@ -941,9 +1273,13 @@ def _build_config(cluster_name, signal, theta_star, repo_root,
     catalog availability (useful for ablation studies).
 
     When SL is enabled, use_sl_in_selection controls whether the
-    two-pass forward selection is used (Pass 1 WL-only → λ_SL → Pass 2
-    WL+λ_SL on rejected candidates) or the legacy single-pass WL
-    selection with post-selection λ_SL only.
+    two-pass forward selection is used (Pass 1 WL-only -> lambda_SL ->
+    Pass 2 WL+lambda_SL on rejected candidates) or the legacy
+    single-pass WL selection with post-selection lambda_SL only.
+
+    kappa_levels, when not None, forces every rendered panel to use
+    those absolute convergence contour levels instead of per-run
+    quantiles.  Presentation use only; omit for production figures.
     """
     base = CLUSTERS[cluster_name]
     cfg = {
@@ -969,6 +1305,10 @@ def _build_config(cluster_name, signal, theta_star, repo_root,
     else:
         cfg['strong_lensing_catalog_path'] = None
         cfg['use_sl_in_selection'] = False
+
+    # Fixed presentation contour levels (optional, temporary).
+    if kappa_levels is not None:
+        cfg['kappa_levels'] = list(kappa_levels)
     return cfg
 
 
@@ -1032,6 +1372,25 @@ def main_cli():
             "      --signal all --mode NFW --no-two-pass\n"
             "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
             "      --signal all --mode NFW\n"
+            "\n"
+            "  # --- Presentation figures with shared contour levels ---\n"
+            "  # Step 1: pool the already-fit reconstructions for ONE cluster\n"
+            "  #         and print a suggested level set.\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
+            "      --action kappa-levels\n"
+            "\n"
+            "  # Step 2: re-render every panel for that cluster with those\n"
+            "  #         fixed levels.  Output filenames gain a '_fixedlev'\n"
+            "  #         suffix, so production figures are not overwritten.\n"
+            "  python -m pipelines.read_jwst --cluster ABELL_2744 \\\n"
+            "      --signal ALL --mode NFW --action visualize \\\n"
+            "      --kappa-levels 0.043,0.081,0.152,0.264,0.401\n"
+            "\n"
+            "  # Per-cluster level sets in one sweep (levels are only\n"
+            "  # physically comparable within a cluster, so give each its own).\n"
+            "  python -m pipelines.read_jwst --cluster ALL --action visualize \\\n"
+            "      --mode POWER_LAW \\\n"
+            "      --kappa-levels 'ABELL_2744:0.043,0.081,0.152;EL_GORDO:0.02,0.05,0.09'\n"
         ),
     )
     p.add_argument('--cluster', choices=list(CLUSTERS.keys()) + ['ALL'],
@@ -1047,7 +1406,10 @@ def main_cli():
     p.add_argument('--action', choices=VALID_ACTIONS, default='fit',
                    help="What to do: 'fit' runs the pipeline and renders "
                         "plots; 'visualize' re-renders plots from saved "
-                        "CSV; 'errorbars' runs the jackknife.  Default: fit.")
+                        "CSV; 'errorbars' runs the jackknife; "
+                        "'kappa-levels' pools already-fit reconstructions "
+                        "and prints a shared contour level set (renders "
+                        "nothing).  Default: fit.")
     p.add_argument('--theta-star', type=float, default=30.0,
                    dest='theta_star',
                    help="POWER_LAW pivot radius in arcsec.  Default: 30.")
@@ -1056,11 +1418,31 @@ def main_cli():
                         "have an SL catalog configured.  Useful for "
                         "WL-only ablation studies.")
     p.add_argument('--no-two-pass', action='store_true', dest='no_two_pass',
-                   help="Disable two-pass forward selection (WL → λ_SL → "
-                        "WL+SL).  Falls back to the legacy single-pass WL "
-                        "selection with post-selection λ_SL.  Only "
+                   help="Disable two-pass forward selection (WL -> lambda_SL "
+                        "-> WL+SL).  Falls back to the legacy single-pass WL "
+                        "selection with post-selection lambda_SL.  Only "
                         "meaningful when SL is enabled.  Useful for "
                         "ablation against the legacy code path.")
+    p.add_argument('--kappa-levels', type=str, default=None,
+                   dest='kappa_levels',
+                   help="Fixed convergence contour levels for presentation "
+                        "figures, so panels of the same cluster can be "
+                        "compared by eye.  Either a bare comma-separated "
+                        "list ('0.05,0.10,0.20'), applied to every cluster "
+                        "in the sweep, or semicolon-separated per-cluster "
+                        "entries ('ABELL_2744:0.05,0.10;EL_GORDO:0.03,0.07'). "
+                        "Prefer the per-cluster form in multi-cluster "
+                        "sweeps: Sigma_crit differs between clusters, so "
+                        "the same kappa is not the same physical surface "
+                        "density.  Figures written with fixed levels get a "
+                        "'_fixedlev' filename suffix and never overwrite "
+                        "the production ones.  Omit for default per-run "
+                        "quantile levels.")
+    p.add_argument('--kappa-quantiles', type=str, default=None,
+                   dest='kappa_quantiles',
+                   help="Quantiles used by --action kappa-levels when "
+                        "pooling, as a comma-separated list.  "
+                        "Default: 0.50,0.70,0.85,0.94,0.98.")
     p.add_argument('--repo-root', type=str, default=None, dest='repo_root',
                    help="Repository root path (the parent of `pipelines/` "
                         "and `arch/`).  Default: auto-detected from this "
@@ -1086,6 +1468,48 @@ def main_cli():
     use_strong_lensing = not args.no_sl
     use_sl_in_selection = not args.no_two_pass
 
+    # Parse fixed contour levels, if any
+    try:
+        kappa_levels_map = parse_kappa_levels_arg(args.kappa_levels, clusters)
+    except ValueError as e:
+        p.error(str(e))
+
+    # ------------------------------------------------------------------
+    # --action kappa-levels: pool already-fit reconstructions per cluster
+    # and print a shared level set.  Renders nothing.
+    # ------------------------------------------------------------------
+    if args.action == 'kappa-levels':
+        if args.kappa_quantiles is not None:
+            try:
+                quantiles = tuple(
+                    float(s) for s in args.kappa_quantiles.split(',')
+                    if s.strip())
+            except ValueError:
+                p.error(f"Could not parse --kappa-quantiles "
+                        f"{args.kappa_quantiles!r} as floats.")
+            if not quantiles or any(not (0.0 < q < 1.0) for q in quantiles):
+                p.error("--kappa-quantiles must be values strictly between "
+                        "0 and 1.")
+        else:
+            quantiles = (0.50, 0.70, 0.85, 0.94, 0.98)
+
+        # Pool over both profiles unless a single one was requested.
+        pool_lens_types = (('NFW', 'POWER_LAW') if args.mode == 'COMPARE'
+                           else (args.mode,))
+
+        for cluster_name in clusters:
+            compute_pooled_kappa_levels(
+                cluster_name, repo_root,
+                lens_types=pool_lens_types,
+                signals=tuple(signals),
+                theta_star=args.theta_star,
+                quantiles=quantiles,
+                use_strong_lensing=use_strong_lensing,
+                use_sl_in_selection=use_sl_in_selection,
+                verbose=True,
+            )
+        return
+
     # Print a short header so the user can see what they're about to do
     n_jobs = len(clusters) * len(signals)
     print(f"\n{'='*64}")
@@ -1101,7 +1525,15 @@ def main_cli():
     print(f"  strong-lensing: {'enabled' if use_strong_lensing else 'DISABLED'}")
     if use_strong_lensing:
         print(f"  selection   : "
-            f"{'two-pass (WL → λ_SL → WL+SL)' if use_sl_in_selection else 'single-pass (legacy)'}")
+            f"{'two-pass (WL -> lambda_SL -> WL+SL)' if use_sl_in_selection else 'single-pass (legacy)'}")
+    if kappa_levels_map:
+        print(f"  kappa levels: FIXED (presentation mode)")
+        for name in clusters:
+            if name in kappa_levels_map:
+                print(f"     {name:>12}: {kappa_levels_map[name]}")
+            else:
+                print(f"     {name:>12}: (per-run quantiles)")
+        print(f"  figures written with a '_fixedlev' filename suffix")
     print(f"  total jobs : {n_jobs}")
     print()
 
@@ -1112,7 +1544,9 @@ def main_cli():
             cfg = _build_config(cluster_name, signal,
                                 args.theta_star, repo_root,
                                 use_strong_lensing=use_strong_lensing,
-                                use_sl_in_selection=use_sl_in_selection)
+                                use_sl_in_selection=use_sl_in_selection,
+                                kappa_levels=kappa_levels_map.get(
+                                    cluster_name, None))
             try:
                 _run_one(cfg, args.mode, args.action)
             except FileNotFoundError as e:

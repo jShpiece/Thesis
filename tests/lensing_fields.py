@@ -30,7 +30,7 @@ HALO_Y = np.array([300.0, 420.0, 420.0])
 HALO_THETA_E = np.array([20.0, 10.0, 10.0])
 
 # Heuristic global rescaling applied to each field before plotting.
-SHEAR_RESCALE = 0.6
+SHEAR_RESCALE = 1.0
 F_RESCALE = 2.0
 G_RESCALE = 1.0
 
@@ -70,8 +70,8 @@ def make_source_grid(L=L_ARCSEC, n_side=25):
         np.zeros(n), np.zeros(n),     # e1, e2
         np.zeros(n), np.zeros(n),     # f1, f2
         np.zeros(n), np.zeros(n),     # g1, g2
-        np.ones(n) * 0.1,             # e-err
-        np.ones(n) * 0.003,         # f-err
+        np.ones(n) * 0.12,             # e-err
+        np.ones(n) * 0.002,         # f-err
         np.ones(n) * 0.008,           # g-err
         np.ones(n) * 0.8,             # SNR / weight
     )
@@ -134,6 +134,11 @@ def draw_background(ax, log_kappa, norm):
 def plot_shear_panel(ax, log_kappa, norm, x, y, g1, g2, scale=0.03):
     """Spin-2 sticks (no arrowheads, orientation = 0.5 * arg)."""
     draw_background(ax, log_kappa, norm)
+    # Add zoomed in axis to left of plot
+    axin = ax.inset_axes([0.05, 0.0, 0.35, 0.35])  # x0, y0, width, height
+    axin.imshow(log_kappa, origin="lower",
+                extent=(0, L_ARCSEC, 0, L_ARCSEC),
+                cmap="gray_r", norm=norm, interpolation="bilinear")
     E = g1 + 1j * g2
     phi = 0.5 * np.angle(E)
     length = np.abs(E) / scale
@@ -141,16 +146,40 @@ def plot_shear_panel(ax, log_kappa, norm, x, y, g1, g2, scale=0.03):
     for xi, yi, Li, ang in zip(x, y, length, phi):
         dx, dy = 0.5 * Li * np.cos(ang), 0.5 * Li * np.sin(ang)
         ax.plot([xi - dx, xi + dx], [yi - dy, yi + dy], color="gold", lw=1.0)
+        axin.plot([xi - dx, xi + dx], [yi - dy, yi + dy], color="gold", lw=1.0)
+    axin.set_xlim(300 - 75, 300 + 75)
+    axin.set_ylim(300 - 75, 300 + 75)
+    axin.set_aspect('equal')
+    # Suppress axis labels and ticks for the inset
+    axin.set_xticks([])
+    axin.set_yticks([])
+    ax.indicate_inset_zoom(axin)
+        
+
 
 
 def plot_F_panel(ax, log_kappa, norm, x, y, F1, F2, target_len=26.0):
     """Spin-1 arrows."""
     draw_background(ax, log_kappa, norm)
+    axin = ax.inset_axes([0.55, 0.0, 0.35, 0.35])  # x0, y0, width, height
+    axin.imshow(log_kappa, origin="lower",
+                extent=(0, L_ARCSEC, 0, L_ARCSEC),
+                cmap="gray_r", norm=norm, interpolation="bilinear")
     amp = np.hypot(F1, F2)
     if np.all(amp == 0):
         return
     ax.quiver(x, y, F1, F2, angles="xy", scale_units="xy",
               scale=amp.max() / target_len, color="gold", width=0.0035)
+    axin.quiver(x, y, F1, F2, angles="xy", scale_units="xy",
+                scale=amp.max() / target_len, color="gold", width=0.0035)
+    axin.set_xlim(300 - 75, 300 + 75)
+    axin.set_ylim(300 - 75, 300 + 75)
+    axin.set_aspect('equal')
+    # Suppress axis labels and ticks for the inset
+    axin.set_xticks([])
+    axin.set_yticks([])
+    axin.set_aspect('equal')
+    ax.indicate_inset_zoom(axin)
 
 
 def plot_G_panel(ax, log_kappa, norm, x, y, G1, G2, target_len=7.0):
@@ -190,10 +219,10 @@ def main():
     fig, axes = plt.subplots(1, 2, figsize=(18, 6), sharex=True, sharey=True)
 
     plot_shear_panel(axes[0], log_kappa, norm, x, y, g1, g2)
-    axes[0].set_title(r"Shear $\gamma$")
+    #axes[0].set_title(r"Shear $\gamma$")
 
     plot_F_panel(axes[1], log_kappa, norm, x, y, F1, F2)
-    axes[1].set_title(r"First flexion $\mathcal{F}$")
+    #axes[1].set_title(r"First flexion $\mathcal{F}$")
 
     #plot_G_panel(axes[2], log_kappa, norm, x, y, G1, G2)
     #axes[2].set_title(r"Second flexion $\mathcal{G}$")
